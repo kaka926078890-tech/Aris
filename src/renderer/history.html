@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://cdn.tailwindcss.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com;" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <title>历史记录 - Aris</title>
+  <style>
+    .no-drag { -webkit-app-region: no-drag; }
+    .session-item:hover { background: rgba(6, 182, 212, 0.08); }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-200 min-h-screen p-4">
+  <div class="max-w-xl mx-auto">
+    <div class="flex items-center justify-between mb-4 border-b border-cyan-500/30 pb-2">
+      <h1 class="text-lg font-medium text-cyan-200">历史记录</h1>
+      <button id="clearHistory" class="no-drag text-xs px-3 py-1.5 rounded border border-red-500/40 text-red-300 hover:bg-red-500/10">删除历史记录</button>
+    </div>
+    <div id="sessions" class="space-y-1"></div>
+    <div id="detail" class="mt-4 hidden">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-sm text-cyan-300">对话内容</span>
+        <button id="back" class="text-xs text-slate-400 hover:text-cyan-300 no-drag">返回列表</button>
+      </div>
+      <div id="messages" class="space-y-2 max-h-80 overflow-y-auto rounded-lg border border-cyan-500/20 p-3 bg-black/20"></div>
+    </div>
+    <p id="empty" class="text-sm text-slate-500 hidden">暂无历史会话</p>
+  </div>
+  <script>
+    const sessionsEl = document.getElementById('sessions');
+    const detailEl = document.getElementById('detail');
+    const messagesEl = document.getElementById('messages');
+    const emptyEl = document.getElementById('empty');
+    const backBtn = document.getElementById('back');
+
+    function formatTime(ts) {
+      if (!ts) return '';
+      const d = new Date(ts * 1000);
+      const now = new Date();
+      if (d.toDateString() === now.toDateString()) {
+        return '今天 ' + d.toTimeString().slice(0, 5);
+      }
+      return d.toLocaleDateString('zh-CN') + ' ' + d.toTimeString().slice(0, 5);
+    }
+
+    function renderSessions(list) {
+      sessionsEl.innerHTML = '';
+      if (!list || list.length === 0) {
+        emptyEl.classList.remove('hidden');
+        return;
+      }
+      emptyEl.classList.add('hidden');
+      list.forEach(({ session_id, last_at }) => {
+        const div = document.createElement('div');
+        div.className = 'session-item no-drag cursor-pointer rounded-lg px-3 py-2 text-sm';
+        div.textContent = formatTime(last_at) + ' · ' + session_id.slice(0, 12) + '…';
+        div.dataset.sessionId = session_id;
+        div.addEventListener('click', () => showConversation(session_id));
+        sessionsEl.appendChild(div);
+      });
+    }
+
+    async function showConversation(sessionId) {
+      const list = await window.historyApi.getConversation(sessionId);
+      sessionsEl.classList.add('hidden');
+      detailEl.classList.remove('hidden');
+      messagesEl.innerHTML = '';
+      list.forEach(({ role, content, created_at }) => {
+        const div = document.createElement('div');
+        div.className = role === 'user' ? 'text-right' : 'text-left';
+        const bubble = document.createElement('div');
+        bubble.className = role === 'user'
+          ? 'inline-block max-w-[85%] rounded-lg px-3 py-1.5 text-sm bg-cyan-500/20 text-cyan-100'
+          : 'inline-block max-w-[85%] rounded-lg px-3 py-1.5 text-sm bg-slate-700/50 text-slate-200';
+        bubble.textContent = content;
+        div.appendChild(bubble);
+        const time = document.createElement('div');
+        time.className = 'text-xs text-slate-500 mt-0.5';
+        time.textContent = formatTime(created_at);
+        div.appendChild(time);
+        messagesEl.appendChild(div);
+      });
+    }
+
+    backBtn.addEventListener('click', () => {
+      detailEl.classList.add('hidden');
+      sessionsEl.classList.remove('hidden');
+      loadSessions();
+    });
+
+    document.getElementById('clearHistory').addEventListener('click', async () => {
+      if (!confirm('确定要删除全部历史记录吗？此操作不可恢复。')) return;
+      if (typeof window.historyApi !== 'undefined' && window.historyApi.clearAll) {
+        await window.historyApi.clearAll();
+        loadSessions();
+      }
+    });
+
+    async function loadSessions() {
+      const list = await window.historyApi.getSessions();
+      renderSessions(list);
+    }
+
+    loadSessions();
+  </script>
+</body>
+</html>

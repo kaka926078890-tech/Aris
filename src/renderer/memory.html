@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://cdn.tailwindcss.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com;" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <title>记忆管理器 - Aris</title>
+  <style>
+    .no-drag { -webkit-app-region: no-drag; }
+    .row:hover { background: rgba(6, 182, 212, 0.08); }
+    #list::-webkit-scrollbar { width: 10px; }
+    #list::-webkit-scrollbar-thumb { background: rgba(6, 182, 212, 0.25); border-radius: 999px; }
+    #list::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.35); }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-200 min-h-screen p-4">
+  <div class="max-w-5xl mx-auto space-y-4">
+    <div class="flex items-center justify-between gap-3">
+      <h1 class="text-lg font-medium text-cyan-200 border-b border-cyan-500/30 pb-2 flex-1">记忆管理器</h1>
+      <button id="clearMemory" class="no-drag text-xs px-3 py-2 rounded border border-red-500/40 text-red-300 hover:bg-red-500/10">清空所有记忆</button>
+      <button id="refresh" class="no-drag text-xs px-3 py-2 rounded border border-cyan-500/30 text-cyan-200 hover:bg-cyan-500/10">刷新</button>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div class="rounded-lg border border-cyan-500/20 bg-black/20 p-3">
+        <div class="text-xs text-slate-400 mb-2">LanceDB 路径</div>
+        <div id="dbPath" class="text-xs text-slate-200 break-all"></div>
+      </div>
+      <div class="rounded-lg border border-cyan-500/20 bg-black/20 p-3">
+        <div class="text-xs text-slate-400 mb-2">总条数（采样）</div>
+        <div class="flex items-end justify-between gap-2">
+          <div id="total" class="text-2xl text-cyan-200 leading-none">-</div>
+          <div id="sampled" class="text-[11px] text-slate-500 text-right"></div>
+        </div>
+      </div>
+      <div class="rounded-lg border border-cyan-500/20 bg-black/20 p-3">
+        <div class="text-xs text-slate-400 mb-2">时间范围（created_at）</div>
+        <div id="range" class="text-xs text-slate-200"></div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-3">
+      <div class="lg:col-span-2 rounded-lg border border-cyan-500/20 bg-black/20 p-3 space-y-3">
+        <div>
+          <div class="text-xs text-slate-400 mb-2">类型筛选</div>
+          <div id="typeFilters" class="flex flex-wrap gap-2"></div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-400 mb-2">关键词过滤（text contains）</div>
+          <input id="keyword" class="no-drag w-full bg-black/30 border border-cyan-500/20 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-400" placeholder="例如：我是谁 / 语气 / 偏好…" />
+        </div>
+        <div class="pt-2 border-t border-cyan-500/10">
+          <div class="text-xs text-slate-400 mb-2">语义检索（Top-K）</div>
+          <div class="flex gap-2">
+            <input id="query" class="no-drag flex-1 bg-black/30 border border-cyan-500/20 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-400" placeholder="输入一句话，看看命中哪些记忆" />
+            <input id="k" class="no-drag w-20 bg-black/30 border border-cyan-500/20 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-400" value="8" />
+          </div>
+          <button id="search" class="no-drag mt-2 w-full text-xs px-3 py-2 rounded border border-cyan-500/30 text-cyan-200 hover:bg-cyan-500/10">检索</button>
+          <div id="searchStatus" class="mt-2 text-[11px] text-slate-500"></div>
+          <div id="searchResults" class="mt-2 space-y-2 max-h-56 overflow-y-auto pr-1"></div>
+        </div>
+      </div>
+
+      <div class="lg:col-span-3 rounded-lg border border-cyan-500/20 bg-black/20 p-3">
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-sm text-cyan-300">记忆列表（最近）</div>
+          <div class="text-[11px] text-slate-500">仅展示前 <span id="limitLabel"></span> 条</div>
+        </div>
+        <div id="list" class="max-h-[520px] overflow-y-auto rounded border border-cyan-500/10 bg-black/10"></div>
+        <div id="empty" class="text-sm text-slate-500 hidden mt-2">暂无记忆（或未命中筛选条件）</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const api = window.memoryApi;
+    const dbPathEl = document.getElementById('dbPath');
+    const totalEl = document.getElementById('total');
+    const sampledEl = document.getElementById('sampled');
+    const rangeEl = document.getElementById('range');
+    const typeFiltersEl = document.getElementById('typeFilters');
+    const keywordEl = document.getElementById('keyword');
+    const listEl = document.getElementById('list');
+    const emptyEl = document.getElementById('empty');
+    const limitLabelEl = document.getElementById('limitLabel');
+    const queryEl = document.getElementById('query');
+    const kEl = document.getElementById('k');
+    const searchBtn = document.getElementById('search');
+    const searchStatusEl = document.getElementById('searchStatus');
+    const searchResultsEl = document.getElementById('searchResults');
+    const refreshBtn = document.getElementById('refresh');
+
+    const state = {
+      byType: {},
+      selectedTypes: new Set(),
+      keyword: '',
+      list: [],
+      limit: 3000,
+    };
+
+    function fmtTs(ms) {
+      if (!ms || typeof ms !== 'number') return '-';
+      const d = new Date(ms);
+      return d.toLocaleDateString('zh-CN') + ' ' + d.toTimeString().slice(0, 8);
+    }
+
+    function renderTypeFilters() {
+      typeFiltersEl.innerHTML = '';
+      const entries = Object.entries(state.byType || {}).sort((a, b) => b[1] - a[1]);
+      if (entries.length === 0) {
+        const span = document.createElement('div');
+        span.className = 'text-[11px] text-slate-500';
+        span.textContent = '（无）';
+        typeFiltersEl.appendChild(span);
+        return;
+      }
+      entries.forEach(([t, count]) => {
+        const btn = document.createElement('button');
+        btn.className = 'no-drag text-[11px] px-2 py-1 rounded border ' + (state.selectedTypes.has(t) ? 'border-cyan-400/60 text-cyan-200 bg-cyan-500/10' : 'border-cyan-500/20 text-slate-300 hover:bg-cyan-500/5');
+        btn.textContent = `${t} · ${count}`;
+        btn.addEventListener('click', () => {
+          if (state.selectedTypes.has(t)) state.selectedTypes.delete(t);
+          else state.selectedTypes.add(t);
+          renderTypeFilters();
+          renderList();
+        });
+        typeFiltersEl.appendChild(btn);
+      });
+      const clear = document.createElement('button');
+      clear.className = 'no-drag text-[11px] px-2 py-1 rounded border border-slate-600/30 text-slate-400 hover:text-cyan-300 hover:border-cyan-500/30';
+      clear.textContent = '清空筛选';
+      clear.addEventListener('click', () => {
+        state.selectedTypes.clear();
+        keywordEl.value = '';
+        state.keyword = '';
+        renderTypeFilters();
+        renderList();
+      });
+      typeFiltersEl.appendChild(clear);
+    }
+
+    function matchesFilter(row) {
+      if (!row) return false;
+      if (state.selectedTypes.size > 0 && !state.selectedTypes.has(String(row.type || ''))) return false;
+      if (state.keyword) {
+        const t = String(row.text || '').toLowerCase();
+        if (!t.includes(state.keyword.toLowerCase())) return false;
+      }
+      return true;
+    }
+
+    function renderList() {
+      listEl.innerHTML = '';
+      const filtered = (state.list || []).filter(matchesFilter);
+      if (!filtered.length) {
+        emptyEl.classList.remove('hidden');
+        return;
+      }
+      emptyEl.classList.add('hidden');
+      filtered.forEach((r) => {
+        const row = document.createElement('div');
+        row.className = 'row px-3 py-2 border-b border-cyan-500/10';
+        const meta = document.createElement('div');
+        meta.className = 'flex items-center justify-between gap-2 text-[11px] text-slate-500';
+        meta.innerHTML = `<span>${fmtTs(r.created_at)}</span><span class="text-cyan-300/80">${String(r.type || '')}</span>`;
+        const text = document.createElement('div');
+        text.className = 'mt-1 text-sm text-slate-200 whitespace-pre-wrap break-words';
+        text.textContent = String(r.text || '');
+        row.appendChild(meta);
+        row.appendChild(text);
+        listEl.appendChild(row);
+      });
+    }
+
+    async function refresh() {
+      if (!api) return;
+      limitLabelEl.textContent = String(state.limit);
+      const stats = await api.getStats();
+      dbPathEl.textContent = stats.path || '-';
+      totalEl.textContent = String(stats.total ?? '-');
+      sampledEl.textContent = stats.sampleLimit ? `采样 ${stats.sampled}/${stats.sampleLimit}` : '';
+      rangeEl.textContent = `${fmtTs(stats.createdAtMin)}  →  ${fmtTs(stats.createdAtMax)}`;
+      state.byType = stats.byType || {};
+      renderTypeFilters();
+
+      const listResp = await api.list({ limit: state.limit });
+      state.list = Array.isArray(listResp) ? listResp.sort((a, b) => (b.created_at || 0) - (a.created_at || 0)) : [];
+      renderList();
+    }
+
+    keywordEl.addEventListener('input', () => {
+      state.keyword = keywordEl.value || '';
+      renderList();
+    });
+
+    refreshBtn.addEventListener('click', refresh);
+
+    const clearMemoryBtn = document.getElementById('clearMemory');
+    if (clearMemoryBtn) clearMemoryBtn.addEventListener('click', async () => {
+      if (!confirm('确定要清空所有向量记忆吗？此操作不可恢复。')) return;
+      if (api && api.clearAll) {
+        await api.clearAll();
+        refresh();
+      }
+    });
+
+    // Add a reindex button next to refresh (keep HTML minimal changes).
+    (function mountReindexButton() {
+      const btn = document.createElement('button');
+      btn.id = 'reindex';
+      btn.className = 'no-drag text-xs px-3 py-2 rounded border border-cyan-500/30 text-cyan-200 hover:bg-cyan-500/10';
+      btn.textContent = '从历史重建向量索引';
+      btn.addEventListener('click', async () => {
+        if (!api || !api.reindexFromHistory) return;
+        btn.disabled = true;
+        btn.classList.add('opacity-60');
+        btn.textContent = '重建中…';
+        try {
+          await api.reindexFromHistory();
+        } finally {
+          btn.disabled = false;
+          btn.classList.remove('opacity-60');
+          btn.textContent = '从历史重建向量索引';
+          refresh();
+        }
+      });
+      refreshBtn.parentElement.insertBefore(btn, refreshBtn);
+    })();
+
+    searchBtn.addEventListener('click', async () => {
+      if (!api) return;
+      const q = (queryEl.value || '').trim();
+      const k = Math.max(1, Math.min(50, Number(kEl.value || 8) || 8));
+      if (!q) return;
+      searchStatusEl.textContent = '检索中…';
+      searchResultsEl.innerHTML = '';
+      try {
+        const results = await api.semanticSearch(q, k);
+        const rows = Array.isArray(results) ? results : [];
+        searchStatusEl.textContent = `命中 ${rows.length} 条`;
+        rows.forEach((r) => {
+          const box = document.createElement('div');
+          box.className = 'rounded border border-cyan-500/10 bg-black/10 px-3 py-2';
+          const meta = document.createElement('div');
+          meta.className = 'flex items-center justify-between gap-2 text-[11px] text-slate-500';
+          const score = r._distance != null ? `distance: ${Number(r._distance).toFixed(4)}` : (r._score != null ? `score: ${Number(r._score).toFixed(4)}` : '');
+          meta.innerHTML = `<span>${fmtTs(r.created_at)}</span><span class="text-cyan-300/80">${String(r.type || '')}${score ? ' · ' + score : ''}</span>`;
+          const text = document.createElement('div');
+          text.className = 'mt-1 text-sm text-slate-200 whitespace-pre-wrap break-words';
+          text.textContent = String(r.text || '');
+          box.appendChild(meta);
+          box.appendChild(text);
+          searchResultsEl.appendChild(box);
+        });
+      } catch (e) {
+        searchStatusEl.textContent = '检索失败：' + (e && e.message ? e.message : String(e));
+      }
+    });
+
+    refresh();
+  </script>
+</body>
+</html>
+
