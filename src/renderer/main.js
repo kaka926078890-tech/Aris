@@ -19,13 +19,20 @@ const SKILL_LABELS = {
   list_my_files: '列出目录',
   read_file: '读取文件',
   write_file: '写入文件',
+  delete_file: '删除文件',
 };
 
-/** 移除 DSML/工具调用块：已用技能卡片和目录/文件块展示，气泡内只保留自然语言 */
+function stripEmotionBlock(text) {
+  if (typeof text !== 'string') return '';
+  let s = text.replace(/【情感摘要】[\s\S]*?强度评分[：:]\s*\d[^\n]*/g, '');
+  s = s.replace(/\n*【情感摘要】[\s\S]*$/g, '');
+  return s.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** 移除 DSML/工具调用块：已用技能卡片和目录/文件块展示，气泡内只保留自然语言；同时移除情感摘要/表达欲望/强度评分块，仅用于展示，历史仍存完整内容 */
 function formatBubbleContent(text) {
   if (typeof text !== 'string') return '';
   let s = text;
-  // 两种 DSML 格式：<DSML | xxx> / </DSML | xxx>，以及 < | ... DSML ... >
   const dsmlTagV1 = /<\s*\/?\s*DSML\s*\|\s*[^>]*>/gi;
   const dsmlTagV2 = /<\s*\/?\s*\|\s*[\s\S]*?DSML[\s\S]*?>/gi;
   let prev;
@@ -33,6 +40,7 @@ function formatBubbleContent(text) {
     prev = s;
     s = s.replace(dsmlTagV1, '').replace(dsmlTagV2, '');
   } while (s !== prev);
+  s = stripEmotionBlock(s);
   return s.replace(/\n{3,}/g, '\n\n').trim();
 }
 
@@ -45,6 +53,7 @@ function createSkillCard(name, args) {
   if (name === 'list_my_files' && (args.subpath != null)) subtitle = `路径: ${args.subpath}`;
   else if (name === 'read_file' && args.relative_path) subtitle = args.relative_path;
   else if (name === 'write_file' && args.relative_path) subtitle = args.relative_path;
+  else if (name === 'delete_file' && args.relative_path) subtitle = args.relative_path;
   card.innerHTML = `<span class="text-cyan-300 font-medium">使用了技能：${escapeHtml(label)}</span>${subtitle ? `<br><span class="text-cyan-200/80 text-xs break-all">${escapeHtml(subtitle)}</span>` : ''}`;
   return card;
 }
@@ -108,6 +117,19 @@ function createWriteResultBlock(result) {
   return wrap;
 }
 
+/** 根据工具结果创建删除结果摘要 */
+function createDeleteResultBlock(result) {
+  const wrap = document.createElement('div');
+  wrap.className = 'self-start rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200 max-w-[85%]';
+  if (result.error) {
+    wrap.classList.add('text-red-400');
+    wrap.textContent = `删除失败: ${result.error}`;
+    return wrap;
+  }
+  wrap.textContent = result.path ? `已删除: ${result.path}` : '已删除';
+  return wrap;
+}
+
 /** 根据单条 agent 动作创建卡片 + 内容块，返回 [cardEl, contentEl?] */
 function createBlocksForAction(action) {
   const { name, args, result } = action;
@@ -119,6 +141,8 @@ function createBlocksForAction(action) {
     blocks.push(createFileContentBlock(result));
   } else if (name === 'write_file' && result) {
     blocks.push(createWriteResultBlock(result));
+  } else if (name === 'delete_file' && result) {
+    blocks.push(createDeleteResultBlock(result));
   }
   return blocks;
 }

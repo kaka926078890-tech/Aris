@@ -11,6 +11,7 @@ const { getActiveWindowTitle } = require('../context/windowTitle.js');
 const { append } = require('../store/conversations.js');
 const { addMemory } = require('../memory/lancedb.js');
 const { embed } = require('../memory/embedding.js');
+const { readState, writeState, getSubjectiveTimeDescription } = require('../context/arisState.js');
 
 async function maybeProactiveMessage() {
   try {
@@ -34,7 +35,12 @@ async function maybeProactiveMessage() {
 
     const memories = await retrieve(contextSummary.slice(0, 500), 3);
     const memoryText = memories.length ? memories.map((m) => m.text).join(' | ') : '（无）';
-    const fullContext = contextSummary + '\n\n相关记忆：' + memoryText;
+    let fullContext = contextSummary + '\n\n相关记忆：' + memoryText;
+    const state = readState();
+    const timeDesc = getSubjectiveTimeDescription(state?.last_active_time ?? null);
+    const lastStateLine = state?.last_mental_state ? `你上一次的状态/想法是：${state.last_mental_state}` : '';
+    const stateBlock = [timeDesc, lastStateLine].filter(Boolean).join('\n');
+    if (stateBlock) fullContext = '【你上一次的状态与时间感】\n' + stateBlock + '\n\n' + fullContext;
 
     const messages = [
       { role: 'system', content: buildStatePrompt(fullContext) },
@@ -68,6 +74,10 @@ async function maybeProactiveMessage() {
     await append(sessionId, 'assistant', line);
     const vec = await embed(`Aris 主动: ${line}`);
     if (vec) await addMemory({ text: `Aris 主动: ${line}`, vector: vec, type: 'aris_behavior' });
+    writeState({
+      last_active_time: new Date().toISOString(),
+      last_mental_state: line.slice(0, 300),
+    });
     console.info('[Aris][proactive] 已发送:', line.slice(0, 50) + (line.length > 50 ? '…' : ''));
     return line;
   } catch (e) {

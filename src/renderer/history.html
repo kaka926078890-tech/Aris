@@ -42,6 +42,13 @@
       return d.toLocaleDateString('zh-CN') + ' ' + d.toTimeString().slice(0, 5);
     }
 
+    function stripEmotionBlock(text) {
+      if (typeof text !== 'string') return '';
+      let s = text.replace(/【情感摘要】[\s\S]*?强度评分[：:]\s*\d[^\n]*/g, '');
+      s = s.replace(/\n*【情感摘要】[\s\S]*$/g, '');
+      return s.replace(/\n{3,}/g, '\n\n').trim();
+    }
+
     function renderMessages(list) {
       messagesEl.innerHTML = '';
       if (!list || list.length === 0) {
@@ -59,7 +66,7 @@
         bubble.className = role === 'user'
           ? 'inline-block max-w-[85%] rounded-lg px-3 py-1.5 text-sm bg-cyan-500/20 text-cyan-100'
           : 'inline-block max-w-[85%] rounded-lg px-3 py-1.5 text-sm bg-slate-700/50 text-slate-200';
-        bubble.textContent = content;
+        bubble.textContent = role === 'assistant' ? stripEmotionBlock(content) : content;
         row.appendChild(bubble);
         const time = document.createElement('div');
         time.className = 'text-xs text-slate-500 mt-0.5';

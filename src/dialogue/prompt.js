@@ -50,6 +50,9 @@ const CONTEXT_TEMPLATE = `以下是你需要参考的上下文，用于保持连
 【当前日期与时间（用户所在时区的真实时间，回答与时间/日期相关问题时请以此为准）】
 {current_datetime}
 
+【你上一次的状态与时间感】
+{last_state_and_subjective_time}
+
 【当前会话最近几轮】
 {context_window}
 
@@ -58,7 +61,8 @@ const CONTEXT_TEMPLATE = `以下是你需要参考的上下文，用于保持连
 - list_my_files：列出该文件夹中的文件和子目录（可指定子路径）。
 - read_file：读取其中某个文件的文本内容。
 - write_file：在其中创建或覆盖/追加一个文本文件。备份或修改文件时，必须保证写入的内容与读到的或用户要求的一致、完整，不得漏写、截断或删掉大段；内容很长时可分多次用 append: true 追加。
-仅当用户明确要求你「记下来、存起来、写进文件、看看你记的、列出你的文件」等时，才调用这些工具；完成后用简短自然语言告诉用户结果，不要堆砌 JSON。
+- delete_file：删除该文件夹中的某个文件（仅限文件，不能删目录）。仅当用户明确要求删除某文件时使用。
+仅当用户明确要求你「记下来、存起来、写进文件、看看你记的、列出你的文件、删掉某文件」等时，才调用这些工具；完成后用简短自然语言告诉用户结果，不要堆砌 JSON。
 当任务可以拆成多步（例如先列目录再根据结果读文件）时，你可以先规划再执行；若某一步的结果会决定下一步做什么，你可以在收到工具返回后，在同一轮对话中继续调用工具，直到任务完成再回复用户。
 你可以在项目根目录下执行少量白名单命令（如 ls、pwd、cat、npm run 等），仅当用户明确要求时使用 run_terminal_command；结果可能被截断；不要尝试执行未在工具说明中列出的命令。
 你可以在项目目录下执行只读与安全写操作：git_status、git_diff、git_log、git_add、git_commit、git_pull、git_push；禁止 force 等危险操作；仅当用户明确要求查看版本、提交、推送等时才调用。
@@ -74,7 +78,7 @@ function getCurrentDateTime() {
   return `${dateStr} ${timeStr}`;
 }
 
-function buildSystemPrompt({ retrievedMemory = '', userIdentityAndRequirements = '', crossSessionDialogue = '', corrections = '', windowTitle = '', contextWindow = '', currentDatetime }) {
+function buildSystemPrompt({ retrievedMemory = '', userIdentityAndRequirements = '', crossSessionDialogue = '', corrections = '', windowTitle = '', contextWindow = '', currentDatetime, lastStateAndSubjectiveTime = '（无）' }) {
   const datetime = currentDatetime != null ? currentDatetime : getCurrentDateTime();
   return SYSTEM_PROMPT
     .replace('{user_identity_and_requirements}', userIdentityAndRequirements || '（无）')
@@ -83,6 +87,7 @@ function buildSystemPrompt({ retrievedMemory = '', userIdentityAndRequirements =
     .replace('{corrections}', corrections || '（无）')
     .replace('{window_title}', windowTitle || '（未知）')
     .replace('{current_datetime}', datetime)
+    .replace('{last_state_and_subjective_time}', lastStateAndSubjectiveTime || '（无）')
     .replace('{context_window}', contextWindow || '（暂无）');
 }
 

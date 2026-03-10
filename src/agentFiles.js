@@ -129,4 +129,20 @@ function writeFile(relativePath, content, append = false) {
   }
 }
 
-module.exports = { getAgentBasePath, listMyFiles, readFile, writeFile };
+function deleteFile(relativePath) {
+  const { ok, resolved, error } = resolveAndValidate(relativePath);
+  if (!ok) return { ok: false, error: error || '路径不允许' };
+  try {
+    if (!fs.existsSync(resolved)) return { ok: false, error: '文件不存在' };
+    const stat = fs.statSync(resolved);
+    if (!stat.isFile()) return { ok: false, error: '只能删除文件，不能删除目录' };
+    fs.unlinkSync(resolved);
+    const base = getAgentBasePath();
+    const rel = path.relative(base, resolved);
+    return { ok: true, path: rel };
+  } catch (e) {
+    return { ok: false, error: e.message || '删除失败' };
+  }
+}
+
+module.exports = { getAgentBasePath, listMyFiles, readFile, writeFile, deleteFile };

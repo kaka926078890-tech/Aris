@@ -13,8 +13,9 @@ const { addMemory, getRecentByTypes } = require('../memory/lancedb.js');
 const { embed } = require('../memory/embedding.js');
 const { getActiveWindowTitle } = require('../context/windowTitle.js');
 const { loadUserIdentity, updateUserIdentityFromMessage, appendRequirementToIdentity } = require('./userIdentity.js');
-const { listMyFiles, readFile, writeFile } = require('../agentFiles.js');
+const { listMyFiles, readFile, writeFile, deleteFile } = require('../agentFiles.js');
 const { getCurrentTime } = require('../context/currentTime.js');
+const { readState, writeState, getSubjectiveTimeDescription } = require('../context/arisState.js');
 const { jsonrepair } = require('jsonrepair');
 const { runTerminalCommand } = require('../terminal.js');
 const { gitStatus, gitDiff, gitLog, gitAdd, gitCommit, gitPull, gitPush, gitReset } = require('../gitTools.js');
@@ -60,6 +61,20 @@ const AGENT_FILE_TOOLS = [
           append: { type: 'boolean', description: '是否追加', default: false },
         },
         required: ['relative_path', 'content'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_file',
+      description: '删除你自己文件夹中的某个文件。仅限文件，不能删除目录。相对路径不能含 ..。',
+      parameters: {
+        type: 'object',
+        properties: {
+          relative_path: { type: 'string', description: '要删除的文件的相对路径' },
+        },
+        required: ['relative_path'],
       },
     },
   },
@@ -236,6 +251,9 @@ async function runAgentFileTool(name, args) {
     if (name === 'write_file') {
       return writeFile(a.relative_path, a.content, a.append === true);
     }
+    if (name === 'delete_file') {
+      return deleteFile(a.relative_path);
+    }
     if (name === 'get_current_time') {
       return getCurrentTime();
     }
@@ -386,6 +404,11 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     ? crossSessionRaw.slice(-MAX_CROSS_SESSION_CHARS) + '…'
     : crossSessionRaw;
 
+  const state = readState();
+  const timeDesc = getSubjectiveTimeDescription(state?.last_active_time ?? null);
+  const lastStateLine = state?.last_mental_state ? `你上一次的状态/想法是：${state.last_mental_state}` : '';
+  const lastStateAndSubjectiveTime = [timeDesc, lastStateLine].filter(Boolean).join('\n') || '（无）';
+
   const systemPrompt = buildSystemPrompt({
     retrievedMemory,
     userIdentityAndRequirements: userIdentityAndRequirements || '（无）',
@@ -393,6 +416,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     corrections,
     windowTitle: windowTitle || '（未知）',
     contextWindow,
+    lastStateAndSubjectiveTime,
   });
 
   const messages = [
@@ -476,6 +500,11 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
       if (emotionVec) await addMemory({ text: emotionText, vector: emotionVec, type: 'aris_emotion' });
     }
   }
+
+  writeState({
+    last_active_time: new Date().toISOString(),
+    last_mental_state: (emotionMatch && emotionMatch[1] ? emotionMatch[1].trim() : null) || (reply ? reply.slice(0, 300) : null),
+  });
 
   const { identity, requirement } = isIdentityOrRequirement(userContent);
   if (identity) updateUserIdentityFromMessage(userContent);
