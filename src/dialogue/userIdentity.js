@@ -1,18 +1,14 @@
 /**
- * 用户身份文件：读写 userData/user_identity.json，供每轮 prompt 注入。
+ * 用户身份文件：读写 memory/user_identity.json，供每轮 prompt 注入。
  * 对话中检测到「我叫/我是/你可以叫我」等时在此更新。
  */
 const path = require('path');
 const fs = require('fs');
 
+const ARIS_ROOT = path.join(__dirname, '..', '..');
+
 function getIdentityPath() {
-  try {
-    const { app } = require('electron');
-    const userData = app.getPath('userData');
-    return path.join(userData, 'user_identity.json');
-  } catch (_) {
-    return path.join(__dirname, 'user_identity.json');
-  }
+  return path.join(ARIS_ROOT, 'memory', 'user_identity.json');
 }
 
 const DEFAULT_IDENTITY = { name: '', notes: '' };

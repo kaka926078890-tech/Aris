@@ -18,7 +18,7 @@
 |------|------|
 | 根路径 | 与现有 userData 一致：`app.getPath('userData')/aris`，再下建子目录 **`agent`**，即 `userData/aris/agent` |
 | 用途 | 仅用于 Aris 通过工具读写的内容（用户说「把这句话记下来」「看看我上次让你存的」等） |
-| 与现有目录关系 | 与 `aris.db`、`lancedb`、`user_identity.json` 同级，不覆盖现有文件；首次使用前若不存在则创建 `agent` |
+| 与现有目录关系 | 与 `aris.db`、`lancedb` 同级；项目内用户身份在 `memory/user_identity.json`；首次使用前若不存在则创建 `agent` |
 
 路径解析建议复用或对齐现有 `getUserDataPath()`（如 `src/store/db.js`、`src/memory/lancedb.js`），在实现里用：
 

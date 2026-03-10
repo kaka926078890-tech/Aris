@@ -4,3 +4,5 @@ dist
 backup/
 *.restore_backup
 *.backup
+data/
+memory/user_identity.json

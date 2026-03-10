@@ -9,7 +9,7 @@
 | 层级 | 内容 | 来源 | 注入方式 |
 |------|------|------|----------|
 | **第一层** | Aris 人设、禁令、性格 | `persona.md` | 每轮读取文件，固定注入 |
-| **第二层** | 用户身份（我是谁） | `user_identity.json` | 每轮读取文件，固定注入 |
+| **第二层** | 用户身份（我是谁） | `memory/user_identity.json` | 每轮读取文件，固定注入 |
 | **第三层** | 用户要求/纠错 + 相关记忆 | LanceDB | 语义检索 + 按类型检索，带字符上限注入 |
 
 当前会话最近几轮、跨会话摘要、窗口标题、当前时间等作为「上下文块」一并注入，均有长度上限。
@@ -18,10 +18,7 @@
 
 ## 2. 用户身份：文件存储
 
-- **实际路径**（Electron 运行时）  
-  - 在应用**用户数据目录**下，不是项目源码里：`app.getPath('userData')/user_identity.json`。  
-  - macOS 上约为：`~/Library/Application Support/aris/user_identity.json`（以 package.json 的 `name` 为准）。  
-  - 只有在非 Electron 环境（如单独跑 Node 脚本）时，才回退到项目内：`src/dialogue/user_identity.json`。
+- **实际路径**：`memory/user_identity.json`，与其它记忆文件（如 `expression_accumulation.md`）同目录，便于在项目内直接查看或编辑。
 - **何时出现**：文件在**首次写入**时才会创建。当用户说过「我叫/我是/你可以叫我」或「你以后…/不要…/记住…」等身份或要求类表述时，会创建或更新该文件；若从未说过，该文件可能不存在，属正常。
 - **格式**：JSON，例如 `{ "name": "xxx", "notes": "用户曾说的身份或要求（如：不要说比喻句）" }`。
 - **更新时机**：对话中检测到「我叫/我是/你可以叫我」等时更新 name/notes；检测到「不要/别/记住/要求/偏好」等时，将用户要求追加到 notes，保证每轮 prompt 都能注入并遵守。
@@ -50,6 +47,6 @@
 ## 5. 相关文件与常量
 
 - **人设**：`src/dialogue/persona.md`
-- **用户身份**：Electron 下为 `userData/user_identity.json`（见上文）；非 Electron 下为 `src/dialogue/user_identity.json`
+- **用户身份**：`memory/user_identity.json`
 - **Prompt 模板**：`src/dialogue/prompt.js`（`buildSystemPrompt`）
 - **检索与上限**：`src/dialogue/handler.js`（`MAX_MEMORY_CHARS`、`MAX_CROSS_SESSION_CHARS`，以及 `getRecentByTypes` 条数）

@@ -1,7 +1,7 @@
 记忆系统分析：
 1. 对话历史：SQLite存储，会话ID不变
 2. 向量记忆：LanceDB存储，包括user_requirement类型
-3. 用户身份：user_identity.json文件
+3. 用户身份：memory/user_identity.json
 4. 每次对话都会检索相关记忆并注入提示词
 
 问题分析：

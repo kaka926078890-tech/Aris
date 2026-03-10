@@ -13,7 +13,7 @@
 | 对话与 LLM | DeepSeek API（流式）；可选本地 Ollama |
 | 对话存储 | SQLite（原始对话流、会话） |
 | 语义记忆 | LanceDB（嵌入式向量库）+ Ollama nomic-embed-text |
-| 人设/身份 | 本地文件（persona.md、user_identity.json） |
+| 人设/身份 | 本地文件（persona.md、memory/user_identity.json） |
 
 ---
 
@@ -21,7 +21,7 @@
 
 - **M1 透明视窗**：Electron 窗口、点击穿透、菜单。
 - **M2 3D 引擎**：Plexus 粒子、外环音频、方框（`src/engine/`、`src/audio/`）。
-- **M3 认知存储**：SQLite 对话历史；LanceDB 向量记忆；persona.md / user_identity.json。
+- **M3 认知存储**：SQLite 对话历史；LanceDB 向量记忆；persona.md / memory/user_identity.json。
 - **M4 对谈系统**：`handler.js` 编排检索 → 拼 Prompt → 调 LLM → 落库与写向量；`prompt.js` 拼系统提示；`api.js` 调 DeepSeek。
 
 ---
@@ -29,7 +29,7 @@
 ## 3. Prompt 分层（与文档一致）
 
 1. **第一层**：`persona.md` 内容（人设、INFP、禁令）。
-2. **第二层**：`user_identity.json` 内容（用户是谁），每轮读取。
+2. **第二层**：`memory/user_identity.json` 内容（用户是谁），每轮读取。
 3. **第三层**：向量检索结果（纠错 + 相关记忆 + 按类型的 user_requirement），带字符上限。
 4. **上下文块**：跨会话摘要（字符上限）、当前会话最近几轮、窗口标题、当前日期时间。
 
@@ -41,7 +41,7 @@
 
 - **每轮对话**：用户 + Aris 回复合并为一条 `dialogue_turn` 写入 LanceDB。
 - **用户纠错**：走纠错逻辑，记录到纠错表/向量，并在检索时优先注入。
-- **身份/要求**：若检测到「我是/我叫/要求/偏好」等，更新 `user_identity.json` 和/或写入 `user_requirement` 向量。
+- **身份/要求**：若检测到「我是/我叫/要求/偏好」等，更新 `memory/user_identity.json` 和/或写入 `user_requirement` 向量。
 
 ---
 
@@ -59,10 +59,12 @@
 Aris/
 ├── electron.main.js      # 主进程、窗口、IPC
 ├── preload*.js           # 渲染进程 API
+├── memory/               # 记忆与用户身份（项目内）
+│   ├── user_identity.json
+│   └── ...
 ├── src/
 │   ├── dialogue/         # 对话与 Prompt
 │   │   ├── persona.md
-│   │   ├── user_identity.json
 │   │   ├── prompt.js
 │   │   ├── handler.js
 │   │   └── api.js

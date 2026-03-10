@@ -21,7 +21,7 @@
 - 向量库是模糊检索，若「我是 INFP」只存向量，检索不到时人格会漂移。
 - 这类内容必须**每一轮**都出现在 System Prompt 中，是「灵魂骨架」。
 
-**实现：** 使用 `src/dialogue/persona.md`、`src/dialogue/user_identity.json` 等，每次请求前读取并拼进 Prompt 开头。
+**实现：** 使用 `src/dialogue/persona.md`、`memory/user_identity.json` 等，每次请求前读取并拼进 Prompt 开头。
 
 ---
 

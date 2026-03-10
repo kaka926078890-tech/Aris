@@ -116,17 +116,22 @@ function runAgentFileTool(name, args) {
 const IDENTITY_PHRASES = ['我是', '我叫', '我的名字', '我是谁', '身份是', '你可以叫我'];
 const REQUIREMENT_PHRASES = ['你以后', '记住', '要求', '偏好', '希望你能', '不要', '别', '请尽量', '习惯'];
 
+const NOT_NAME_PHRASES = new Set([
+  '谁', '什么', '对的', '好', '的', '呀', '啊', '哦', '嗯',
+  '改不动了', '卡住了', '不行', '没办法', '错了', '不对',
+]);
+
 /** 从检索到的记忆文本中提取「用户名字」，用于注入到【用户曾告知的身份与要求】 */
 function extractIdentityFromMemories(memories) {
   if (!Array.isArray(memories) || memories.length === 0) return '';
-  const skip = new Set(['谁', '什么', '对的', '好', '的', '呀', '啊', '哦', '嗯']);
   const seen = new Set();
   for (const m of memories) {
     const text = typeof m.text === 'string' ? m.text : String(m?.text ?? '');
     const match = text.match(/你是[「\"]?\s*([^\s」\"，。！？、]{1,20})[」\"]?/);
-    if (match && match[1] && !skip.has(match[1].trim()) && !seen.has(match[1].trim())) {
-      seen.add(match[1].trim());
-      return `用户名字：${match[1].trim()}`;
+    const candidate = match && match[1] ? match[1].trim() : '';
+    if (candidate && !NOT_NAME_PHRASES.has(candidate) && !seen.has(candidate)) {
+      seen.add(candidate);
+      return `用户名字：${candidate}`;
     }
   }
   return '';
