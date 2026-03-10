@@ -37,27 +37,30 @@ async function maybeProactiveMessage() {
     if (content) {
       console.info('[Aris][proactive] 思考过程:\n' + content);
     }
-    if (!content || content.includes('是否想说话：否')) return null;
+    if (!content || content.includes('是否想说话：否')) {
+      return null;
+    }
     const match = content.match(/若想说话，内容[：:]\s*([^\n]+)/) || content.match(/内容[：:]\s*([^\n]+)/);
     const line = match ? match[1].trim() : content.split('\n').pop().trim();
-    if (line.length > 5 && line.length < 200) {
-      // 若上一条已是助手消息且内容与本次相同或高度相似，不再重复发送
-      const last = recent.length > 0 ? recent[recent.length - 1] : null;
-      if (last && last.role === 'assistant') {
-        const lastText = (last.content || '').trim();
-        if (lastText === line || lastText.includes(line) || line.includes(lastText)) {
-          console.info('[Aris][proactive] 跳过重复：上条已是相同/相似内容');
-          return null;
-        }
-      }
-      await append(sessionId, 'assistant', line);
-      const vec = await embed(`Aris 主动: ${line}`);
-      if (vec) await addMemory({ text: `Aris 主动: ${line}`, vector: vec, type: 'aris_behavior' });
-      return line;
+    if (line.length <= 5 || line.length >= 200) {
+      return null;
     }
-    return null;
+    // 若上一条已是助手消息且内容与本次相同或高度相似，不再重复发送
+    const last = recent.length > 0 ? recent[recent.length - 1] : null;
+    if (last && last.role === 'assistant') {
+      const lastText = (last.content || '').trim();
+      if (lastText === line || lastText.includes(line) || line.includes(lastText)) {
+        console.info('[Aris][proactive] 跳过重复：上条已是相同/相似内容');
+        return null;
+      }
+    }
+    await append(sessionId, 'assistant', line);
+    const vec = await embed(`Aris 主动: ${line}`);
+    if (vec) await addMemory({ text: `Aris 主动: ${line}`, vector: vec, type: 'aris_behavior' });
+    console.info('[Aris][proactive] 已发送:', line.slice(0, 50) + (line.length > 50 ? '…' : ''));
+    return line;
   } catch (e) {
-    console.warn('Proactive check failed', e);
+    console.warn('[Aris][proactive] 检查失败', e);
     return null;
   }
 }

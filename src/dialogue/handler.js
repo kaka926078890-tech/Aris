@@ -14,6 +14,8 @@ const { embed } = require('../memory/embedding.js');
 const { getActiveWindowTitle } = require('../context/windowTitle.js');
 const { loadUserIdentity, updateUserIdentityFromMessage, appendRequirementToIdentity } = require('./userIdentity.js');
 const { listMyFiles, readFile, writeFile } = require('../agentFiles.js');
+const { getCurrentTime } = require('../context/currentTime.js');
+const { jsonrepair } = require('jsonrepair');
 
 const AGENT_FILE_TOOLS = [
   {
@@ -47,23 +49,52 @@ const AGENT_FILE_TOOLS = [
     type: 'function',
     function: {
       name: 'write_file',
-      description: '在你自己的文件夹中写入或覆盖一个文件。',
+      description: '在你自己的文件夹中写入或覆盖一个文件。可一次性写入任意长度文本；也可设 append: true 追加内容。',
       parameters: {
         type: 'object',
         properties: {
           relative_path: { type: 'string', description: '相对路径' },
-          content: { type: 'string', description: '要写入的文本' },
+          content: { type: 'string', description: '要写入的完整文本内容' },
           append: { type: 'boolean', description: '是否追加', default: false },
         },
         required: ['relative_path', 'content'],
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'get_current_time',
+      description: '获取当前日期与时间（用户所在时区）。无需参数。用于回答「几点了」「今天星期几」或需要记录/引用当前时间时调用。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
 ];
 
-function runAgentFileTool(name, args) {
+/** 解析工具参数：先标准 JSON.parse，失败则用 jsonrepair 修复后再解析（应对 LLM 输出的长字符串/未转义引号等） */
+function parseToolArgs(args) {
+  if (args == null || typeof args !== 'string') return typeof args === 'object' && args !== null ? args : {};
+  const str = args.trim() || '{}';
   try {
-    const a = typeof args === 'string' ? JSON.parse(args || '{}') : args || {};
+    return JSON.parse(str);
+  } catch (_) {
+    try {
+      const repaired = jsonrepair(str);
+      return JSON.parse(repaired);
+    } catch (e) {
+      throw new Error(e.message || '工具参数 JSON 无法解析');
+    }
+  }
+}
+
+function runAgentFileTool(name, args) {
+  let a;
+  try {
+    a = parseToolArgs(args);
+  } catch (e) {
+    return { ok: false, error: e.message || '工具参数解析失败' };
+  }
+  try {
     if (name === 'list_my_files') {
       return listMyFiles(a.subpath ?? '');
     }
@@ -72,6 +103,9 @@ function runAgentFileTool(name, args) {
     }
     if (name === 'write_file') {
       return writeFile(a.relative_path, a.content, a.append === true);
+    }
+    if (name === 'get_current_time') {
+      return getCurrentTime();
     }
     return { ok: false, error: '未知工具' };
   } catch (e) {

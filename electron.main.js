@@ -10,6 +10,9 @@ let historyWindow = null;
 let memoryWindow = null;
 /** 是否正在处理对话（流式生成中），用于串行化发送并避免 proactive 插入 */
 let dialogueBusy = false;
+/** 上次有对话活动的时间戳；需空闲超过此时长才跑「是否想说话」，避免正在对话时插入 */
+let lastDialogueAt = 0;
+const PROACTIVE_IDLE_MS = 3 * 60 * 1000;
 
 function createWindow() {
   const isMac = process.platform === 'darwin';
@@ -173,12 +176,19 @@ function openMemoryWindow() {
 
 function startProactiveInterval() {
   const { maybeProactiveMessage } = require('./src/dialogue/proactive.js');
+  const intervalMs = 3 * 60 * 1000;
   setInterval(async () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (dialogueBusy) return;
+    if (dialogueBusy) {
+      return;
+    }
+    const idleMs = Date.now() - lastDialogueAt;
+    if (lastDialogueAt > 0 && idleMs < PROACTIVE_IDLE_MS) {
+      return;
+    }
     const msg = await maybeProactiveMessage();
     if (msg) mainWindow.webContents.send('aris:proactive', msg);
-  }, 3 * 60 * 1000);
+  }, intervalMs);
 }
 
 async function checkOllamaEmbed() {
@@ -251,6 +261,7 @@ ipcMain.handle('dialogue:send', async (event, userContent) => {
     return result;
   } finally {
     dialogueBusy = false;
+    lastDialogueAt = Date.now();
   }
 });
 
