@@ -1,7 +1,10 @@
 /**
  * Main process dialogue handler: memory-first flow, then LLM, then persist.
+ * 支持「自己文件夹」工具：多轮工具调用（见 MAX_TOOL_ROUNDS），每轮带 tools 非流式请求，
+ * 有 tool_calls 则执行并追加到 messages 后继续下一轮，直到无 tool_calls 或达轮数上限，最后流式请求一次得到回复。
  */
-const { chatStream } = require('./api.js');
+const MAX_TOOL_ROUNDS = 100;
+const { chatStream, chatWithTools } = require('./api.js');
 const { buildSystemPrompt } = require('./prompt.js');
 const { retrieve } = require('../memory/retrieval.js');
 const { getCorrectionsForPrompt, isUserCorrection, recordCorrection } = require('../memory/corrections.js');
@@ -9,10 +12,91 @@ const { getCurrentSessionId, append, getRecent, getRecentFromOtherSessions } = r
 const { addMemory, getRecentByTypes } = require('../memory/lancedb.js');
 const { embed } = require('../memory/embedding.js');
 const { getActiveWindowTitle } = require('../context/windowTitle.js');
-const { loadUserIdentity, updateUserIdentityFromMessage } = require('./userIdentity.js');
+const { loadUserIdentity, updateUserIdentityFromMessage, appendRequirementToIdentity } = require('./userIdentity.js');
+const { listMyFiles, readFile, writeFile } = require('../agentFiles.js');
+
+const AGENT_FILE_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'list_my_files',
+      description: '列出你自己文件夹中的文件和子目录。可传 subpath 表示子目录（如 notes），不传则列根目录。',
+      parameters: {
+        type: 'object',
+        properties: {
+          subpath: { type: 'string', description: '相对子路径，如 notes 或空', default: '' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_file',
+      description: '读取你自己文件夹中某个文件的文本内容（UTF-8）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          relative_path: { type: 'string', description: '相对路径' },
+        },
+        required: ['relative_path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'write_file',
+      description: '在你自己的文件夹中写入或覆盖一个文件。',
+      parameters: {
+        type: 'object',
+        properties: {
+          relative_path: { type: 'string', description: '相对路径' },
+          content: { type: 'string', description: '要写入的文本' },
+          append: { type: 'boolean', description: '是否追加', default: false },
+        },
+        required: ['relative_path', 'content'],
+      },
+    },
+  },
+];
+
+function runAgentFileTool(name, args) {
+  try {
+    const a = typeof args === 'string' ? JSON.parse(args || '{}') : args || {};
+    if (name === 'list_my_files') {
+      return listMyFiles(a.subpath ?? '');
+    }
+    if (name === 'read_file') {
+      return readFile(a.relative_path);
+    }
+    if (name === 'write_file') {
+      return writeFile(a.relative_path, a.content, a.append === true);
+    }
+    return { ok: false, error: '未知工具' };
+  } catch (e) {
+    return { ok: false, error: e.message || '执行失败' };
+  }
+}
 
 const IDENTITY_PHRASES = ['我是', '我叫', '我的名字', '我是谁', '身份是', '你可以叫我'];
 const REQUIREMENT_PHRASES = ['你以后', '记住', '要求', '偏好', '希望你能', '不要', '别', '请尽量', '习惯'];
+
+/** 从检索到的记忆文本中提取「用户名字」，用于注入到【用户曾告知的身份与要求】 */
+function extractIdentityFromMemories(memories) {
+  if (!Array.isArray(memories) || memories.length === 0) return '';
+  const skip = new Set(['谁', '什么', '对的', '好', '的', '呀', '啊', '哦', '嗯']);
+  const seen = new Set();
+  for (const m of memories) {
+    const text = typeof m.text === 'string' ? m.text : String(m?.text ?? '');
+    const match = text.match(/你是[「\"]?\s*([^\s」\"，。！？、]{1,20})[」\"]?/);
+    if (match && match[1] && !skip.has(match[1].trim()) && !seen.has(match[1].trim())) {
+      seen.add(match[1].trim());
+      return `用户名字：${match[1].trim()}`;
+    }
+  }
+  return '';
+}
 
 function isIdentityOrRequirement(text) {
   if (!text || typeof text !== 'string') return { identity: false, requirement: false };
@@ -23,7 +107,34 @@ function isIdentityOrRequirement(text) {
   return { identity, requirement };
 }
 
-async function handleUserMessage(userContent, sendChunk) {
+/**
+ * 构建发给前端的「技能动作」列表，便于渲染为卡片和目录/文件内容。
+ * @param {Array} toolCalls
+ * @param {Array} toolResults 与 toolCalls 一一对应，每项为 { role, tool_call_id, content }，content 为 string
+ * @returns {Array<{ name: string, args: object, result: object }>}
+ */
+function buildAgentActions(toolCalls, toolResults) {
+  if (!Array.isArray(toolCalls) || !Array.isArray(toolResults)) return [];
+  return toolCalls.map((tc, i) => {
+    const name = tc.function?.name || '';
+    let args = {};
+    try {
+      args = typeof tc.function?.arguments === 'string'
+        ? JSON.parse(tc.function.arguments || '{}')
+        : tc.function?.arguments || {};
+    } catch (_) {}
+    let result = {};
+    try {
+      const raw = toolResults[i]?.content;
+      result = typeof raw === 'string' ? JSON.parse(raw) : raw || {};
+    } catch (_) {
+      result = { raw: toolResults[i]?.content };
+    }
+    return { name, args, result };
+  });
+}
+
+async function handleUserMessage(userContent, sendChunk, sendAgentActions) {
   const sessionId = await getCurrentSessionId();
   const recentBefore = await getRecent(sessionId, 14);
   const lastAssistantContent = recentBefore.length
@@ -42,10 +153,13 @@ async function handleUserMessage(userContent, sendChunk) {
   ]);
 
   const identityFromFile = loadUserIdentity();
+  const identityFromRetrieved = extractIdentityFromMemories(memories);
   const requirementTexts = Array.isArray(requirementsFromVector) && requirementsFromVector.length > 0
     ? requirementsFromVector.map((r) => (typeof r === 'string' ? r : r?.text ?? r)).filter(Boolean)
     : [];
-  const userIdentityAndRequirements = [identityFromFile, ...requirementTexts].filter(Boolean).join('\n---\n') || '';
+  const userIdentityAndRequirements = [identityFromFile, identityFromRetrieved, ...requirementTexts]
+    .filter(Boolean)
+    .join('\n---\n') || '';
 
   const MAX_MEMORY_CHARS = 3200;
   let retrievedMemory = '';
@@ -84,14 +198,55 @@ async function handleUserMessage(userContent, sendChunk) {
     ...recent.slice(-14).map((r) => ({ role: r.role, content: r.content })),
   ];
 
-  const { content: reply, error } = await chatStream(messages, sendChunk);
+  let currentMessages = messages;
+  let reply = '';
+  let err = false;
+  let round = 0;
+  let exitedDueToNoToolCalls = false;
+
+  while (round < MAX_TOOL_ROUNDS) {
+    const res = await chatWithTools(currentMessages, AGENT_FILE_TOOLS);
+    reply = res.content || '';
+    err = res.error;
+    if (!res.tool_calls || res.tool_calls.length === 0) {
+      exitedDueToNoToolCalls = true;
+      break;
+    }
+    const assistantMsg = {
+      role: 'assistant',
+      content: res.content || null,
+      tool_calls: res.tool_calls,
+    };
+    const toolResults = res.tool_calls.map((tc) => {
+      const result = runAgentFileTool(tc.function?.name, tc.function?.arguments);
+      return {
+        role: 'tool',
+        tool_call_id: tc.id,
+        content: typeof result === 'string' ? result : JSON.stringify(result),
+      };
+    });
+    if (typeof sendAgentActions === 'function') {
+      const actions = buildAgentActions(res.tool_calls, toolResults);
+      if (actions.length > 0) sendAgentActions(actions);
+    }
+    currentMessages = [...currentMessages, assistantMsg, ...toolResults];
+    round++;
+  }
+
+  if (exitedDueToNoToolCalls) {
+    if (sendChunk && reply) sendChunk(reply);
+  } else {
+    const second = await chatStream(currentMessages, sendChunk);
+    reply = second.content;
+    err = second.error;
+  }
+
   await append(sessionId, 'assistant', reply);
 
   if (isUserCorrection(userContent) && lastAssistantContent) {
     await recordCorrection(lastAssistantContent, userContent);
   }
 
-  // 一轮对话存一条：用户 + Aris 合并向量化（不按句各存一条）
   const userPart = userContent.slice(0, 300);
   const arisPart = reply.slice(0, 500);
   const pairText = `用户: ${userPart}\nAris: ${arisPart}`;
@@ -101,12 +256,13 @@ async function handleUserMessage(userContent, sendChunk) {
   const { identity, requirement } = isIdentityOrRequirement(userContent);
   if (identity) updateUserIdentityFromMessage(userContent);
   if (requirement) {
+    appendRequirementToIdentity(userContent);
     const singleText = `用户要求: ${userContent.slice(0, 400)}`;
     const singleVec = await embed(singleText);
     if (singleVec) await addMemory({ text: singleText, vector: singleVec, type: 'user_requirement' });
   }
 
-  return { content: reply, error, sessionId };
+  return { content: reply, error: err, sessionId };
 }
 
 module.exports = { handleUserMessage };

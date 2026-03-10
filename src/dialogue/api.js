@@ -29,11 +29,55 @@ async function chat(messages) {
       throw new Error(`DeepSeek ${res.status}: ${t}`);
     }
     const data = await res.json();
-    const content = data.choices?.[0]?.message?.content ?? '';
-    return { content, error: false };
+    const msg = data.choices?.[0]?.message ?? {};
+    const content = msg.content ?? '';
+    const tool_calls = msg.tool_calls ?? null;
+    return { content, tool_calls, error: false };
   } catch (e) {
     console.error('DeepSeek chat error', e);
-    return { content: `[请求失败: ${e.message}]`, error: true };
+    return { content: `[请求失败: ${e.message}]`, tool_calls: null, error: true };
+  }
+}
+
+/**
+ * 带 tools 的非流式请求，用于首轮判断是否有 tool_calls。
+ * @returns { Promise<{ content: string, tool_calls: Array|null, error: boolean }> }
+ */
+async function chatWithTools(messages, tools) {
+  const DEEPSEEK_API = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com';
+  const API_KEY = process.env.DEEPSEEK_API_KEY || '';
+  if (!API_KEY) {
+    console.warn('DEEPSEEK_API_KEY not set');
+    return { content: '[未配置 API Key]', tool_calls: null, error: true };
+  }
+  try {
+    const res = await fetch(`${DEEPSEEK_API}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages,
+        tools: Array.isArray(tools) && tools.length > 0 ? tools : undefined,
+        stream: false,
+        max_tokens: 1024,
+        temperature: 0.7,
+      }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`DeepSeek ${res.status}: ${t}`);
+    }
+    const data = await res.json();
+    const msg = data.choices?.[0]?.message ?? {};
+    const content = msg.content ?? '';
+    const tool_calls = msg.tool_calls ?? null;
+    return { content, tool_calls, error: false };
+  } catch (e) {
+    console.error('DeepSeek chatWithTools error', e);
+    return { content: `[请求失败: ${e.message}]`, tool_calls: null, error: true };
   }
 }
 
@@ -118,4 +162,4 @@ async function chatStream(messages, onChunk) {
   }
 }
 
-module.exports = { chat, chatStream };
+module.exports = { chat, chatStream, chatWithTools };

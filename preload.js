@@ -9,6 +9,11 @@ contextBridge.exposeInMainWorld('aris', {
     ipcRenderer.on('dialogue:chunk', handler);
     return () => ipcRenderer.removeListener('dialogue:chunk', handler);
   },
+  onAgentActions: (callback) => {
+    const handler = (_, actions) => callback(actions);
+    ipcRenderer.on('dialogue:agentActions', handler);
+    return () => ipcRenderer.removeListener('dialogue:agentActions', handler);
+  },
   getWindowTitle: () => ipcRenderer.invoke('get-window-title'),
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),

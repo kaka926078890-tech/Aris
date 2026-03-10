@@ -23,13 +23,22 @@ async function retrieve(queryText, limit = 10) {
     console.warn('[Aris][memory] search failed:', e && e.message ? e.message : e);
     return [];
   }
-  if (rows.length > 0 && rows[0] != null) {
-    const keys = Object.keys(rows[0]);
-    if (keys.length > 0) console.info('[Aris][memory] search row keys:', keys.join(', '));
-  }
   const out = rows
     .map((r) => ({ ...r, text: getText(r) }))
     .filter((r) => r.text != null && String(r.text).trim() !== '');
+
+  if (out.length > 0) {
+    const queryPreview = (queryText || '').slice(0, 60);
+    console.info(`[Aris][memory] 召回 ${out.length} 条 (query: "${queryPreview}${(queryText || '').length > 60 ? '…' : ''}")`);
+    out.forEach((r, i) => {
+      const type = r.type != null ? r.type : 'unknown';
+      const snippet = String(r.text || '').slice(0, 80).replace(/\n/g, ' ');
+      console.info(`[Aris][memory]   ${i + 1}. [${type}] ${snippet}${(r.text || '').length > 80 ? '…' : ''}`);
+    });
+  } else {
+    console.info('[Aris][memory] 召回 0 条');
+  }
+
   return out;
 }
 

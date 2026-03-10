@@ -85,4 +85,35 @@ function updateUserIdentityFromMessage(userContent) {
   }
 }
 
-module.exports = { loadUserIdentity, updateUserIdentityFromMessage, getIdentityPath };
+/**
+ * 将用户要求（如「不要说比喻句」）追加到 identity 的 notes，保证每轮 prompt 都会注入并遵守。
+ */
+function appendRequirementToIdentity(userContent) {
+  if (!userContent || typeof userContent !== 'string') return;
+  const line = userContent.trim().slice(0, 400);
+  if (line.length < 2) return;
+
+  const p = getIdentityPath();
+  let data = DEFAULT_IDENTITY;
+  try {
+    if (fs.existsSync(p)) {
+      const raw = fs.readFileSync(p, 'utf8').trim();
+      if (raw) data = { ...DEFAULT_IDENTITY, ...JSON.parse(raw) };
+    }
+  } catch (_) {}
+
+  const requirementLine = '用户要求: ' + line;
+  if (data.notes && data.notes.includes(requirementLine)) return;
+  data.notes = data.notes ? data.notes + '\n' + requirementLine : requirementLine;
+
+  try {
+    const dir = path.dirname(p);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf8');
+    console.info('[Aris][userIdentity] requirement appended:', line.slice(0, 60) + (line.length > 60 ? '…' : ''));
+  } catch (e) {
+    console.warn('[Aris][userIdentity] append requirement failed', e?.message);
+  }
+}
+
+module.exports = { loadUserIdentity, updateUserIdentityFromMessage, appendRequirementToIdentity, getIdentityPath };

@@ -8,31 +8,29 @@
   <title>历史记录 - Aris</title>
   <style>
     .no-drag { -webkit-app-region: no-drag; }
-    .session-item:hover { background: rgba(6, 182, 212, 0.08); }
+    .message-bubble { scroll-margin-top: 4rem; }
+    .message-bubble.search-hit { background: rgba(6, 182, 212, 0.15); }
   </style>
 </head>
-<body class="bg-slate-900 text-slate-200 min-h-screen p-4">
-  <div class="max-w-xl mx-auto">
-    <div class="flex items-center justify-between mb-4 border-b border-cyan-500/30 pb-2">
-      <h1 class="text-lg font-medium text-cyan-200">历史记录</h1>
-      <button id="clearHistory" class="no-drag text-xs px-3 py-1.5 rounded border border-red-500/40 text-red-300 hover:bg-red-500/10">删除历史记录</button>
+<body class="bg-slate-900 text-slate-200 flex flex-col h-screen overflow-hidden">
+  <header class="flex-shrink-0 flex items-center gap-2 border-b border-cyan-500/30 px-4 py-2 no-drag overflow-hidden min-w-0">
+    <h1 class="text-lg font-medium text-cyan-200 flex-shrink-0">历史记录</h1>
+    <div class="flex-1 flex items-center gap-2 min-w-0 overflow-hidden">
+      <input id="searchInput" type="text" placeholder="检索…" class="flex-1 min-w-0 max-w-xs bg-black/40 text-cyan-100 border border-cyan-500/40 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-400" />
+      <button id="searchBtn" class="text-xs px-3 py-1.5 rounded border border-cyan-500/50 text-cyan-300 hover:bg-cyan-500/20 flex-shrink-0">检索</button>
     </div>
-    <div id="sessions" class="space-y-1"></div>
-    <div id="detail" class="mt-4 hidden">
-      <div class="flex items-center justify-between mb-2">
-        <span class="text-sm text-cyan-300">对话内容</span>
-        <button id="back" class="text-xs text-slate-400 hover:text-cyan-300 no-drag">返回列表</button>
-      </div>
-      <div id="messages" class="space-y-2 max-h-80 overflow-y-auto rounded-lg border border-cyan-500/20 p-3 bg-black/20"></div>
-    </div>
+    <button id="clearHistory" class="text-xs px-3 py-1.5 rounded border border-red-500/40 text-red-300 hover:bg-red-500/10 flex-shrink-0">删除历史记录</button>
+  </header>
+  <main id="messagesWrap" class="flex-1 min-h-0 overflow-y-auto px-4 py-3">
+    <div id="messages" class="max-w-xl mx-auto space-y-3"></div>
     <p id="empty" class="text-sm text-slate-500 hidden">暂无历史会话</p>
-  </div>
+  </main>
   <script>
-    const sessionsEl = document.getElementById('sessions');
-    const detailEl = document.getElementById('detail');
+    const messagesWrap = document.getElementById('messagesWrap');
     const messagesEl = document.getElementById('messages');
     const emptyEl = document.getElementById('empty');
-    const backBtn = document.getElementById('back');
+    const searchInput = document.getElementById('searchInput');
+    const searchBtn = document.getElementById('searchBtn');
 
     function formatTime(ts) {
       if (!ts) return '';
@@ -44,65 +42,79 @@
       return d.toLocaleDateString('zh-CN') + ' ' + d.toTimeString().slice(0, 5);
     }
 
-    function renderSessions(list) {
-      sessionsEl.innerHTML = '';
+    function renderMessages(list) {
+      messagesEl.innerHTML = '';
       if (!list || list.length === 0) {
         emptyEl.classList.remove('hidden');
         return;
       }
       emptyEl.classList.add('hidden');
-      list.forEach(({ session_id, last_at }) => {
-        const div = document.createElement('div');
-        div.className = 'session-item no-drag cursor-pointer rounded-lg px-3 py-2 text-sm';
-        div.textContent = formatTime(last_at) + ' · ' + session_id.slice(0, 12) + '…';
-        div.dataset.sessionId = session_id;
-        div.addEventListener('click', () => showConversation(session_id));
-        sessionsEl.appendChild(div);
-      });
-    }
-
-    async function showConversation(sessionId) {
-      const list = await window.historyApi.getConversation(sessionId);
-      sessionsEl.classList.add('hidden');
-      detailEl.classList.remove('hidden');
-      messagesEl.innerHTML = '';
       list.forEach(({ role, content, created_at }) => {
         const div = document.createElement('div');
-        div.className = role === 'user' ? 'text-right' : 'text-left';
+        div.className = 'message-bubble';
+        div.dataset.content = content;
+        const row = document.createElement('div');
+        row.className = role === 'user' ? 'text-right' : 'text-left';
         const bubble = document.createElement('div');
         bubble.className = role === 'user'
           ? 'inline-block max-w-[85%] rounded-lg px-3 py-1.5 text-sm bg-cyan-500/20 text-cyan-100'
           : 'inline-block max-w-[85%] rounded-lg px-3 py-1.5 text-sm bg-slate-700/50 text-slate-200';
         bubble.textContent = content;
-        div.appendChild(bubble);
+        row.appendChild(bubble);
         const time = document.createElement('div');
         time.className = 'text-xs text-slate-500 mt-0.5';
         time.textContent = formatTime(created_at);
-        div.appendChild(time);
+        row.appendChild(time);
+        div.appendChild(row);
         messagesEl.appendChild(div);
       });
+      scrollToLatest();
     }
 
-    backBtn.addEventListener('click', () => {
-      detailEl.classList.add('hidden');
-      sessionsEl.classList.remove('hidden');
-      loadSessions();
-    });
+    function scrollToLatest() {
+      messagesWrap.scrollTop = messagesWrap.scrollHeight;
+    }
+
+    function doSearch() {
+      const q = (searchInput.value || '').trim();
+      const bubbles = messagesEl.querySelectorAll('.message-bubble');
+      bubbles.forEach((el) => el.classList.remove('search-hit'));
+      if (!q) {
+        scrollToLatest();
+        return;
+      }
+      const lower = q.toLowerCase();
+      const hits = [];
+      bubbles.forEach((el) => {
+        const text = (el.dataset.content || '').toLowerCase();
+        if (text.includes(lower)) {
+          el.classList.add('search-hit');
+          hits.push(el);
+        }
+      });
+      if (hits.length > 0) {
+        hits[hits.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+
+    async function loadHistory() {
+      const sessionId = await window.historyApi.getCurrentSessionId();
+      const list = await window.historyApi.getConversation(sessionId);
+      renderMessages(list);
+    }
+
+    searchBtn.addEventListener('click', doSearch);
+    searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
 
     document.getElementById('clearHistory').addEventListener('click', async () => {
       if (!confirm('确定要删除全部历史记录吗？此操作不可恢复。')) return;
       if (typeof window.historyApi !== 'undefined' && window.historyApi.clearAll) {
         await window.historyApi.clearAll();
-        loadSessions();
+        loadHistory();
       }
     });
 
-    async function loadSessions() {
-      const list = await window.historyApi.getSessions();
-      renderSessions(list);
-    }
-
-    loadSessions();
+    loadHistory();
   </script>
 </body>
 </html>

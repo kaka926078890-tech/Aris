@@ -4,10 +4,12 @@ const path = require('path');
 const { handleUserMessage } = require('./src/dialogue/handler.js');
 const { getActiveWindowTitle } = require('./src/context/windowTitle.js');
 const { exportToFile, importFromFile } = require('./src/store/backup.js');
-const { getAllSessions, getAllForSession, clearAllConversations } = require('./src/store/conversations.js');
+const { getAllSessions, getAllForSession, clearAllConversations, getCurrentSessionId } = require('./src/store/conversations.js');
 let mainWindow = null;
 let historyWindow = null;
 let memoryWindow = null;
+/** 是否正在处理对话（流式生成中），用于串行化发送并避免 proactive 插入 */
+let dialogueBusy = false;
 
 function createWindow() {
   const isMac = process.platform === 'darwin';
@@ -173,6 +175,7 @@ function startProactiveInterval() {
   const { maybeProactiveMessage } = require('./src/dialogue/proactive.js');
   setInterval(async () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (dialogueBusy) return;
     const msg = await maybeProactiveMessage();
     if (msg) mainWindow.webContents.send('aris:proactive', msg);
   }, 3 * 60 * 1000);
@@ -231,9 +234,24 @@ ipcMain.on('set-ignore-mouse-events', (_, ignore, options) => {
 ipcMain.handle('get-window-title', () => getActiveWindowTitle());
 
 ipcMain.handle('dialogue:send', async (event, userContent) => {
-  const sendChunk = (chunk) => event.sender.send('dialogue:chunk', chunk);
-  const result = await handleUserMessage(userContent, sendChunk);
-  return result;
+  if (dialogueBusy) {
+    return { error: '请等待当前回复完成后再发送' };
+  }
+  dialogueBusy = true;
+  const sendChunk = (chunk) => {
+    if (event.sender && !event.sender.isDestroyed()) event.sender.send('dialogue:chunk', chunk);
+  };
+  const sendAgentActions = (actions) => {
+    if (event.sender && !event.sender.isDestroyed()) {
+      event.sender.send('dialogue:agentActions', actions);
+    }
+  };
+  try {
+    const result = await handleUserMessage(userContent, sendChunk, sendAgentActions);
+    return result;
+  } finally {
+    dialogueBusy = false;
+  }
 });
 
 ipcMain.handle('window:minimize', () => {
@@ -246,6 +264,10 @@ ipcMain.handle('window:close', () => {
 
 ipcMain.handle('history:getSessions', async () => {
   return getAllSessions();
+});
+
+ipcMain.handle('history:getCurrentSessionId', async () => {
+  return getCurrentSessionId();
 });
 
 ipcMain.handle('history:getConversation', async (_, sessionId) => {
