@@ -6,7 +6,8 @@ const path = require('path');
 const fs = require('fs');
 
 const MAX_READ_BYTES = 512 * 1024; // 512KB
-const SAFE_NAME_REGEX = /^[a-zA-Z0-9_.\-/]+$/;
+/** 路径段允许：Unicode 字母/数字、空格、下划线、点、横线（支持中文等文件名） */
+const SAFE_NAME_REGEX = /^[\p{L}\p{N}\s_.\-]+$/u;
 
 /** 项目根目录：agentFiles.js 在 src/ 下，故上一级为项目根 */
 function getAgentBasePath() {

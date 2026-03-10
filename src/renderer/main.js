@@ -6,6 +6,7 @@ const overlay = document.getElementById('dialogue-overlay');
 const bubblesWrap = document.getElementById('bubbles-wrap');
 const bubblesEl = document.getElementById('bubbles');
 const inputEl = document.getElementById('dialogue-input');
+const stopBtn = document.getElementById('dialogue-stop');
 
 function scrollToBottom() {
   if (bubblesWrap) bubblesWrap.scrollTop = bubblesWrap.scrollHeight;
@@ -210,8 +211,9 @@ function setSending(v) {
   sending = v;
   if (inputEl) {
     inputEl.disabled = !!v;
-    inputEl.placeholder = v ? '生成中…' : '';
+    inputEl.placeholder = v ? '生成中…' : '输入消息，Shift+Enter 换行…';
   }
+  if (stopBtn) stopBtn.classList.toggle('hidden', !v);
 }
 
 function sendUserMessage() {
@@ -281,6 +283,7 @@ if (container) {
     inputEl.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
       if (e.isComposing) return;
+      if (e.shiftKey) return; // Shift+Enter 换行，不发送
       e.preventDefault();
       sendUserMessage();
     });
@@ -294,6 +297,12 @@ if (container) {
       const value = inputEl.value || '';
       inputEl.value = value.slice(0, start) + text + value.slice(end);
       inputEl.selectionStart = inputEl.selectionEnd = start + text.length;
+    });
+  }
+  if (stopBtn) {
+    stopBtn.classList.add('hidden');
+    stopBtn.addEventListener('click', () => {
+      if (typeof window.aris !== 'undefined' && window.aris.abortDialogue) window.aris.abortDialogue();
     });
   }
 

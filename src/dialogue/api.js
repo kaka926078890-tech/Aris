@@ -41,9 +41,10 @@ async function chat(messages) {
 
 /**
  * 带 tools 的非流式请求，用于首轮判断是否有 tool_calls。
+ * @param {AbortSignal|undefined} signal - 可选，用于中断请求
  * @returns { Promise<{ content: string, tool_calls: Array|null, error: boolean }> }
  */
-async function chatWithTools(messages, tools) {
+async function chatWithTools(messages, tools, signal) {
   const DEEPSEEK_API = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com';
   const API_KEY = process.env.DEEPSEEK_API_KEY || '';
   if (!API_KEY) {
@@ -52,6 +53,7 @@ async function chatWithTools(messages, tools) {
   }
   try {
     const res = await fetch(`${DEEPSEEK_API}/v1/chat/completions`, {
+      signal: signal || undefined,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -76,6 +78,9 @@ async function chatWithTools(messages, tools) {
     const tool_calls = msg.tool_calls ?? null;
     return { content, tool_calls, error: false };
   } catch (e) {
+    if (e && e.name === 'AbortError') {
+      return { content: '', tool_calls: null, error: true, aborted: true };
+    }
     console.error('DeepSeek chatWithTools error', e);
     return { content: `[请求失败: ${e.message}]`, tool_calls: null, error: true };
   }
@@ -97,9 +102,10 @@ function logPayload(messages) {
 
 /**
  * Stream chat completion, call onChunk(text) for each delta.
+ * @param {AbortSignal|undefined} signal - 可选，用于中断请求
  * Returns { content, error } when done.
  */
-async function chatStream(messages, onChunk) {
+async function chatStream(messages, onChunk, signal) {
   const DEEPSEEK_API = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com';
   const API_KEY = process.env.DEEPSEEK_API_KEY || '';
   if (!API_KEY) {
@@ -110,6 +116,7 @@ async function chatStream(messages, onChunk) {
   logPayload(messages);
   try {
     const res = await fetch(`${DEEPSEEK_API}/v1/chat/completions`, {
+      signal: signal || undefined,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -133,8 +140,13 @@ async function chatStream(messages, onChunk) {
     let buffer = '';
     let content = '';
     while (true) {
+      if (signal && signal.aborted) {
+        await reader.cancel();
+        break;
+      }
       const { done, value } = await reader.read();
       if (done) break;
+      if (signal && signal.aborted) break;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
@@ -155,6 +167,9 @@ async function chatStream(messages, onChunk) {
     }
     return { content, error: false };
   } catch (e) {
+    if (e && e.name === 'AbortError') {
+      return { content, error: false, aborted: true };
+    }
     console.error('DeepSeek chat stream error', e);
     const msg = `[请求失败: ${e.message}]`;
     if (onChunk) onChunk(msg);

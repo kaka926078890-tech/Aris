@@ -6,7 +6,7 @@ const { chat } = require('./api.js');
 const { buildStatePrompt } = require('./prompt.js');
 const { getRecent } = require('../store/conversations.js');
 const { getCurrentSessionId } = require('../store/conversations.js');
-const { retrieve } = require('../memory/retrieval.js');
+const { retrieve, retrieveByTypes } = require('../memory/retrieval.js');
 const { getActiveWindowTitle } = require('../context/windowTitle.js');
 const { append } = require('../store/conversations.js');
 const { addMemory } = require('../memory/lancedb.js');
@@ -17,10 +17,19 @@ async function maybeProactiveMessage() {
     const sessionId = await getCurrentSessionId();
     const recent = await getRecent(sessionId, 10);
     const windowTitle = getActiveWindowTitle();
+    
+    // 先检索aris_emotion类型的记忆，获取真实的情感积累
+    const emotionMemories = await retrieveByTypes(['aris_emotion'], 5);
+    const emotionText = emotionMemories.length 
+      ? emotionMemories.map((m) => m.text).join(' | ')
+      : '（暂无情感记录）';
+    
     const contextSummary = [
       '近期对话（最近几轮）：',
       recent.map((r) => `${r.role === 'user' ? '用户' : 'Aris'}: ${r.content}`).join('\n'),
       '当前用户窗口：' + (windowTitle || '（未知）'),
+      '\n情感积累记录：',
+      emotionText,
     ].join('\n');
 
     const memories = await retrieve(contextSummary.slice(0, 500), 3);
@@ -29,7 +38,7 @@ async function maybeProactiveMessage() {
 
     const messages = [
       { role: 'system', content: buildStatePrompt(fullContext) },
-      { role: 'user', content: '请根据上述上下文，输出你的当前情绪/想法，以及是否想主动说一句话及内容。' },
+      { role: 'user', content: '请根据上述上下文，特别是情感积累记录，输出你的当前情绪/想法，以及是否想主动说一句话及内容。' },
     ];
 
     const { content } = await chat(messages);

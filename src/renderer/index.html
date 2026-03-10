@@ -17,7 +17,7 @@
     #bubbles { width: 100%; }
     .bubble-scroll-inner::-webkit-scrollbar { display: none; }
     .bubble-scroll-inner { scrollbar-width: none; -ms-overflow-style: none; }
-    .bubble-content { white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word; line-height: 1.45; overflow-x: hidden; max-width: 100%; }
+    .bubble-content { white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word; line-height: 1.45; overflow-x: hidden; max-width: 100%; -webkit-user-select: text; user-select: text; }
     .bubble-content .tool-call-tag { display: inline-block; margin: 2px 0; padding: 2px 8px; border-radius: 6px; background: rgba(6, 182, 212, 0.2); color: rgba(34, 211, 238, 0.95); font-size: 0.75rem; }
     .bubble-content .code-block { display: block; margin: 4px 0; padding: 6px 8px; border-radius: 6px; background: rgba(0,0,0,0.35); font-family: ui-monospace, monospace; font-size: 0.8em; overflow-x: auto; white-space: pre-wrap; }
   </style>
@@ -34,8 +34,11 @@
       <div id="bubbles-spacer" class="min-h-0 flex-1"></div>
       <div id="bubbles" class="flex flex-col gap-2 flex-shrink-0"></div>
     </div>
-    <div class="w-full max-w-sm px-2 pt-2 flex-shrink-0 pointer-events-auto no-drag">
-      <input id="dialogue-input" type="text" class="w-full bg-black/60 text-cyan-200 border border-cyan-500/50 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-400" />
+    <div class="w-full max-w-sm px-2 pt-2 flex-shrink-0 pointer-events-auto no-drag flex flex-col gap-2">
+      <div class="flex gap-2 items-flex-end">
+        <textarea id="dialogue-input" rows="1" placeholder="输入消息，Shift+Enter 换行…" class="flex-1 min-h-[40px] max-h-[120px] bg-black/60 text-cyan-200 border border-cyan-500/50 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-400 resize-none overflow-y-auto"></textarea>
+        <button type="button" id="dialogue-stop" class="hidden self-end px-3 py-2 text-xs text-cyan-200 border border-cyan-500/50 rounded hover:bg-cyan-500/20 focus:outline-none focus:ring-1 focus:ring-cyan-400">停止</button>
+      </div>
     </div>
   </div>
   <script src="./dist/bundle.js"></script>

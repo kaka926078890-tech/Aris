@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('aris', {
   setIgnoreMouseEvents: (ignore, options) =>
     ipcRenderer.send('set-ignore-mouse-events', ignore, options),
   sendMessage: (text) => ipcRenderer.invoke('dialogue:send', text),
+  abortDialogue: () => ipcRenderer.invoke('dialogue:abort'),
   onDialogueChunk: (callback) => {
     const handler = (_, chunk) => callback(chunk);
     ipcRenderer.on('dialogue:chunk', handler);

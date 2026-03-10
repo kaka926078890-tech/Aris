@@ -10,6 +10,8 @@ let historyWindow = null;
 let memoryWindow = null;
 /** 是否正在处理对话（流式生成中），用于串行化发送并避免 proactive 插入 */
 let dialogueBusy = false;
+/** 当前对话的 AbortController，用于用户点击「停止」时中断 */
+let dialogueAbortController = null;
 /** 上次有对话活动的时间戳；需空闲超过此时长才跑「是否想说话」，避免正在对话时插入 */
 let lastDialogueAt = 0;
 const PROACTIVE_IDLE_MS = 3 * 60 * 1000;
@@ -248,6 +250,7 @@ ipcMain.handle('dialogue:send', async (event, userContent) => {
     return { error: '请等待当前回复完成后再发送' };
   }
   dialogueBusy = true;
+  dialogueAbortController = new AbortController();
   const sendChunk = (chunk) => {
     if (event.sender && !event.sender.isDestroyed()) event.sender.send('dialogue:chunk', chunk);
   };
@@ -257,11 +260,18 @@ ipcMain.handle('dialogue:send', async (event, userContent) => {
     }
   };
   try {
-    const result = await handleUserMessage(userContent, sendChunk, sendAgentActions);
+    const result = await handleUserMessage(userContent, sendChunk, sendAgentActions, dialogueAbortController.signal);
     return result;
   } finally {
+    dialogueAbortController = null;
     dialogueBusy = false;
     lastDialogueAt = Date.now();
+  }
+});
+
+ipcMain.handle('dialogue:abort', () => {
+  if (dialogueAbortController) {
+    dialogueAbortController.abort();
   }
 });
 

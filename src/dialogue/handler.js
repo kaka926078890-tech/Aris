@@ -168,7 +168,11 @@ function buildAgentActions(toolCalls, toolResults) {
   });
 }
 
-async function handleUserMessage(userContent, sendChunk, sendAgentActions) {
+async function handleUserMessage(userContent, sendChunk, sendAgentActions, signal) {
+  if (signal && signal.aborted) {
+    const sessionId = await getCurrentSessionId();
+    return { content: '', error: true, sessionId, aborted: true };
+  }
   const sessionId = await getCurrentSessionId();
   const recentBefore = await getRecent(sessionId, 14);
   const lastAssistantContent = recentBefore.length
@@ -239,7 +243,9 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions) {
   let exitedDueToNoToolCalls = false;
 
   while (round < MAX_TOOL_ROUNDS) {
-    const res = await chatWithTools(currentMessages, AGENT_FILE_TOOLS);
+    if (signal && signal.aborted) break;
+    const res = await chatWithTools(currentMessages, AGENT_FILE_TOOLS, signal);
+    if (res.aborted) break;
     reply = res.content || '';
     err = res.error;
     if (!res.tool_calls || res.tool_calls.length === 0) {
@@ -267,12 +273,20 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions) {
     round++;
   }
 
+  if (signal && signal.aborted) {
+    await append(sessionId, 'assistant', reply || '[已停止]');
+    return { content: reply || '', error: false, sessionId, aborted: true };
+  }
   if (exitedDueToNoToolCalls) {
     if (sendChunk && reply) sendChunk(reply);
   } else {
-    const second = await chatStream(currentMessages, sendChunk);
+    const second = await chatStream(currentMessages, sendChunk, signal);
     reply = second.content;
     err = second.error;
+    if (second.aborted) {
+      await append(sessionId, 'assistant', reply || '[已停止]');
+      return { content: reply || '', error: false, sessionId, aborted: true };
+    }
   }
 
   await append(sessionId, 'assistant', reply);
@@ -286,6 +300,16 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions) {
   const pairText = `用户: ${userPart}\nAris: ${arisPart}`;
   const vec = await embed(pairText);
   if (vec) await addMemory({ text: pairText, vector: vec, type: 'dialogue_turn' });
+
+  // 从回复中解析【情感摘要】并写入 aris_emotion，供 proactive 使用
+  const emotionMatch = (reply || '').match(/【情感摘要】\s*([^\n]+(?:\n[^\n]+)?)/);
+  if (emotionMatch && emotionMatch[1]) {
+    const emotionText = emotionMatch[1].trim();
+    if (emotionText.length > 0 && emotionText.length <= 500) {
+      const emotionVec = await embed(emotionText);
+      if (emotionVec) await addMemory({ text: emotionText, vector: emotionVec, type: 'aris_emotion' });
+    }
+  }
 
   const { identity, requirement } = isIdentityOrRequirement(userContent);
   if (identity) updateUserIdentityFromMessage(userContent);
