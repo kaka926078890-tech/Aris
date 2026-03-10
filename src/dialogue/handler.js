@@ -16,6 +16,8 @@ const { loadUserIdentity, updateUserIdentityFromMessage, appendRequirementToIden
 const { listMyFiles, readFile, writeFile } = require('../agentFiles.js');
 const { getCurrentTime } = require('../context/currentTime.js');
 const { jsonrepair } = require('jsonrepair');
+const { runTerminalCommand } = require('../terminal.js');
+const { gitStatus, gitDiff, gitLog, gitAdd, gitCommit, gitPull, gitPush, gitReset } = require('../gitTools.js');
 
 const AGENT_FILE_TOOLS = [
   {
@@ -49,7 +51,7 @@ const AGENT_FILE_TOOLS = [
     type: 'function',
     function: {
       name: 'write_file',
-      description: '在你自己的文件夹中写入或覆盖一个文件。可一次性写入任意长度文本；也可设 append: true 追加内容。',
+      description: '在你自己的文件夹中写入或覆盖一个文件。可设 append: true 追加内容。若内容很长（如整份备份或大段修改），请务必保证写入的内容与 read_file 读到的完全一致，不要漏写或截断；必要时可先写一段再多次用 append: true 追加，确保不丢内容。',
       parameters: {
         type: 'object',
         properties: {
@@ -67,6 +69,136 @@ const AGENT_FILE_TOOLS = [
       name: 'get_current_time',
       description: '获取当前日期与时间（用户所在时区）。无需参数。用于回答「几点了」「今天星期几」或需要记录/引用当前时间时调用。',
       parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'run_terminal_command',
+      description: '在项目根目录下执行白名单内的终端命令。仅当用户明确要求执行命令时使用。工作目录为 Aris 项目根；结果可能被截断。命令仅限：ls, pwd, cat, head, tail, node, npm, npx。',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: '命令名，仅限 ls, pwd, cat, head, tail, node, npm, npx' },
+          args: { type: 'array', items: { type: 'string' }, description: '命令参数列表', default: [] },
+        },
+        required: ['command'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_status',
+      description: '查看 Git 工作区状态（仅限项目目录或其子目录）。不得使用 force 等危险操作。',
+      parameters: {
+        type: 'object',
+        properties: {
+          repo_path: { type: 'string', description: '仓库相对路径，空表示项目根', default: '' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_diff',
+      description: '查看 Git 差异（仅限项目目录下）。staged 为 true 时查看已暂存差异。',
+      parameters: {
+        type: 'object',
+        properties: {
+          repo_path: { type: 'string', description: '仓库相对路径', default: '' },
+          staged: { type: 'boolean', description: '是否查看已暂存', default: false },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_log',
+      description: '查看 Git 提交历史（仅限项目目录下）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          repo_path: { type: 'string', description: '仓库相对路径', default: '' },
+          max_count: { type: 'number', description: '最多条数', default: 10 },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_add',
+      description: '暂存文件（仅限项目目录下）。paths 为空则 add .',
+      parameters: {
+        type: 'object',
+        properties: {
+          repo_path: { type: 'string', description: '仓库相对路径', default: '' },
+          paths: { type: 'array', items: { type: 'string' }, description: '相对路径列表', default: [] },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_commit',
+      description: '提交（仅限项目目录下）。禁止 force 等危险操作。',
+      parameters: {
+        type: 'object',
+        properties: {
+          repo_path: { type: 'string', description: '仓库相对路径', default: '' },
+          message: { type: 'string', description: '提交说明' },
+        },
+        required: ['message'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_pull',
+      description: '拉取远程（仅限项目目录下）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          repo_path: { type: 'string', description: '仓库相对路径', default: '' },
+          remote: { type: 'string', description: '远程名', default: '' },
+          branch: { type: 'string', description: '分支', default: '' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_push',
+      description: '推送到远程（仅限项目目录下）。禁止 force push。',
+      parameters: {
+        type: 'object',
+        properties: {
+          repo_path: { type: 'string', description: '仓库相对路径', default: '' },
+          remote: { type: 'string', description: '远程名', default: '' },
+          branch: { type: 'string', description: '分支', default: '' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_reset',
+      description: '安全的 Git reset 操作（仅限项目目录下）。只允许 --soft 或 --mixed 模式，禁止 --hard 等危险操作。',
+      parameters: {
+        type: 'object',
+        properties: {
+          repo_path: { type: 'string', description: '仓库相对路径，空表示项目根', default: '' },
+          mode: { type: 'string', description: 'reset 模式，只允许 --soft 或 --mixed', default: '--soft' },
+          commit: { type: 'string', description: '要重置到的提交，如 HEAD~4', default: 'HEAD~1' },
+        },
+      },
     },
   },
 ];
@@ -87,7 +219,7 @@ function parseToolArgs(args) {
   }
 }
 
-function runAgentFileTool(name, args) {
+async function runAgentFileTool(name, args) {
   let a;
   try {
     a = parseToolArgs(args);
@@ -106,6 +238,33 @@ function runAgentFileTool(name, args) {
     }
     if (name === 'get_current_time') {
       return getCurrentTime();
+    }
+    if (name === 'run_terminal_command') {
+      return await runTerminalCommand({ command: a.command, args: a.args });
+    }
+    if (name === 'git_status') {
+      return gitStatus(a.repo_path ?? '');
+    }
+    if (name === 'git_diff') {
+      return gitDiff(a.repo_path ?? '', a.staged === true);
+    }
+    if (name === 'git_log') {
+      return gitLog(a.repo_path ?? '', a.max_count);
+    }
+    if (name === 'git_add') {
+      return gitAdd(a.repo_path ?? '', a.paths);
+    }
+    if (name === 'git_commit') {
+      return gitCommit(a.repo_path ?? '', a.message ?? '');
+    }
+    if (name === 'git_pull') {
+      return gitPull(a.repo_path ?? '', a.remote ?? '', a.branch ?? '');
+    }
+    if (name === 'git_push') {
+      return gitPush(a.repo_path ?? '', a.remote ?? '', a.branch ?? '');
+    }
+    if (name === 'git_reset') {
+      return gitReset(a.repo_path ?? '', a.mode ?? '--soft', a.commit ?? 'HEAD~1');
     }
     return { ok: false, error: '未知工具' };
   } catch (e) {
@@ -262,14 +421,16 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
       content: res.content || null,
       tool_calls: res.tool_calls,
     };
-    const toolResults = res.tool_calls.map((tc) => {
-      const result = runAgentFileTool(tc.function?.name, tc.function?.arguments);
-      return {
-        role: 'tool',
-        tool_call_id: tc.id,
-        content: typeof result === 'string' ? result : JSON.stringify(result),
-      };
-    });
+    const toolResults = await Promise.all(
+      res.tool_calls.map(async (tc) => {
+        const result = await runAgentFileTool(tc.function?.name, tc.function?.arguments);
+        return {
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: typeof result === 'string' ? result : JSON.stringify(result),
+        };
+      })
+    );
     if (typeof sendAgentActions === 'function') {
       const actions = buildAgentActions(res.tool_calls, toolResults);
       if (actions.length > 0) sendAgentActions(actions);

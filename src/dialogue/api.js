@@ -3,6 +3,9 @@
  */
 require('dotenv').config();
 
+const MAX_TOKENS_STREAM = 1024;
+const MAX_TOKENS_TOOLS = Math.min(Number(process.env.ARIS_TOOL_MAX_TOKENS) || 8192, 32768);
+
 async function chat(messages) {
   const DEEPSEEK_API = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com';
   const API_KEY = process.env.DEEPSEEK_API_KEY || '';
@@ -20,7 +23,7 @@ async function chat(messages) {
       body: JSON.stringify({
         model: 'deepseek-chat',
         messages,
-        max_tokens: 1024,
+        max_tokens: MAX_TOKENS_STREAM,
         temperature: 0.7,
       }),
     });
@@ -39,11 +42,6 @@ async function chat(messages) {
   }
 }
 
-/**
- * 带 tools 的非流式请求，用于首轮判断是否有 tool_calls。
- * @param {AbortSignal|undefined} signal - 可选，用于中断请求
- * @returns { Promise<{ content: string, tool_calls: Array|null, error: boolean }> }
- */
 async function chatWithTools(messages, tools, signal) {
   const DEEPSEEK_API = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com';
   const API_KEY = process.env.DEEPSEEK_API_KEY || '';
@@ -64,7 +62,7 @@ async function chatWithTools(messages, tools, signal) {
         messages,
         tools: Array.isArray(tools) && tools.length > 0 ? tools : undefined,
         stream: false,
-        max_tokens: 1024,
+        max_tokens: MAX_TOKENS_TOOLS,
         temperature: 0.7,
       }),
     });
@@ -125,7 +123,7 @@ async function chatStream(messages, onChunk, signal) {
       body: JSON.stringify({
         model: 'deepseek-chat',
         messages,
-        max_tokens: 1024,
+        max_tokens: MAX_TOKENS_STREAM,
         temperature: 0.7,
         stream: true,
       }),

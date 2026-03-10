@@ -54,12 +54,14 @@ async function maybeProactiveMessage() {
     if (line.length <= 5 || line.length >= 200) {
       return null;
     }
-    // 若上一条已是助手消息且内容与本次相同或高度相似，不再重复发送
-    const last = recent.length > 0 ? recent[recent.length - 1] : null;
-    if (last && last.role === 'assistant') {
-      const lastText = (last.content || '').trim();
-      if (lastText === line || lastText.includes(line) || line.includes(lastText)) {
-        console.info('[Aris][proactive] 跳过重复：上条已是相同/相似内容');
+    const normalize = (s) => (s || '').replace(/[，。？、\s]/g, '').trim();
+    const recentAssistant = recent.filter((r) => r.role === 'assistant').slice(-5);
+    const lineNorm = normalize(line);
+    for (const msg of recentAssistant) {
+      const prev = normalize((msg.content || '').trim());
+      if (prev.length < 10) continue;
+      if (lineNorm === prev || lineNorm.includes(prev) || prev.includes(lineNorm)) {
+        console.info('[Aris][proactive] 跳过重复：与近期某条助手消息相同/相似');
         return null;
       }
     }
