@@ -13,24 +13,65 @@ const { addMemory, deleteMemoryById } = require('../memory/lancedb.js');
 const { embed } = require('../memory/embedding.js');
 const { readState, writeState, getSubjectiveTimeDescription } = require('../context/arisState.js');
 
+/** 表达阈值：优先级超过此值时才使用积累的表达欲望直接表达，否则走 LLM */
+const EXPRESSION_THRESHOLD = 0.5;
+
 /**
- * 计算表达欲望的优先级分数
- * @param {Object} desire - 表达欲望记录，包含 metadata.intensity 和 metadata.timestamp
+ * 计算欲望与当前上下文的相关性（词/片段重叠，0-1）
+ * 支持英文分词与中文 2 字片段，无重叠时返回 0.5 中性分
+ */
+function computeRelevanceScore(desireText, contextSummary) {
+  if (!desireText || !contextSummary) return 0.5;
+  const ctx = (contextSummary || '').toLowerCase();
+  const tokenize = (s) => (s || '')
+    .replace(/[\s，。！？、；：""''（）\n]+/g, ' ')
+    .split(' ')
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2);
+  const desireTokens = tokenize(desireText);
+  if (desireTokens.length > 0) {
+    let hit = 0;
+    for (const tok of desireTokens) {
+      if (ctx.includes(tok.toLowerCase())) hit++;
+    }
+    const ratio = hit / desireTokens.length;
+    return 0.5 + 0.5 * Math.min(1, ratio);
+  }
+  // 中文等无空格：用 2 字片段与上下文重叠
+  const s = desireText.trim();
+  if (s.length < 2) return 0.5;
+  let chunks = 0;
+  let hits = 0;
+  for (let i = 0; i <= s.length - 2; i++) {
+    chunks++;
+    if (ctx.includes(s.slice(i, i + 2))) hits++;
+  }
+  if (chunks === 0) return 0.5;
+  const ratio = hits / chunks;
+  return 0.5 + 0.5 * Math.min(1, ratio);
+}
+
+/**
+ * 计算表达欲望的优先级分数（阶段二：时效性 + 情感强度 + 相关性）
+ * @param {Object} desire - 表达欲望记录，含 metadata.intensity、metadata.timestamp、text
  * @param {number} currentTime - 当前时间戳（毫秒）
+ * @param {string} contextSummary - 当前上下文摘要，用于相关性
  * @returns {number} 优先级分数（0-1之间）
  */
-function calculateDesirePriority(desire, currentTime) {
+function calculateDesirePriority(desire, currentTime, contextSummary) {
   const intensity = desire.metadata?.intensity || 3;
   const timestamp = desire.metadata?.timestamp ? new Date(desire.metadata.timestamp).getTime() : currentTime;
-  
-  // 强度权重：0.6（1-5分映射到0.2-1.0）
-  const intensityScore = (intensity - 1) / 4 * 0.8 + 0.2; // 1分->0.2, 5分->1.0
-  
-  // 时效性权重：0.4（越新分数越高）
+  const desireText = desire.text || '';
+
+  // 情感强度（1-5 映射到 0.2-1.0），权重 0.5
+  const intensityScore = (intensity - 1) / 4 * 0.8 + 0.2;
+  // 时效性（越新越高），24 小时内线性衰减，权重 0.3
   const ageHours = (currentTime - timestamp) / (1000 * 60 * 60);
-  const recencyScore = Math.max(0, 1 - ageHours / 24); // 24小时内线性衰减
-  
-  return intensityScore * 0.6 + recencyScore * 0.4;
+  const recencyScore = Math.max(0, 1 - ageHours / 24);
+  // 与当前上下文相关性，权重 0.2
+  const relevanceScore = computeRelevanceScore(desireText, contextSummary);
+
+  return intensityScore * 0.5 + recencyScore * 0.3 + relevanceScore * 0.2;
 }
 
 /**
@@ -45,28 +86,26 @@ function selectExpressionDesire(desireMemories, contextSummary) {
   }
   
   const currentTime = Date.now();
-  
-  // 计算每个欲望的优先级分数
-  const desiresWithPriority = desireMemories.map(desire => ({
+
+  // 计算每个欲望的优先级分数（含相关性）
+  const desiresWithPriority = desireMemories.map((desire) => ({
     desire,
-    priority: calculateDesirePriority(desire, currentTime),
-    text: desire.text || ''
+    priority: calculateDesirePriority(desire, currentTime, contextSummary),
+    text: desire.text || '',
   }));
-  
+
   // 按优先级降序排序
   desiresWithPriority.sort((a, b) => b.priority - a.priority);
-  
-  // 选择前3个高优先级的欲望
-  const topDesires = desiresWithPriority.slice(0, 3);
-  
-  // 如果有高优先级欲望（优先级>0.5），直接选择最高的
-  const highPriorityDesire = topDesires.find(d => d.priority > 0.5);
+
+  // 取前若干条，按表达阈值决定是否直接表达
+  const topDesires = desiresWithPriority.slice(0, 5);
+  const highPriorityDesire = topDesires.find((d) => d.priority > EXPRESSION_THRESHOLD);
   if (highPriorityDesire) {
-    console.info(`[Aris][proactive] 选择高优先级表达欲望：${highPriorityDesire.text.slice(0, 50)}… 优先级：${highPriorityDesire.priority.toFixed(2)}`);
+    console.info(`[Aris][proactive] 选择高优先级表达欲望（阈值=${EXPRESSION_THRESHOLD}）：${highPriorityDesire.text.slice(0, 50)}… 优先级：${highPriorityDesire.priority.toFixed(2)}`);
     return highPriorityDesire.desire;
   }
-  
-  // 否则返回null，让LLM决定
+
+  // 否则返回 null，走 LLM 生成
   return null;
 }
 

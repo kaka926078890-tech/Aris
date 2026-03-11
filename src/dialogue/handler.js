@@ -298,6 +298,19 @@ const NOT_NAME_PHRASES = new Set([
   '改不动了', '卡住了', '不行', '没办法', '错了', '不对',
 ]);
 
+/**
+ * 将消息的 created_at（Unix 秒）格式化为可读时间，供 LLM 判断两次对话的时间差
+ * 同一天显示「今天 HH:mm」，否则显示「M月D日 HH:mm」
+ */
+function formatMessageTime(createdAt) {
+  if (createdAt == null) return '';
+  const date = new Date(typeof createdAt === 'number' ? createdAt * 1000 : new Date(createdAt).getTime());
+  const today = new Date();
+  const isToday = date.getDate() === today.getDate() && date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear();
+  const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return isToday ? `今天 ${timeStr}` : `${date.getMonth() + 1}月${date.getDate()}日 ${timeStr}`;
+}
+
 /** 从检索到的记忆文本中提取「用户名字」，用于注入到【用户曾告知的身份与要求】 */
 function extractIdentityFromMemories(memories) {
   if (!Array.isArray(memories) || memories.length === 0) return '';
@@ -371,11 +384,19 @@ async function buildPromptContext(sessionId, query, recent, crossSession, requir
   }
   const corrections = correctionsList.length ? correctionsList.join('\n') : '';
   const contextWindow = recent
-    .map((r) => `${r.role === 'user' ? '用户' : 'Aris'}: ${r.content}`)
+    .map((r) => {
+      const who = r.role === 'user' ? '用户' : 'Aris';
+      const timeLabel = formatMessageTime(r.created_at) ? ` (${formatMessageTime(r.created_at)}) ` : ' ';
+      return `${who}${timeLabel}: ${r.content}`;
+    })
     .join('\n');
   const MAX_CROSS_SESSION_CHARS = 2800;
   const crossSessionRaw = crossSession
-    .map((r) => `${r.role === 'user' ? '用户' : 'Aris'}: ${r.content}`)
+    .map((r) => {
+      const who = r.role === 'user' ? '用户' : 'Aris';
+      const timeLabel = formatMessageTime(r.created_at) ? ` (${formatMessageTime(r.created_at)}) ` : ' ';
+      return `${who}${timeLabel}: ${r.content}`;
+    })
     .join('\n');
   const crossSessionDialogue = crossSessionRaw.length > MAX_CROSS_SESSION_CHARS
     ? crossSessionRaw.slice(-MAX_CROSS_SESSION_CHARS) + '…'
@@ -474,12 +495,20 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   );
   const corrections = correctionsList.length ? correctionsList.join('\n') : '';
   const contextWindow = recent
-    .map((r) => `${r.role === 'user' ? '用户' : 'Aris'}: ${r.content}`)
+    .map((r) => {
+      const who = r.role === 'user' ? '用户' : 'Aris';
+      const timeLabel = formatMessageTime(r.created_at) ? ` (${formatMessageTime(r.created_at)}) ` : ' ';
+      return `${who}${timeLabel}: ${r.content}`;
+    })
     .join('\n');
 
   const MAX_CROSS_SESSION_CHARS = 2800;
   const crossSessionRaw = crossSession
-    .map((r) => `${r.role === 'user' ? '用户' : 'Aris'}: ${r.content}`)
+    .map((r) => {
+      const who = r.role === 'user' ? '用户' : 'Aris';
+      const timeLabel = formatMessageTime(r.created_at) ? ` (${formatMessageTime(r.created_at)}) ` : ' ';
+      return `${who}${timeLabel}: ${r.content}`;
+    })
     .join('\n');
   const crossSessionDialogue = crossSessionRaw.length > MAX_CROSS_SESSION_CHARS
     ? crossSessionRaw.slice(-MAX_CROSS_SESSION_CHARS) + '…'

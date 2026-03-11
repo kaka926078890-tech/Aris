@@ -63,7 +63,7 @@ const CONTEXT_TEMPLATE = `以下是你需要参考的上下文，用于保持连
 【你上一次的状态与时间感】
 {last_state_and_subjective_time}
 
-【当前会话最近几轮】
+【当前会话最近几轮】（每条消息旁括号内为该条发送时间，回答「过了多久」「摸鱼多久」等时间差问题时请据此计算）
 {context_window}
 
 【行为规则】
