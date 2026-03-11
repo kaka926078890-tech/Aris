@@ -344,7 +344,7 @@ if (container) {
       sendUserMessage();
     });
     inputEl.addEventListener('paste', (e) => {
-      let text = (e.clipboardData && e.clipboardData.getData('text/plain')) || '';
+      const text = (e.clipboardData && e.clipboardData.getData('text/plain')) || '';
       if (text) {
         e.preventDefault();
         const start = inputEl.selectionStart ?? 0;
@@ -352,17 +352,8 @@ if (container) {
         const value = inputEl.value || '';
         inputEl.value = value.slice(0, start) + text + value.slice(end);
         inputEl.selectionStart = inputEl.selectionEnd = start + text.length;
-        return;
       }
-      e.preventDefault();
-      navigator.clipboard.readText().then((clipText) => {
-        if (!clipText) return;
-        const start = inputEl.selectionStart ?? 0;
-        const end = inputEl.selectionEnd ?? 0;
-        const value = inputEl.value || '';
-        inputEl.value = value.slice(0, start) + clipText + value.slice(end);
-        inputEl.selectionStart = inputEl.selectionEnd = start + clipText.length;
-      }).catch(() => {});
+      // 当 clipboardData 无文本时不阻止默认粘贴，交给浏览器/Electron 处理，避免 Electron 下无法粘贴
     });
   }
   if (stopBtn) {

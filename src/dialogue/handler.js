@@ -15,7 +15,7 @@ const { getActiveWindowTitle } = require('../context/windowTitle.js');
 const { loadUserIdentity, updateUserIdentityFromMessage, appendRequirementToIdentity } = require('./userIdentity.js');
 const { listMyFiles, readFile, writeFile, deleteFile } = require('../agentFiles.js');
 const { getCurrentTime } = require('../context/currentTime.js');
-const { readState, writeState, getSubjectiveTimeDescription } = require('../context/arisState.js');
+const { readState, writeState, getSubjectiveTimeDescription, readProactiveState, writeProactiveState } = require('../context/arisState.js');
 const { jsonrepair } = require('jsonrepair');
 const { runTerminalCommand } = require('../terminal.js');
 const { gitStatus, gitDiff, gitLog, gitAdd, gitCommit, gitPull, gitPush, gitReset } = require('../gitTools.js');
@@ -298,6 +298,14 @@ const NOT_NAME_PHRASES = new Set([
   '改不动了', '卡住了', '不行', '没办法', '错了', '不对',
 ]);
 
+/** 用户表达「下班」的短语，用于标记今日已下班（触发自升级条件之一） */
+const OFF_WORK_PHRASES = ['下班了', '下班', '先下了', '下了', '撤了', '今天先这样'];
+function isOffWorkMessage(text) {
+  if (!text || typeof text !== 'string') return false;
+  const t = text.trim();
+  return OFF_WORK_PHRASES.some((p) => t.includes(p));
+}
+
 /**
  * 将消息的 created_at（Unix 秒）格式化为可读时间，供 LLM 判断两次对话的时间差
  * 同一天显示「今天 HH:mm」，否则显示「M月D日 HH:mm」
@@ -463,6 +471,12 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     ? (recentBefore.filter((r) => r.role === 'assistant').pop() || {}).content
     : null;
   await append(sessionId, 'user', userContent);
+
+  // 用户发消息：重置未回应次数与低功耗，恢复正常 proactive
+  writeProactiveState({ proactive_no_reply_count: 0, low_power_mode: false });
+  if (isOffWorkMessage(userContent)) {
+    writeProactiveState({ today_off_work: true });
+  }
 
   const query = userContent + (lastAssistantContent ? ' ' + lastAssistantContent : '');
   const [memories, correctionsList, recent, crossSession, requirementsFromVector, windowTitle] = await Promise.all([

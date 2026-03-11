@@ -6,6 +6,76 @@ function getStatePath() {
   return path.join(getUserDataPath(), 'aris_state.json');
 }
 
+/** proactive/低功耗/自升级 状态文件路径 */
+function getProactiveStatePath() {
+  return path.join(getUserDataPath(), 'aris_proactive_state.json');
+}
+
+/** 当前自然日 YYYY-MM-DD（本地） */
+function getTodayDateStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * 读取 proactive 状态。按自然日重置：若 state_date 不是今天，则 today_off_work、self_upgrade_done_today 置 false 并写回。
+ * @returns {{ state_date: string, today_off_work: boolean, self_upgrade_done_today: boolean, proactive_no_reply_count: number, low_power_mode: boolean }}
+ */
+function readProactiveState() {
+  const today = getTodayDateStr();
+  const defaults = {
+    state_date: today,
+    today_off_work: false,
+    self_upgrade_done_today: false,
+    proactive_no_reply_count: 0,
+    low_power_mode: false,
+  };
+  try {
+    const p = getProactiveStatePath();
+    if (!fs.existsSync(p)) return defaults;
+    const raw = fs.readFileSync(p, 'utf8');
+    const data = JSON.parse(raw);
+    const state = {
+      state_date: data.state_date || today,
+      today_off_work: Boolean(data.today_off_work),
+      self_upgrade_done_today: Boolean(data.self_upgrade_done_today),
+      proactive_no_reply_count: Math.min(3, Math.max(0, Number(data.proactive_no_reply_count) || 0)),
+      low_power_mode: Boolean(data.low_power_mode),
+    };
+    if (state.state_date !== today) {
+      state.state_date = today;
+      state.today_off_work = false;
+      state.self_upgrade_done_today = false;
+      const dir = path.dirname(p);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(p, JSON.stringify(state, null, 2), 'utf8');
+    }
+    return state;
+  } catch (_) {
+    return defaults;
+  }
+}
+
+/**
+ * 写入 proactive 状态（部分更新，其余保留）。
+ * @param {{ state_date?: string, today_off_work?: boolean, self_upgrade_done_today?: boolean, proactive_no_reply_count?: number, low_power_mode?: boolean }} updates
+ */
+function writeProactiveState(updates) {
+  try {
+    const current = readProactiveState();
+    const merged = { ...current, ...updates };
+    if (merged.proactive_no_reply_count != null) {
+      merged.proactive_no_reply_count = Math.min(3, Math.max(0, Number(merged.proactive_no_reply_count)));
+    }
+    const p = getProactiveStatePath();
+    const dir = path.dirname(p);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(merged, null, 2), 'utf8');
+  } catch (e) {
+    console.warn('[Aris][arisState] writeProactiveState failed', e.message);
+  }
+}
+
 function readState() {
   try {
     const p = getStatePath();
@@ -65,4 +135,13 @@ function getSubjectiveTimeDescription(lastActiveTimeIso) {
   return `现在是 ${nowStr}。距离你上次活跃已过去 ${deltaMin} 分钟。${body}`;
 }
 
-module.exports = { getStatePath, readState, writeState, getSubjectiveTimeDescription };
+module.exports = {
+  getStatePath,
+  readState,
+  writeState,
+  getSubjectiveTimeDescription,
+  getProactiveStatePath,
+  getTodayDateStr,
+  readProactiveState,
+  writeProactiveState,
+};

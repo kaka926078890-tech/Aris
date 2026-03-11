@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { app, BrowserWindow, ipcMain, Menu, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, dialog, clipboard } = require('electron');
 const path = require('path');
 const { handleUserMessage, getPromptPreview } = require('./src/dialogue/handler.js');
 const { getActiveWindowTitle } = require('./src/context/windowTitle.js');

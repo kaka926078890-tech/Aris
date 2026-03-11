@@ -11,7 +11,8 @@ const { getActiveWindowTitle } = require('../context/windowTitle.js');
 const { append } = require('../store/conversations.js');
 const { addMemory, deleteMemoryById } = require('../memory/lancedb.js');
 const { embed } = require('../memory/embedding.js');
-const { readState, writeState, getSubjectiveTimeDescription } = require('../context/arisState.js');
+const { readState, writeState, getSubjectiveTimeDescription, readProactiveState, writeProactiveState } = require('../context/arisState.js');
+const { runSelfUpgrade } = require('./selfUpgrade.js');
 
 /** 表达阈值：优先级超过此值时才使用积累的表达欲望直接表达，否则走 LLM */
 const EXPRESSION_THRESHOLD = 0.5;
@@ -111,6 +112,10 @@ function selectExpressionDesire(desireMemories, contextSummary) {
 
 async function maybeProactiveMessage() {
   try {
+    const proactiveState = readProactiveState();
+    if (proactiveState.low_power_mode) {
+      return null;
+    }
     const sessionId = await getCurrentSessionId();
     const recent = await getRecent(sessionId, 10);
     const windowTitle = getActiveWindowTitle();
@@ -147,6 +152,12 @@ async function maybeProactiveMessage() {
         }
         
         if (!isDuplicate) {
+          const p = readProactiveState();
+          if (p.proactive_no_reply_count === 2 && !p.self_upgrade_done_today) {
+            await runSelfUpgrade();
+            writeProactiveState({ self_upgrade_done_today: true, low_power_mode: true, proactive_no_reply_count: 0 });
+            return null;
+          }
           await append(sessionId, 'assistant', expressionText);
           const vec = await embed(`Aris 主动（积累表达）: ${expressionText}`);
           if (vec) await addMemory({ text: `Aris 主动（积累表达）: ${expressionText}`, vector: vec, type: 'aris_behavior' });
@@ -154,6 +165,8 @@ async function maybeProactiveMessage() {
             last_active_time: new Date().toISOString(),
             last_mental_state: expressionText.slice(0, 300),
           });
+          const nextCount = p.proactive_no_reply_count + 1;
+          writeProactiveState({ proactive_no_reply_count: nextCount, low_power_mode: nextCount >= 3 });
           console.info(`[Aris][proactive] 使用积累表达欲望：${expressionText.slice(0, 50)}…`);
           if (selectedDesire.id != null) {
             await deleteMemoryById(selectedDesire.id);
@@ -222,6 +235,12 @@ async function maybeProactiveMessage() {
         return null;
       }
     }
+    const pLine = readProactiveState();
+    if (pLine.proactive_no_reply_count === 2 && !pLine.self_upgrade_done_today) {
+      await runSelfUpgrade();
+      writeProactiveState({ self_upgrade_done_today: true, low_power_mode: true, proactive_no_reply_count: 0 });
+      return null;
+    }
     await append(sessionId, 'assistant', line);
     const vec = await embed(`Aris 主动: ${line}`);
     if (vec) await addMemory({ text: `Aris 主动: ${line}`, vector: vec, type: 'aris_behavior' });
@@ -229,6 +248,8 @@ async function maybeProactiveMessage() {
       last_active_time: new Date().toISOString(),
       last_mental_state: line.slice(0, 300),
     });
+    const nextCount = pLine.proactive_no_reply_count + 1;
+    writeProactiveState({ proactive_no_reply_count: nextCount, low_power_mode: nextCount >= 3 });
     console.info('[Aris][proactive] 已发送:', line.slice(0, 50) + (line.length > 50 ? '…' : ''));
     return line;
   } catch (e) {
