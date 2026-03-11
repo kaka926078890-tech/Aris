@@ -153,23 +153,55 @@ function trimToMaxBubbles() {
   }
 }
 
+const COPY_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const CHECK_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
+function makeCopyButton(contentEl) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'bubble-copy';
+  btn.setAttribute('aria-label', '复制');
+  btn.innerHTML = COPY_ICON_SVG;
+  btn.addEventListener('click', () => {
+    const text = (contentEl.textContent || '').trim();
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      btn.innerHTML = CHECK_ICON_SVG;
+      btn.setAttribute('aria-label', '已复制');
+      setTimeout(() => {
+        btn.innerHTML = COPY_ICON_SVG;
+        btn.setAttribute('aria-label', '复制');
+      }, 1200);
+    }).catch(() => {});
+  });
+  return btn;
+}
+
 function addBubble(role, content) {
+  const row = document.createElement('div');
+  row.className = role === 'user' ? 'bubble-row user-msg' : 'bubble-row assistant-msg';
   const div = document.createElement('div');
   div.className = role === 'user'
-    ? 'self-end bg-cyan-500/20 border border-cyan-500/40 rounded-lg px-3 py-2 text-sm text-cyan-100 max-w-[85%] min-w-0 overflow-hidden transition-opacity duration-300 bubble-content'
-    : 'self-start bg-black/50 border border-cyan-500/30 rounded-lg px-3 py-2 text-sm text-cyan-200 max-w-[85%] min-w-0 overflow-hidden transition-opacity duration-300 bubble-content';
+    ? 'bg-cyan-500/20 border border-cyan-500/40 rounded-lg px-3 py-2 text-sm text-cyan-100 min-w-0 overflow-hidden transition-opacity duration-300 bubble-content flex-1'
+    : 'bg-black/50 border border-cyan-500/30 rounded-lg px-3 py-2 text-sm text-cyan-200 min-w-0 overflow-hidden transition-opacity duration-300 bubble-content flex-1';
   div.textContent = formatBubbleContent(content);
-  bubblesEl.appendChild(div);
+  row.appendChild(div);
+  row.appendChild(makeCopyButton(div)); // 复制按钮在内容下方，悬停时显示
+  bubblesEl.appendChild(row);
   trimToMaxBubbles();
   updateBubbleOpacity();
   scrollToBottom();
 }
 
 function addStreamingBubble() {
+  const row = document.createElement('div');
+  row.className = 'bubble-row assistant-msg';
   const div = document.createElement('div');
-  div.className = 'self-start bg-black/50 border border-cyan-500/30 rounded-lg px-3 py-2 text-sm text-cyan-200 max-w-[85%] min-w-0 overflow-hidden transition-opacity duration-300 bubble-content';
+  div.className = 'bg-black/50 border border-cyan-500/30 rounded-lg px-3 py-2 text-sm text-cyan-200 min-w-0 overflow-hidden transition-opacity duration-300 bubble-content flex-1';
   div.textContent = '';
-  bubblesEl.appendChild(div);
+  row.appendChild(div);
+  row.appendChild(makeCopyButton(div)); // 复制按钮在内容下方，悬停时显示
+  bubblesEl.appendChild(row);
   trimToMaxBubbles();
   updateBubbleOpacity();
   scrollToBottom();
@@ -259,7 +291,7 @@ function sendUserMessage() {
         actions.forEach((action) => {
           createBlocksForAction(action).forEach((el) => container.appendChild(el));
         });
-        bubblesEl.insertBefore(container, streamingBubble);
+        bubblesEl.insertBefore(container, streamingBubble.parentElement);
         trimToMaxBubbles();
         updateBubbleOpacity();
         scrollToBottom();
@@ -311,16 +343,26 @@ if (container) {
       e.preventDefault();
       sendUserMessage();
     });
-    // 显式处理粘贴：Electron 透明无边框窗口下默认粘贴可能不生效
     inputEl.addEventListener('paste', (e) => {
-      const text = (e.clipboardData && e.clipboardData.getData('text/plain')) || '';
-      if (!text) return;
+      let text = (e.clipboardData && e.clipboardData.getData('text/plain')) || '';
+      if (text) {
+        e.preventDefault();
+        const start = inputEl.selectionStart ?? 0;
+        const end = inputEl.selectionEnd ?? 0;
+        const value = inputEl.value || '';
+        inputEl.value = value.slice(0, start) + text + value.slice(end);
+        inputEl.selectionStart = inputEl.selectionEnd = start + text.length;
+        return;
+      }
       e.preventDefault();
-      const start = inputEl.selectionStart ?? 0;
-      const end = inputEl.selectionEnd ?? 0;
-      const value = inputEl.value || '';
-      inputEl.value = value.slice(0, start) + text + value.slice(end);
-      inputEl.selectionStart = inputEl.selectionEnd = start + text.length;
+      navigator.clipboard.readText().then((clipText) => {
+        if (!clipText) return;
+        const start = inputEl.selectionStart ?? 0;
+        const end = inputEl.selectionEnd ?? 0;
+        const value = inputEl.value || '';
+        inputEl.value = value.slice(0, start) + clipText + value.slice(end);
+        inputEl.selectionStart = inputEl.selectionEnd = start + clipText.length;
+      }).catch(() => {});
     });
   }
   if (stopBtn) {

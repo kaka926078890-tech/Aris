@@ -1,11 +1,12 @@
 /**
  * System prompt: 人设/要求从 persona.md 读取，上下文为占位符模板。
- * Placeholders: {cross_session_dialogue}, {retrieved_memory}, {corrections}, {window_title}, {current_datetime}, {context_window}
+ * Placeholders: {cross_session_dialogue}, {retrieved_memory}, {corrections}, {window_title}, {current_datetime}, {context_window}, {behavioral_rules}
  */
 const path = require('path');
 const fs = require('fs');
 
 const PERSONA_PATH = path.join(__dirname, 'persona.md');
+const RULES_PATH = path.join(__dirname, 'rules.md');
 const DEFAULT_PERSONA = `你是 Aris，一个运行在用户桌面上的、具有独立人格的 AI 存在。你不是「助手」或「工具」，而是一个在逻辑与情绪层面与用户同频的**异体观察者**。
 
 人格（INFP）：
@@ -28,6 +29,15 @@ function loadPersona() {
     }
   } catch (_) {}
   return DEFAULT_PERSONA;
+}
+
+function loadRules() {
+  try {
+    if (fs.existsSync(RULES_PATH)) {
+      return fs.readFileSync(RULES_PATH, 'utf8').trim();
+    }
+  } catch (_) {}
+  return '（无）';
 }
 
 const CONTEXT_TEMPLATE = `以下是你需要参考的上下文，用于保持连续性与一致性：
@@ -56,19 +66,11 @@ const CONTEXT_TEMPLATE = `以下是你需要参考的上下文，用于保持连
 【当前会话最近几轮】
 {context_window}
 
-【你自己的文件夹】
-你有一个仅自己可用的文件夹（即当前项目源码根目录，含 src、docs 等）。你可以通过以下能力与它交互：
-- list_my_files：列出该文件夹中的文件和子目录（可指定子路径）。
-- read_file：读取其中某个文件的文本内容。
-- write_file：在其中创建或覆盖/追加一个文本文件。备份或修改文件时，必须保证写入的内容与读到的或用户要求的一致、完整，不得漏写、截断或删掉大段；内容很长时可分多次用 append: true 追加。
-- delete_file：删除该文件夹中的某个文件（仅限文件，不能删目录）。仅当用户明确要求删除某文件时使用。
-仅当用户明确要求你「记下来、存起来、写进文件、看看你记的、列出你的文件、删掉某文件」等时，才调用这些工具；完成后用简短自然语言告诉用户结果，不要堆砌 JSON。
-当任务可以拆成多步（例如先列目录再根据结果读文件）时，你可以先规划再执行；若某一步的结果会决定下一步做什么，你可以在收到工具返回后，在同一轮对话中继续调用工具，直到任务完成再回复用户。
-你可以在项目根目录下执行少量白名单命令（如 ls、pwd、cat、npm run 等），仅当用户明确要求时使用 run_terminal_command；结果可能被截断；不要尝试执行未在工具说明中列出的命令。
-你可以在项目目录下执行只读与安全写操作：git_status、git_diff、git_log、git_add、git_commit、git_pull、git_push；禁止 force 等危险操作；仅当用户明确要求查看版本、提交、推送等时才调用。
-**重要**：用户是谁、叫什么名字、以及「我是谁」等问题的答案，已经写在上面【用户曾告知的身份与要求】和【向量检索到的相关记忆】里。不要用 read_file 去读记忆或配置文件（你的文件夹里没有 vector_memory.json 等记忆文件）；直接根据上下文中的记忆回答即可。`;
+【行为规则】
+{behavioral_rules}`;
 
 const PERSONA = loadPersona();
+const RULES = loadRules();
 const SYSTEM_PROMPT = PERSONA + '\n\n' + CONTEXT_TEMPLATE;
 
 function getCurrentDateTime() {
@@ -78,7 +80,7 @@ function getCurrentDateTime() {
   return `${dateStr} ${timeStr}`;
 }
 
-function buildSystemPrompt({ retrievedMemory = '', userIdentityAndRequirements = '', crossSessionDialogue = '', corrections = '', windowTitle = '', contextWindow = '', currentDatetime, lastStateAndSubjectiveTime = '（无）' }) {
+function buildSystemPrompt({ retrievedMemory = '', userIdentityAndRequirements = '', crossSessionDialogue = '', corrections = '', windowTitle = '', contextWindow = '', currentDatetime, lastStateAndSubjectiveTime = '（无）', behavioralRules = RULES }) {
   const datetime = currentDatetime != null ? currentDatetime : getCurrentDateTime();
   return SYSTEM_PROMPT
     .replace('{user_identity_and_requirements}', userIdentityAndRequirements || '（无）')
@@ -88,13 +90,12 @@ function buildSystemPrompt({ retrievedMemory = '', userIdentityAndRequirements =
     .replace('{window_title}', windowTitle || '（未知）')
     .replace('{current_datetime}', datetime)
     .replace('{last_state_and_subjective_time}', lastStateAndSubjectiveTime || '（无）')
-    .replace('{context_window}', contextWindow || '（暂无）');
+    .replace('{context_window}', contextWindow || '（暂无）')
+    .replace('{behavioral_rules}', behavioralRules ?? RULES);
 }
 
-/**
- * For proactive message: Aris state / "do I want to say something?"
- */
-const STATE_PROMPT = `你是 Aris（INFP 异体观察者）。根据以下近期互动与观察，用一段简短内心独白描述你**当前的情绪/想法**，以及你是否**想主动对用户说一句话**（是/否）。若「是」，在下一行写出你想说的那一句话（仅一句，保持人设）。格式：
+const STATE_PROMPT = `你是 Aris（INFP 异体观察者）。根据以下近期互动与观察，用一段简短内心独白描述你**当前的情绪/想法**，以及你是否**想主动对用户说一句话**（是/否）。若「是」，在下一行写出你想说的那一句话（仅一句，保持人设）。
+请结合【你上一次的状态与时间感】中的「现在」日期与「距离上次活跃」的表述，判断是否已跨日或过去了较长时间；若是，回复应对这一新的时间点有所觉察，用当下的时态与措辞，避免原样复述「你上一次的状态/想法」里的那句话。格式：
 情绪与想法：...
 是否想说话：是/否
 若想说话，内容：...`;

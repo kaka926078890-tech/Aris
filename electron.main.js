@@ -1,13 +1,14 @@
 require('dotenv').config();
 const { app, BrowserWindow, ipcMain, Menu, dialog } = require('electron');
 const path = require('path');
-const { handleUserMessage } = require('./src/dialogue/handler.js');
+const { handleUserMessage, getPromptPreview } = require('./src/dialogue/handler.js');
 const { getActiveWindowTitle } = require('./src/context/windowTitle.js');
 const { exportToFile, importFromFile } = require('./src/store/backup.js');
 const { getAllSessions, getAllForSession, clearAllConversations, getCurrentSessionId } = require('./src/store/conversations.js');
 let mainWindow = null;
 let historyWindow = null;
 let memoryWindow = null;
+let promptWindow = null;
 /** 是否正在处理对话（流式生成中），用于串行化发送并避免 proactive 插入 */
 let dialogueBusy = false;
 /** 当前对话的 AbortController，用于用户点击「停止」时中断 */
@@ -118,6 +119,10 @@ function setupAppMenu() {
           label: '记忆管理器',
           click: () => openMemoryWindow(),
         },
+        {
+          label: 'API 提示词预览',
+          click: () => openPromptWindow(),
+        },
       ],
     },
     ...(!isMac ? [{
@@ -174,6 +179,25 @@ function openMemoryWindow() {
   });
   memoryWindow.loadFile(path.join(__dirname, 'src', 'renderer', 'memory.html'));
   memoryWindow.on('closed', () => { memoryWindow = null; });
+}
+
+function openPromptWindow() {
+  if (promptWindow && !promptWindow.isDestroyed()) {
+    promptWindow.focus();
+    return;
+  }
+  promptWindow = new BrowserWindow({
+    width: 720,
+    height: 640,
+    parent: mainWindow || undefined,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.prompt.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  promptWindow.loadFile(path.join(__dirname, 'src', 'renderer', 'prompt.html'));
+  promptWindow.on('closed', () => { promptWindow = null; });
 }
 
 function startProactiveInterval() {
@@ -297,6 +321,10 @@ ipcMain.handle('history:getConversation', async (_, sessionId) => {
 
 ipcMain.handle('history:clearAll', async () => {
   await clearAllConversations();
+});
+
+ipcMain.handle('prompt:getPreview', async (_, userMessage) => {
+  return getPromptPreview(userMessage);
 });
 
 ipcMain.handle('memory:clearAll', async () => {

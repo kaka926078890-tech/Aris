@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://cdn.tailwindcss.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com;" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <title>API 提示词预览 - Aris</title>
+  <style>
+    .no-drag { -webkit-app-region: no-drag; }
+    #promptText { white-space: pre-wrap; word-break: break-word; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-200 flex flex-col h-screen overflow-hidden">
+  <header class="flex-shrink-0 flex items-center justify-between gap-2 border-b border-cyan-500/30 px-4 py-2 no-drag">
+    <h1 class="text-lg font-medium text-cyan-200">API 提示词预览</h1>
+    <div class="flex items-center gap-2">
+      <button id="copyBtn" class="text-xs px-3 py-1.5 rounded border border-cyan-500/50 text-cyan-300 hover:bg-cyan-500/20 disabled:opacity-50" disabled>复制全部</button>
+    </div>
+  </header>
+  <main class="flex-1 min-h-0 flex flex-col overflow-hidden">
+    <div class="flex-shrink-0 px-4 py-2 border-b border-cyan-500/20 no-drag">
+      <label class="block text-xs text-slate-400 mb-1">要发送的话（据此生成发给 API 的完整提示词）</label>
+      <div class="flex gap-2">
+        <textarea id="userInput" rows="2" placeholder="输入一句话…" class="flex-1 min-w-0 bg-black/40 text-cyan-100 border border-cyan-500/40 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-400 resize-none"></textarea>
+        <button id="generateBtn" class="self-end px-3 py-2 text-xs rounded border border-cyan-500/50 text-cyan-300 hover:bg-cyan-500/20 focus:outline-none focus:ring-1 focus:ring-cyan-400">生成提示词</button>
+      </div>
+    </div>
+    <div id="loading" class="hidden flex-1 flex items-center justify-center text-slate-500">生成中…</div>
+    <div id="content" class="hidden flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div id="promptWrap" class="flex-1 min-h-0 overflow-auto px-4 py-3">
+        <pre id="promptText" class="text-sm text-slate-300 font-sans whitespace-pre-wrap break-words m-0"></pre>
+      </div>
+    </div>
+    <div id="empty" class="flex-1 flex items-center justify-center text-slate-500 px-4">输入要发送的话后点击「生成提示词」</div>
+    <div id="error" class="hidden flex-1 flex items-center justify-center text-red-400 px-4"></div>
+  </main>
+  <script>
+    const userInput = document.getElementById('userInput');
+    const generateBtn = document.getElementById('generateBtn');
+    const loadingEl = document.getElementById('loading');
+    const contentEl = document.getElementById('content');
+    const emptyEl = document.getElementById('empty');
+    const promptTextEl = document.getElementById('promptText');
+    const errorEl = document.getElementById('error');
+    const copyBtn = document.getElementById('copyBtn');
+
+    async function generate() {
+      const text = (userInput.value || '').trim();
+      if (!text) {
+        errorEl.textContent = '请先输入要发送的话';
+        errorEl.classList.remove('hidden');
+        contentEl.classList.add('hidden');
+        emptyEl.classList.add('hidden');
+        return;
+      }
+      loadingEl.classList.remove('hidden');
+      contentEl.classList.add('hidden');
+      emptyEl.classList.add('hidden');
+      errorEl.classList.add('hidden');
+      try {
+        const data = await window.promptApi.getPreview(text);
+        if (data && data.promptText != null) {
+          promptTextEl.textContent = data.promptText;
+          contentEl.classList.remove('hidden');
+          copyBtn.disabled = false;
+        } else {
+          promptTextEl.textContent = '';
+          emptyEl.classList.remove('hidden');
+        }
+      } catch (e) {
+        errorEl.textContent = e.message || '生成失败';
+        errorEl.classList.remove('hidden');
+      } finally {
+        loadingEl.classList.add('hidden');
+      }
+    }
+
+    copyBtn.addEventListener('click', async () => {
+      const text = promptTextEl.textContent || '';
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        copyBtn.textContent = '已复制';
+        copyBtn.disabled = true;
+        setTimeout(() => {
+          copyBtn.textContent = '复制全部';
+          copyBtn.disabled = false;
+        }, 1500);
+      } catch (_) {
+        copyBtn.textContent = '复制失败';
+      }
+    });
+
+    generateBtn.addEventListener('click', () => generate());
+    userInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        generate();
+      }
+    });
+  </script>
+</body>
+</html>
