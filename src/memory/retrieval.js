@@ -7,6 +7,12 @@ function getText(row) {
   return typeof t === 'string' ? t : String(t ?? '');
 }
 
+function getMetadata(row) {
+  if (row == null) return {};
+  const m = row.metadata ?? row.Metadata ?? (typeof row.get === 'function' ? row.get('metadata') : undefined);
+  return typeof m === 'object' && m !== null ? m : {};
+}
+
 /**
  * Semantic retrieval: embed query, search LanceDB, return top-k (user + Aris side).
  */
@@ -24,7 +30,11 @@ async function retrieve(queryText, limit = 10) {
     return [];
   }
   const out = rows
-    .map((r) => ({ ...r, text: getText(r) }))
+    .map((r) => ({ 
+      ...r, 
+      text: getText(r),
+      metadata: getMetadata(r)
+    }))
     .filter((r) => r.text != null && String(r.text).trim() !== '');
 
   if (out.length > 0) {
@@ -49,13 +59,9 @@ async function retrieveByTypes(types, limit = 10) {
   if (!Array.isArray(types) || types.length === 0) return [];
   
   try {
-    const texts = await getRecentByTypes(types, limit);
-    return texts.map((text, index) => ({
-      id: Date.now() + index,
-      text: text,
-      type: types[0], // 使用第一个类型作为标记
-      created_at: Date.now() - index * 1000, // 模拟时间戳
-    }));
+    // 使用 getRecentByTypes 获取完整的记忆记录（包括 metadata）
+    const memories = await getRecentByTypes(types, limit);
+    return memories;
   } catch (e) {
     console.warn('[Aris][memory] retrieveByTypes failed:', e && e.message ? e.message : e);
     return [];

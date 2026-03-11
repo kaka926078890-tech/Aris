@@ -1,7 +1,7 @@
 /**
  * LanceDB for vector memory. ESM package used via dynamic import.
- * Table: memory (id, text, vector, type, created_at)
- * Types: user_preference | user_view | correction | aris_thought | aris_emotion | aris_behavior
+ * Table: memory (id, text, vector, type, created_at, metadata)
+ * Types: user_preference | user_view | correction | aris_thought | aris_emotion | aris_behavior | aris_expression_desire
  */
 const path = require('path');
 
@@ -44,6 +44,7 @@ async function getTable(vectorDimension) {
       vector: Array(vectorDimension).fill(0),
       type: 'user_preference',
       created_at: Date.now(),
+      metadata: {},
     },
   ]);
   const all = await table.query().limit(1).toArray();
@@ -51,7 +52,7 @@ async function getTable(vectorDimension) {
   return table;
 }
 
-async function addMemory({ text, vector, type }) {
+async function addMemory({ text, vector, type, metadata }) {
   if (!vector || !Array.isArray(vector) || vector.length === 0) return;
   const tbl = await getTable(vector.length);
   const row = {
@@ -60,9 +61,35 @@ async function addMemory({ text, vector, type }) {
     vector,
     type: String(type || 'user_preference'),
     created_at: Date.now(),
+    metadata: metadata || {},
   };
-  await tbl.add([row]);
-  console.info(`[Aris][memory] add: type=${row.type} textLen=${row.text.length} dim=${vector.length}`);
+  try {
+    await tbl.add([row]);
+  } catch (e) {
+    if (row.metadata && Object.keys(row.metadata).length > 0) {
+      delete row.metadata;
+      await tbl.add([row]);
+      console.info(`[Aris][memory] add (no metadata): type=${row.type} textLen=${row.text.length} dim=${vector.length}`);
+      return;
+    }
+    throw e;
+  }
+  console.info(`[Aris][memory] add: type=${row.type} textLen=${row.text.length} dim=${vector.length} metadata=${JSON.stringify(row.metadata)}`);
+}
+
+/**
+ * 按 id 删除一条记忆（用于表达后移除已使用的表达欲望，避免重复）
+ */
+async function deleteMemoryById(id) {
+  if (id == null || id === '') return;
+  await getLance();
+  if (!table) return;
+  try {
+    await table.delete(`id = ${id}`);
+    console.info(`[Aris][memory] delete: id=${id}`);
+  } catch (e) {
+    console.warn('[Aris][memory] deleteMemoryById failed:', e && e.message ? e.message : e);
+  }
 }
 
 async function search(queryVector, limit = 10) {
@@ -81,6 +108,7 @@ async function listAllMeta(limit = 5000) {
     text: r.text,
     type: r.type,
     created_at: r.created_at,
+    metadata: r.metadata || {},
   })).filter((r) => r.text != null && String(r.text).trim() !== '');
 }
 
@@ -94,8 +122,7 @@ async function getRecentByTypes(types, limit = 10) {
   return rows
     .filter((r) => set.has(String(r.type || '')))
     .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
-    .slice(0, limit)
-    .map((r) => r.text);
+    .slice(0, limit);
 }
 
 async function getStats(sampleLimit = 100000) {
@@ -144,6 +171,7 @@ async function exportAll() {
     vector: Array.isArray(r.vector) ? r.vector : (r.vector && r.vector.length != null ? Array.from(r.vector) : []),
     type: r.type,
     created_at: r.created_at,
+    metadata: r.metadata || {},
   })).filter((r) => r.vector && r.vector.length > 0);
 }
 
@@ -184,6 +212,7 @@ async function resetAndImport(records) {
       text: r.text,
       vector: r.vector,
       type: r.type,
+      metadata: r.metadata || {},
     });
   }
 }
@@ -193,4 +222,4 @@ function getLanceDbPath() {
   return path.join(userDataPath, 'lancedb');
 }
 
-module.exports = { addMemory, search, listAllMeta, getRecentByTypes, getStats, getTable, getLance, exportAll, resetLanceDb, resetAndImport, getLanceDbPath };
+module.exports = { addMemory, search, listAllMeta, getRecentByTypes, getStats, getTable, getLance, exportAll, resetLanceDb, resetAndImport, getLanceDbPath, deleteMemoryById };

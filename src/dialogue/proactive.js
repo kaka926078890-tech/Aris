@@ -9,7 +9,7 @@ const { getCurrentSessionId } = require('../store/conversations.js');
 const { retrieve, retrieveByTypes } = require('../memory/retrieval.js');
 const { getActiveWindowTitle } = require('../context/windowTitle.js');
 const { append } = require('../store/conversations.js');
-const { addMemory } = require('../memory/lancedb.js');
+const { addMemory, deleteMemoryById } = require('../memory/lancedb.js');
 const { embed } = require('../memory/embedding.js');
 const { readState, writeState, getSubjectiveTimeDescription } = require('../context/arisState.js');
 
@@ -116,11 +116,9 @@ async function maybeProactiveMessage() {
             last_mental_state: expressionText.slice(0, 300),
           });
           console.info(`[Aris][proactive] 使用积累表达欲望：${expressionText.slice(0, 50)}…`);
-          
-          // 表达后删除该欲望记录，避免重复表达
-          // 注意：这里需要实现删除逻辑，但当前框架可能不支持直接删除记忆
-          // 暂时保留，后续可以添加标记或移动到已表达列表
-          
+          if (selectedDesire.id != null) {
+            await deleteMemoryById(selectedDesire.id);
+          }
           return expressionText;
         }
       }

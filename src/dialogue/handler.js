@@ -304,7 +304,7 @@ function extractIdentityFromMemories(memories) {
   const seen = new Set();
   for (const m of memories) {
     const text = typeof m.text === 'string' ? m.text : String(m?.text ?? '');
-    const match = text.match(/你是[「\\\"]?\\s*([^\\s」\\\"，。！？、]{1,20})[」\\\"]?/);
+    const match = text.match(/你是[「\\\"]?\s*([^\s」\\\"，。！？、]{1,20})[」\\\"]?/);
     const candidate = match && match[1] ? match[1].trim() : '';
     if (candidate && !NOT_NAME_PHRASES.has(candidate) && !seen.has(candidate)) {
       seen.add(candidate);
@@ -362,28 +362,28 @@ async function buildPromptContext(sessionId, query, recent, crossSession, requir
     : [];
   const userIdentityAndRequirements = [identityFromFile, identityFromRetrieved, ...requirementTexts]
     .filter(Boolean)
-    .join('\\n---\\n') || '';
+    .join('\n---\n') || '';
   const MAX_MEMORY_CHARS = 3200;
   let retrievedMemory = '';
   if (memories.length > 0) {
-    const raw = memories.map((m) => m.text).join('\\n---\\n');
+    const raw = memories.map((m) => m.text).join('\n---\n');
     retrievedMemory = raw.length > MAX_MEMORY_CHARS ? raw.slice(0, MAX_MEMORY_CHARS) + '…' : raw;
   }
-  const corrections = correctionsList.length ? correctionsList.join('\\n') : '';
+  const corrections = correctionsList.length ? correctionsList.join('\n') : '';
   const contextWindow = recent
     .map((r) => `${r.role === 'user' ? '用户' : 'Aris'}: ${r.content}`)
-    .join('\\n');
+    .join('\n');
   const MAX_CROSS_SESSION_CHARS = 2800;
   const crossSessionRaw = crossSession
     .map((r) => `${r.role === 'user' ? '用户' : 'Aris'}: ${r.content}`)
-    .join('\\n');
+    .join('\n');
   const crossSessionDialogue = crossSessionRaw.length > MAX_CROSS_SESSION_CHARS
     ? crossSessionRaw.slice(-MAX_CROSS_SESSION_CHARS) + '…'
     : crossSessionRaw;
   const state = readState();
   const timeDesc = getSubjectiveTimeDescription(state?.last_active_time ?? null);
   const lastStateLine = state?.last_mental_state ? `你上一次的状态/想法是：${state.last_mental_state}` : '';
-  const lastStateAndSubjectiveTime = [timeDesc, lastStateLine].filter(Boolean).join('\\n') || '（无）';
+  const lastStateAndSubjectiveTime = [timeDesc, lastStateLine].filter(Boolean).join('\n') || '（无）';
   const systemPrompt = buildSystemPrompt({
     retrievedMemory,
     userIdentityAndRequirements: userIdentityAndRequirements || '（无）',
@@ -416,12 +416,18 @@ async function getPromptPreview(userMessage) {
     getRecentByTypes(['user_requirement'], 10),
     Promise.resolve(getActiveWindowTitle()),
   ]);
-  const { systemPrompt, messages } = await buildPromptContext(sessionId, query, recentForBuild, crossSession, requirementsFromVector, windowTitle);
+  
+  // 提取文本内容
+  const requirementTexts = Array.isArray(requirementsFromVector) && requirementsFromVector.length > 0
+    ? requirementsFromVector.map((r) => (typeof r === 'string' ? r : r?.text ?? r)).filter(Boolean)
+    : [];
+  
+  const { systemPrompt, messages } = await buildPromptContext(sessionId, query, recentForBuild, crossSession, requirementTexts, windowTitle);
   const dialoguePart = messages
     .filter((m) => m.role !== 'system')
     .map((m) => (m.role === 'user' ? '用户' : 'Aris') + ': ' + (m.content || ''))
-    .join('\\n\\n');
-  const promptText = '【系统】\\n' + systemPrompt + '\\n\\n【对话】\\n' + dialoguePart;
+    .join('\n\n');
+  const promptText = '【系统】\n' + systemPrompt + '\n\n【对话】\n' + dialoguePart;
   return { systemPrompt, messages, promptText };
 }
 
@@ -454,27 +460,27 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     : [];
   const userIdentityAndRequirements = [identityFromFile, identityFromRetrieved, ...requirementTexts]
     .filter(Boolean)
-    .join('\\n---\\n') || '';
+    .join('\n---\n') || '';
 
   const MAX_MEMORY_CHARS = 3200;
   let retrievedMemory = '';
   if (memories.length > 0) {
-    const raw = memories.map((m) => m.text).join('\\n---\\n');
+    const raw = memories.map((m) => m.text).join('\n---\n');
     retrievedMemory = raw.length > MAX_MEMORY_CHARS ? raw.slice(0, MAX_MEMORY_CHARS) + '…' : raw;
   }
   const firstSnippet = memories.length ? String(memories[0].text || '').slice(0, 80) : '';
   console.info(
     `[Aris][memory] retrieve: queryLen=${query.length} hits=${memories.length} injectedChars=${retrievedMemory.length} first=\"${firstSnippet}…\"`
   );
-  const corrections = correctionsList.length ? correctionsList.join('\\n') : '';
+  const corrections = correctionsList.length ? correctionsList.join('\n') : '';
   const contextWindow = recent
     .map((r) => `${r.role === 'user' ? '用户' : 'Aris'}: ${r.content}`)
-    .join('\\n');
+    .join('\n');
 
   const MAX_CROSS_SESSION_CHARS = 2800;
   const crossSessionRaw = crossSession
     .map((r) => `${r.role === 'user' ? '用户' : 'Aris'}: ${r.content}`)
-    .join('\\n');
+    .join('\n');
   const crossSessionDialogue = crossSessionRaw.length > MAX_CROSS_SESSION_CHARS
     ? crossSessionRaw.slice(-MAX_CROSS_SESSION_CHARS) + '…'
     : crossSessionRaw;
@@ -482,7 +488,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   const state = readState();
   const timeDesc = getSubjectiveTimeDescription(state?.last_active_time ?? null);
   const lastStateLine = state?.last_mental_state ? `你上一次的状态/想法是：${state.last_mental_state}` : '';
-  const lastStateAndSubjectiveTime = [timeDesc, lastStateLine].filter(Boolean).join('\\n') || '（无）';
+  const lastStateAndSubjectiveTime = [timeDesc, lastStateLine].filter(Boolean).join('\n') || '（无）';
 
   const systemPrompt = buildSystemPrompt({
     retrievedMemory,
@@ -562,12 +568,12 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
 
   const userPart = userContent.slice(0, 300);
   const arisPart = reply.slice(0, 500);
-  const pairText = `用户: ${userPart}\\nAris: ${arisPart}`;
+  const pairText = `用户: ${userPart}\nAris: ${arisPart}`;
   const vec = await embed(pairText);
   if (vec) await addMemory({ text: pairText, vector: vec, type: 'dialogue_turn' });
 
   // 从回复中解析【情感摘要】并写入 aris_emotion，供 proactive 使用
-  const emotionMatch = (reply || '').match(/【情感摘要】\\s*([^\\n]+(?:\\n[^\\n]+)?)/);
+  const emotionMatch = (reply || '').match(/【情感摘要】\s*([^\n]+(?:\n[^\n]+)?)/);
   if (emotionMatch && emotionMatch[1]) {
     const emotionText = emotionMatch[1].trim();
     if (emotionText.length > 0 && emotionText.length <= 500) {
@@ -577,13 +583,13 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   }
 
   // 从回复中解析【表达欲望】并写入 aris_expression_desire，供 proactive 使用
-  const expressionDesireMatch = (reply || '').match(/【表达欲望】\\s*([^\\n]+(?:\\n[^\\n]+)?)/);
+  const expressionDesireMatch = (reply || '').match(/【表达欲望】\s*([^\n]+(?:\n[^\n]+)?)/);
   if (expressionDesireMatch && expressionDesireMatch[1]) {
     const desireText = expressionDesireMatch[1].trim();
     if (desireText.length > 0 && desireText.length <= 500) {
       // 尝试提取强度评分
       let intensity = 3; // 默认值
-      const intensityMatch = desireText.match(/强度评分：\\s*(\\d+)/);
+      const intensityMatch = desireText.match(/强度评分：\s*(\d+)/);
       if (intensityMatch && intensityMatch[1]) {
         const parsed = parseInt(intensityMatch[1], 10);
         if (!isNaN(parsed) && parsed >= 1 && parsed <= 5) {
@@ -592,7 +598,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
       }
       
       // 移除强度评分部分，只保留表达内容
-      const cleanDesireText = desireText.replace(/强度评分：\\s*\\d+.*$/, '').trim();
+      const cleanDesireText = desireText.replace(/强度评分：\s*\d+.*$/, '').trim();
       
       if (cleanDesireText.length > 0) {
         const desireVec = await embed(cleanDesireText);
