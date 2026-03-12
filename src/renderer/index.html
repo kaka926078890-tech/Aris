@@ -40,10 +40,9 @@
     .input-area { background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(34, 211, 238, 0.25); border-radius: 12px; transition: border-color 0.2s ease, box-shadow 0.2s ease; flex-wrap: nowrap; }
     .input-area:focus-within { border-color: rgba(34, 211, 238, 0.5); box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.15); }
     #dialogue-input::placeholder { color: rgba(148, 163, 184, 0.8); }
-    .btn-stop { min-width: 72px; height: 40px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid rgba(248, 113, 113, 0.5); border-radius: 10px; cursor: pointer; color: rgb(248, 113, 113); background: rgba(248, 113, 113, 0.15); font-size: 13px; font-weight: 500; transition: background 0.2s ease, border-color 0.2s ease; -webkit-app-region: no-drag; }
-    .btn-stop:hover { background: rgba(248, 113, 113, 0.28); border-color: rgba(248, 113, 113, 0.8); color: rgb(254, 202, 202); }
-    .btn-stop:focus { outline: none; box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.4); }
-    .btn-stop.is-hidden { visibility: hidden; pointer-events: none; background: transparent; border-color: transparent; color: transparent; min-width: 72px; }
+    .btn-stop { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; padding: 0 12px; height: 44px; border: 1px solid #ef4444; border-radius: 8px; cursor: pointer; color: #fff; background: #dc2626; font-size: 14px; font-weight: 500; -webkit-app-region: no-drag; white-space: nowrap; }
+    .btn-stop:hover { background: #b91c1c; }
+    .btn-stop.is-hidden { display: none !important; }
   </style>
 </head>
 <body class="flex flex-col h-full">
@@ -61,10 +60,7 @@
     <div class="w-full max-w-sm px-3 pt-3 pb-1 flex-shrink-0 pointer-events-auto no-drag flex flex-col gap-2">
       <div class="input-area flex gap-2 items-end p-2">
         <textarea id="dialogue-input" rows="1" placeholder="输入消息，Shift+Enter 换行…" class="flex-1 min-h-[44px] max-h-[120px] bg-transparent text-cyan-100 placeholder-slate-400 px-2 py-2.5 text-sm focus:outline-none resize-none overflow-y-auto"></textarea>
-        <button type="button" id="dialogue-stop" class="btn-stop is-hidden" title="停止生成" aria-label="停止生成">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-          <span>停止</span>
-        </button>
+        <button type="button" id="dialogue-stop" class="btn-stop is-hidden" title="停止生成" aria-label="停止生成">停止</button>
       </div>
     </div>
   </div>

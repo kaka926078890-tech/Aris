@@ -329,7 +329,8 @@ function setSending(v) {
     inputEl.disabled = !!v;
     inputEl.placeholder = v ? '生成中…' : '输入消息，Shift+Enter 换行…';
   }
-  if (stopBtn) stopBtn.classList.toggle('is-hidden', !v);
+  const btn = document.getElementById('dialogue-stop');
+  if (btn) btn.classList.toggle('is-hidden', !v);
 }
 
 function sendUserMessage() {
@@ -420,7 +421,6 @@ if (container) {
     });
   }
   if (stopBtn) {
-    stopBtn.classList.add('hidden');
     stopBtn.addEventListener('click', () => {
       if (typeof window.aris !== 'undefined' && window.aris.abortDialogue) window.aris.abortDialogue();
     });
