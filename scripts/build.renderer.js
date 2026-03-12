@@ -1,10 +1,11 @@
 const esbuild = require('esbuild');
 const path = require('path');
 
+const root = path.join(__dirname, '..');
 esbuild.build({
-  entryPoints: [path.join(__dirname, 'src', 'renderer', 'main.js')],
+  entryPoints: [path.join(root, 'src', 'renderer', 'main.js')],
   bundle: true,
-  outfile: path.join(__dirname, 'src', 'renderer', 'dist', 'bundle.js'),
+  outfile: path.join(root, 'src', 'renderer', 'dist', 'bundle.js'),
   format: 'iife',
   platform: 'browser',
   target: 'es2020',

@@ -5,6 +5,9 @@ module.exports = {
   files: [
     'electron.main.js',
     'preload.js',
+    'preload.history.js',
+    'preload.memory.js',
+    'preload.prompt.js',
     'src/**/*',
     '!src/renderer/main.js',
     '!src/**/*.map',

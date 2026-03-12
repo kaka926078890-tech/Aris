@@ -4,7 +4,7 @@
   "description": "Aris - Desktop AI companion with HUD visual and INFP personality",
   "main": "electron.main.js",
   "scripts": {
-    "build:renderer": "node build.renderer.js",
+    "build:renderer": "node scripts/build.renderer.js",
     "start": "npm run build:renderer && electron .",
     "build": "npm run build:renderer && electron-builder --config electron-builder.config.js"
   },

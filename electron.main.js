@@ -26,7 +26,7 @@ function createWindow() {
     frame: false,
     titleBarStyle: isMac ? 'hiddenInset' : undefined,
     trafficLightPosition: isMac ? { x: 12, y: 18 } : undefined,
-    alwaysOnTop: true,
+    alwaysOnTop: false,
     resizable: true,
     skipTaskbar: false,
     hasShadow: false,

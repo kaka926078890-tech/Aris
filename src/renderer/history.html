@@ -19,6 +19,7 @@
       <input id="searchInput" type="text" placeholder="检索…" class="flex-1 min-w-0 max-w-xs bg-black/40 text-cyan-100 border border-cyan-500/40 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-400" />
       <button id="searchBtn" class="text-xs px-3 py-1.5 rounded border border-cyan-500/50 text-cyan-300 hover:bg-cyan-500/20 flex-shrink-0">检索</button>
     </div>
+    <button id="refreshHistory" class="text-xs px-3 py-1.5 rounded border border-cyan-500/50 text-cyan-300 hover:bg-cyan-500/20 flex-shrink-0">刷新</button>
     <button id="clearHistory" class="text-xs px-3 py-1.5 rounded border border-red-500/40 text-red-300 hover:bg-red-500/10 flex-shrink-0">删除历史记录</button>
   </header>
   <main id="messagesWrap" class="flex-1 min-h-0 overflow-y-auto px-4 py-3">
@@ -75,11 +76,16 @@
         div.appendChild(row);
         messagesEl.appendChild(div);
       });
-      scrollToLatest();
+      // 等布局完成后再滚动到底部，避免 scrollHeight 未更新
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          scrollToLatest();
+        });
+      });
     }
 
     function scrollToLatest() {
-      messagesWrap.scrollTop = messagesWrap.scrollHeight;
+      if (messagesWrap) messagesWrap.scrollTop = messagesWrap.scrollHeight;
     }
 
     function doSearch() {
@@ -112,6 +118,8 @@
 
     searchBtn.addEventListener('click', doSearch);
     searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+
+    document.getElementById('refreshHistory').addEventListener('click', () => loadHistory());
 
     document.getElementById('clearHistory').addEventListener('click', async () => {
       if (!confirm('确定要删除全部历史记录吗？此操作不可恢复。')) return;

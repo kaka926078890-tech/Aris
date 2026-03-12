@@ -1,20 +1,20 @@
 /**
  * 与 handler 相同的上下文构建逻辑，逐段检查是否包含「改不动了」并调用 DeepSeek 看模型拿到的名字。
- * 在 Aris 目录执行：node test_identity_context.js
+ * 在项目根目录执行：node scripts/test_identity_context.js
  */
 require('dotenv').config();
 const path = require('path');
 
-process.chdir(path.join(__dirname));
+process.chdir(path.join(__dirname, '..'));
 
-const { retrieve } = require('./src/memory/retrieval.js');
-const { getCorrectionsForPrompt } = require('./src/memory/corrections.js');
-const { getCurrentSessionId, getRecent, getRecentFromOtherSessions } = require('./src/store/conversations.js');
-const { getRecentByTypes } = require('./src/memory/lancedb.js');
-const { loadUserIdentity } = require('./src/dialogue/userIdentity.js');
-const { buildSystemPrompt } = require('./src/dialogue/prompt.js');
-const { getActiveWindowTitle } = require('./src/context/windowTitle.js');
-const { chat } = require('./src/dialogue/api.js');
+const { retrieve } = require('../src/memory/retrieval.js');
+const { getCorrectionsForPrompt } = require('../src/memory/corrections.js');
+const { getCurrentSessionId, getRecent, getRecentFromOtherSessions } = require('../src/store/conversations.js');
+const { getRecentByTypes } = require('../src/memory/lancedb.js');
+const { loadUserIdentity } = require('../src/dialogue/userIdentity.js');
+const { buildSystemPrompt } = require('../src/dialogue/prompt.js');
+const { getActiveWindowTitle } = require('../src/context/windowTitle.js');
+const { chat } = require('../src/dialogue/api.js');
 
 const NOT_NAME_PHRASES = new Set([
   '谁', '什么', '对的', '好', '的', '呀', '啊', '哦', '嗯',
