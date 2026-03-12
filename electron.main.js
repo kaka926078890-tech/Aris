@@ -9,6 +9,7 @@ let mainWindow = null;
 let historyWindow = null;
 let memoryWindow = null;
 let promptWindow = null;
+let monitorWindow = null;
 /** 是否正在处理对话（流式生成中），用于串行化发送并避免 proactive 插入 */
 let dialogueBusy = false;
 /** 当前对话的 AbortController，用于用户点击「停止」时中断 */
@@ -123,6 +124,10 @@ function setupAppMenu() {
           label: 'API 提示词预览',
           click: () => openPromptWindow(),
         },
+        {
+          label: '打开监控面板',
+          click: () => openMonitorWindow(),
+        },
       ],
     },
     ...(!isMac ? [{
@@ -198,6 +203,25 @@ function openPromptWindow() {
   });
   promptWindow.loadFile(path.join(__dirname, 'src', 'renderer', 'prompt.html'));
   promptWindow.on('closed', () => { promptWindow = null; });
+}
+
+function openMonitorWindow() {
+  if (monitorWindow && !monitorWindow.isDestroyed()) {
+    monitorWindow.focus();
+    return;
+  }
+  monitorWindow = new BrowserWindow({
+    width: 720,
+    height: 560,
+    parent: mainWindow || undefined,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.monitor.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  monitorWindow.loadFile(path.join(__dirname, 'src', 'renderer', 'monitor.html'));
+  monitorWindow.on('closed', () => { monitorWindow = null; });
 }
 
 function startProactiveInterval() {
@@ -335,6 +359,16 @@ ipcMain.handle('memory:clearAll', async () => {
 ipcMain.handle('memory:getStats', async () => {
   const { getStats } = require('./src/memory/lancedb.js');
   return getStats();
+});
+
+ipcMain.handle('monitor:getTokenUsage', async () => {
+  const { getTokenUsageRecords } = require('./src/store/monitor.js');
+  return getTokenUsageRecords();
+});
+
+ipcMain.handle('monitor:getFileModifications', async () => {
+  const { getFileModifications } = require('./src/store/monitor.js');
+  return getFileModifications();
 });
 
 ipcMain.handle('memory:list', async (_, params) => {

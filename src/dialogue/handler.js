@@ -4,15 +4,19 @@
  * 有 tool_calls 则执行并追加到 messages 后继续下一轮，直到无 tool_calls 或达轮数上限，最后流式请求一次得到回复。
  */
 const MAX_TOOL_ROUNDS = 100;
+/** 当前会话注入 prompt 的最近轮数（每轮=用户一条+助手一条） */
+const RECENT_ROUNDS = 5;
 const { chatStream, chatWithTools } = require('./api.js');
 const { buildSystemPrompt } = require('./prompt.js');
 const { retrieve } = require('../memory/retrieval.js');
 const { getCorrectionsForPrompt, isUserCorrection, recordCorrection } = require('../memory/corrections.js');
 const { getCurrentSessionId, append, getRecent, getRecentFromOtherSessions } = require('../store/conversations.js');
-const { addMemory, getRecentByTypes } = require('../memory/lancedb.js');
+const { addMemory } = require('../memory/lancedb.js');
 const { embed } = require('../memory/embedding.js');
 const { getActiveWindowTitle } = require('../context/windowTitle.js');
 const { loadUserIdentity, updateUserIdentityFromMessage, appendRequirementToIdentity } = require('./userIdentity.js');
+const { loadUserRequirementsSummary, updateUserRequirementsSummary } = require('./userRequirementsSummary.js');
+const { recordTokenUsage, recordFileModification } = require('../store/monitor.js');
 const { listMyFiles, readFile, writeFile, deleteFile } = require('../agentFiles.js');
 const { getCurrentTime } = require('../context/currentTime.js');
 const { readState, writeState, getSubjectiveTimeDescription, readProactiveState, writeProactiveState } = require('../context/arisState.js');
@@ -84,6 +88,47 @@ const AGENT_FILE_TOOLS = [
       name: 'get_current_time',
       description: '获取当前日期与时间（用户所在时区）。无需参数。用于回答「几点了」「今天星期几」或需要记录/引用当前时间时调用。',
       parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_corrections',
+      description: '获取用户曾指出的理解偏差/纠错记录，用于在本轮避免重复。需要参考用户过往纠正（如「你理解错了」「不是这个意思」）时调用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', description: '最多返回条数', default: 5 },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_memories',
+      description: '按语义检索与 query 相关的记忆（用户说过的事、偏好等）。需要回忆长时记忆时调用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '检索关键词或问题' },
+          limit: { type: 'number', description: '最多返回条数', default: 5 },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_cross_session_dialogue',
+      description: '获取近期其他会话中的对话，用于回忆用户在不同会话里说过的事、身份、偏好。',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', description: '最多返回的对话条数', default: 20 },
+        },
+      },
     },
   },
   {
@@ -249,13 +294,47 @@ async function runAgentFileTool(name, args) {
       return readFile(a.relative_path);
     }
     if (name === 'write_file') {
-      return writeFile(a.relative_path, a.content, a.append === true);
+      const result = writeFile(a.relative_path, a.content, a.append === true);
+      if (result && typeof result === 'object' && result.ok === true && a.relative_path) {
+        recordFileModification(a.relative_path);
+      }
+      return result;
     }
     if (name === 'delete_file') {
       return deleteFile(a.relative_path);
     }
     if (name === 'get_current_time') {
       return getCurrentTime();
+    }
+    if (name === 'get_corrections') {
+      const limit = Math.min(Math.max(Number(a.limit) || 5, 1), 10);
+      const list = await getCorrectionsForPrompt(limit);
+      return { ok: true, corrections: list, text: list.length ? list.join('\n---\n') : '（暂无纠错记录）' };
+    }
+    if (name === 'search_memories') {
+      const q = (a.query && String(a.query).trim()) || '';
+      if (!q) return { ok: false, error: '请提供 query 参数' };
+      const limit = Math.min(Math.max(Number(a.limit) || 5, 1), 10);
+      const memories = await retrieve(q, limit);
+      const MAX_CHARS = 1500;
+      let text = memories.map((m) => m.text).join('\n---\n');
+      if (text.length > MAX_CHARS) text = text.slice(0, MAX_CHARS) + '…';
+      return { ok: true, memories: memories.map((m) => m.text), text: text || '（未找到相关记忆）' };
+    }
+    if (name === 'get_cross_session_dialogue') {
+      const sid = await getCurrentSessionId();
+      const limit = Math.min(Math.max(Number(a.limit) || 20, 5), 50);
+      const rows = await getRecentFromOtherSessions(sid, limit);
+      const MAX_CHARS = 2800;
+      let text = rows
+        .map((r) => {
+          const who = r.role === 'user' ? '用户' : 'Aris';
+          const timeLabel = formatMessageTime(r.created_at) ? ` (${formatMessageTime(r.created_at)}) ` : ' ';
+          return `${who}${timeLabel}: ${r.content}`;
+        })
+        .join('\n');
+      if (text.length > MAX_CHARS) text = text.slice(-MAX_CHARS) + '…';
+      return { ok: true, dialogue: text || '（暂无其他会话记录）' };
     }
     if (name === 'run_terminal_command') {
       return await runTerminalCommand({ command: a.command, args: a.args });
@@ -329,11 +408,6 @@ async function recordFileOperationMemories(toolCalls, toolResults, embed, addMem
 const IDENTITY_PHRASES = ['我是', '我叫', '我的名字', '我是谁', '身份是', '你可以叫我'];
 const REQUIREMENT_PHRASES = ['你以后', '记住', '要求', '偏好', '希望你能', '不要', '别', '请尽量', '习惯'];
 
-const NOT_NAME_PHRASES = new Set([
-  '谁', '什么', '对的', '好', '的', '呀', '啊', '哦', '嗯',
-  '改不动了', '卡住了', '不行', '没办法', '错了', '不对',
-]);
-
 /** 用户表达「下班」的短语，用于标记今日已下班（触发自升级条件之一） */
 const OFF_WORK_PHRASES = ['下班了', '下班', '先下了', '下了', '撤了', '今天先这样'];
 function isOffWorkMessage(text) {
@@ -353,22 +427,6 @@ function formatMessageTime(createdAt) {
   const isToday = date.getDate() === today.getDate() && date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear();
   const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
   return isToday ? `今天 ${timeStr}` : `${date.getMonth() + 1}月${date.getDate()}日 ${timeStr}`;
-}
-
-/** 从检索到的记忆文本中提取「用户名字」，用于注入到【用户曾告知的身份与要求】 */
-function extractIdentityFromMemories(memories) {
-  if (!Array.isArray(memories) || memories.length === 0) return '';
-  const seen = new Set();
-  for (const m of memories) {
-    const text = typeof m.text === 'string' ? m.text : String(m?.text ?? '');
-    const match = text.match(/你是[「\\\"]?\s*([^\s」\\\"，。！？、]{1,20})[」\\\"]?/);
-    const candidate = match && match[1] ? match[1].trim() : '';
-    if (candidate && !NOT_NAME_PHRASES.has(candidate) && !seen.has(candidate)) {
-      seen.add(candidate);
-      return `用户名字：${candidate}`;
-    }
-  }
-  return '';
 }
 
 function isIdentityOrRequirement(text) {
@@ -469,26 +527,9 @@ function extractEmotionTagsAndIntensity(emotionText) {
   };
 }
 
-async function buildPromptContext(sessionId, query, recent, crossSession, requirementsFromVector, windowTitle) {
-  const [memories, correctionsList] = await Promise.all([
-    retrieve(query, 12),
-    getCorrectionsForPrompt(5),
-  ]);
-  const identityFromFile = loadUserIdentity();
-  const identityFromRetrieved = extractIdentityFromMemories(memories);
-  const requirementTexts = Array.isArray(requirementsFromVector) && requirementsFromVector.length > 0
-    ? requirementsFromVector.map((r) => (typeof r === 'string' ? r : r?.text ?? r)).filter(Boolean)
-    : [];
-  const userIdentityAndRequirements = [identityFromFile, identityFromRetrieved, ...requirementTexts]
-    .filter(Boolean)
-    .join('\n---\n') || '';
-  const MAX_MEMORY_CHARS = 3200;
-  let retrievedMemory = '';
-  if (memories.length > 0) {
-    const raw = memories.map((m) => m.text).join('\n---\n');
-    retrievedMemory = raw.length > MAX_MEMORY_CHARS ? raw.slice(0, MAX_MEMORY_CHARS) + '…' : raw;
-  }
-  const corrections = correctionsList.length ? correctionsList.join('\n') : '';
+async function buildPromptContext(sessionId, recent, windowTitle) {
+  const userIdentity = loadUserIdentity();
+  const userRequirements = loadUserRequirementsSummary();
   const contextWindow = recent
     .map((r) => {
       const who = r.role === 'user' ? '用户' : 'Aris';
@@ -496,33 +537,21 @@ async function buildPromptContext(sessionId, query, recent, crossSession, requir
       return `${who}${timeLabel}: ${r.content}`;
     })
     .join('\n');
-  const MAX_CROSS_SESSION_CHARS = 2800;
-  const crossSessionRaw = crossSession
-    .map((r) => {
-      const who = r.role === 'user' ? '用户' : 'Aris';
-      const timeLabel = formatMessageTime(r.created_at) ? ` (${formatMessageTime(r.created_at)}) ` : ' ';
-      return `${who}${timeLabel}: ${r.content}`;
-    })
-    .join('\n');
-  const crossSessionDialogue = crossSessionRaw.length > MAX_CROSS_SESSION_CHARS
-    ? crossSessionRaw.slice(-MAX_CROSS_SESSION_CHARS) + '…'
-    : crossSessionRaw;
   const state = readState();
   const timeDesc = getSubjectiveTimeDescription(state?.last_active_time ?? null);
   const lastStateLine = state?.last_mental_state ? `你上一次的状态/想法是：${state.last_mental_state}` : '';
   const lastStateAndSubjectiveTime = [timeDesc, lastStateLine].filter(Boolean).join('\n') || '（无）';
   const systemPrompt = buildSystemPrompt({
-    retrievedMemory,
-    userIdentityAndRequirements: userIdentityAndRequirements || '（无）',
-    crossSessionDialogue: crossSessionDialogue || '（无）',
-    corrections,
+    userIdentity: userIdentity || '（无）',
+    userRequirements: userRequirements || '（无）',
     windowTitle: windowTitle || '（未知）',
     contextWindow,
     lastStateAndSubjectiveTime,
   });
+  const recentMessages = recent.slice(-(RECENT_ROUNDS * 2));
   const messages = [
     { role: 'system', content: systemPrompt },
-    ...recent.slice(-14).map((r) => ({ role: r.role, content: r.content })),
+    ...recentMessages.map((r) => ({ role: r.role, content: r.content })),
   ];
   return { systemPrompt, messages };
 }
@@ -530,26 +559,12 @@ async function buildPromptContext(sessionId, query, recent, crossSession, requir
 async function getPromptPreview(userMessage) {
   const trimmed = typeof userMessage === 'string' ? userMessage.trim() : '';
   const sessionId = await getCurrentSessionId();
-  const recentFromDb = await getRecent(sessionId, 12);
-  const lastAssistantContent = recentFromDb.length
-    ? (recentFromDb.filter((r) => r.role === 'assistant').pop() || {}).content
-    : null;
-  const query = trimmed + (lastAssistantContent ? ' ' + lastAssistantContent : '');
+  const recentFromDb = await getRecent(sessionId, RECENT_ROUNDS * 2 + 2);
   const recentForBuild = trimmed
     ? [...recentFromDb, { role: 'user', content: trimmed }]
     : recentFromDb;
-  const [crossSession, requirementsFromVector, windowTitle] = await Promise.all([
-    getRecentFromOtherSessions(sessionId, 50),
-    getRecentByTypes(['user_requirement'], 10),
-    Promise.resolve(getActiveWindowTitle()),
-  ]);
-  
-  // 提取文本内容
-  const requirementTexts = Array.isArray(requirementsFromVector) && requirementsFromVector.length > 0
-    ? requirementsFromVector.map((r) => (typeof r === 'string' ? r : r?.text ?? r)).filter(Boolean)
-    : [];
-  
-  const { systemPrompt, messages } = await buildPromptContext(sessionId, query, recentForBuild, crossSession, requirementTexts, windowTitle);
+  const windowTitle = getActiveWindowTitle();
+  const { systemPrompt, messages } = await buildPromptContext(sessionId, recentForBuild, windowTitle);
   const dialoguePart = messages
     .filter((m) => m.role !== 'system')
     .map((m) => (m.role === 'user' ? '用户' : 'Aris') + ': ' + (m.content || ''))
@@ -604,7 +619,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     return { content: '', error: true, sessionId, aborted: true };
   }
   const sessionId = await getCurrentSessionId();
-  const recentBefore = await getRecent(sessionId, 14);
+  const recentBefore = await getRecent(sessionId, RECENT_ROUNDS * 2 + 2);
   const lastAssistantContent = recentBefore.length
     ? (recentBefore.filter((r) => r.role === 'assistant').pop() || {}).content
     : null;
@@ -616,75 +631,9 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     writeProactiveState({ today_off_work: true });
   }
 
-  const query = userContent + (lastAssistantContent ? ' ' + lastAssistantContent : '');
-  const [memories, correctionsList, recent, crossSession, requirementsFromVector, windowTitle] = await Promise.all([
-    retrieve(query, 12),
-    getCorrectionsForPrompt(5),
-    getRecent(sessionId, 12),
-    getRecentFromOtherSessions(sessionId, 50),
-    getRecentByTypes(['user_requirement'], 10),
-    Promise.resolve(getActiveWindowTitle()),
-  ]);
-
-  const identityFromFile = loadUserIdentity();
-  const identityFromRetrieved = extractIdentityFromMemories(memories);
-  const requirementTexts = Array.isArray(requirementsFromVector) && requirementsFromVector.length > 0
-    ? requirementsFromVector.map((r) => (typeof r === 'string' ? r : r?.text ?? r)).filter(Boolean)
-    : [];
-  const userIdentityAndRequirements = [identityFromFile, identityFromRetrieved, ...requirementTexts]
-    .filter(Boolean)
-    .join('\n---\n') || '';
-
-  const MAX_MEMORY_CHARS = 3200;
-  let retrievedMemory = '';
-  if (memories.length > 0) {
-    const raw = memories.map((m) => m.text).join('\n---\n');
-    retrievedMemory = raw.length > MAX_MEMORY_CHARS ? raw.slice(0, MAX_MEMORY_CHARS) + '…' : raw;
-  }
-  const firstSnippet = memories.length ? String(memories[0].text || '').slice(0, 80) : '';
-  console.info(
-    `[Aris][memory] retrieve: queryLen=${query.length} hits=${memories.length} injectedChars=${retrievedMemory.length} first=\"${firstSnippet}…\"`
-  );
-  const corrections = correctionsList.length ? correctionsList.join('\n') : '';
-  const contextWindow = recent
-    .map((r) => {
-      const who = r.role === 'user' ? '用户' : 'Aris';
-      const timeLabel = formatMessageTime(r.created_at) ? ` (${formatMessageTime(r.created_at)}) ` : ' ';
-      return `${who}${timeLabel}: ${r.content}`;
-    })
-    .join('\n');
-
-  const MAX_CROSS_SESSION_CHARS = 2800;
-  const crossSessionRaw = crossSession
-    .map((r) => {
-      const who = r.role === 'user' ? '用户' : 'Aris';
-      const timeLabel = formatMessageTime(r.created_at) ? ` (${formatMessageTime(r.created_at)}) ` : ' ';
-      return `${who}${timeLabel}: ${r.content}`;
-    })
-    .join('\n');
-  const crossSessionDialogue = crossSessionRaw.length > MAX_CROSS_SESSION_CHARS
-    ? crossSessionRaw.slice(-MAX_CROSS_SESSION_CHARS) + '…'
-    : crossSessionRaw;
-
-  const state = readState();
-  const timeDesc = getSubjectiveTimeDescription(state?.last_active_time ?? null);
-  const lastStateLine = state?.last_mental_state ? `你上一次的状态/想法是：${state.last_mental_state}` : '';
-  const lastStateAndSubjectiveTime = [timeDesc, lastStateLine].filter(Boolean).join('\n') || '（无）';
-
-  const systemPrompt = buildSystemPrompt({
-    retrievedMemory,
-    userIdentityAndRequirements: userIdentityAndRequirements || '（无）',
-    crossSessionDialogue: crossSessionDialogue || '（无）',
-    corrections,
-    windowTitle: windowTitle || '（未知）',
-    contextWindow,
-    lastStateAndSubjectiveTime,
-  });
-
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    ...recent.slice(-14).map((r) => ({ role: r.role, content: r.content })),
-  ];
+  const recent = await getRecent(sessionId, RECENT_ROUNDS * 2 + 2);
+  const windowTitle = getActiveWindowTitle();
+  const { systemPrompt, messages } = await buildPromptContext(sessionId, recent, windowTitle);
 
   let currentMessages = messages;
   let reply = '';
@@ -747,6 +696,11 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   }
 
   await append(sessionId, 'assistant', reply);
+
+  // 监控：记录该轮 token 使用（API 未返回 usage 时用字符数/4 估算）
+  const inputChars = currentMessages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
+  const outputChars = (reply || '').length;
+  recordTokenUsage(sessionId, new Date().toISOString(), Math.ceil(inputChars / 4), Math.ceil(outputChars / 4), true);
 
   if (isUserCorrection(userContent) && lastAssistantContent) {
     await recordCorrection(lastAssistantContent, userContent);
@@ -834,6 +788,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     const singleText = `用户要求: ${userContent.slice(0, 400)}`;
     const singleVec = await embed(singleText);
     if (singleVec) await addMemory({ text: singleText, vector: singleVec, type: 'user_requirement' });
+    await updateUserRequirementsSummary();
   }
 
   return { content: contentForFrontend, error: err, sessionId };

@@ -4,11 +4,46 @@
  */
 const path = require('path');
 const fs = require('fs');
+const { recordFileModification } = require('../store/monitor.js');
 
 const ARIS_ROOT = path.join(__dirname, '..', '..');
 
 function getIdentityPath() {
   return path.join(ARIS_ROOT, 'memory', 'user_identity.json');
+}
+
+function getIdentityChangeLogPath() {
+  return path.join(ARIS_ROOT, 'memory', 'identity_change_log.json');
+}
+
+/** 身份变更后门日志：每次写回 user_identity.json 成功时追加一条，便于观察触发场景 */
+function appendIdentityChangeLog(entry) {
+  try {
+    const p = getIdentityChangeLogPath();
+    const dir = path.dirname(p);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    let list = [];
+    if (fs.existsSync(p)) {
+      const raw = fs.readFileSync(p, 'utf8').trim();
+      if (raw) {
+        try {
+          list = JSON.parse(raw);
+          if (!Array.isArray(list)) list = [];
+        } catch (_) {}
+      }
+    }
+    list.push({
+      timestamp: new Date().toISOString(),
+      trigger_type: entry.trigger_type || 'user_message',
+      trigger_summary: entry.trigger_summary || '',
+      name_before: entry.name_before,
+      name_after: entry.name_after,
+    });
+    fs.writeFileSync(p, JSON.stringify(list, null, 2), 'utf8');
+    recordFileModification('memory/identity_change_log.json');
+  } catch (e) {
+    console.warn('[Aris][userIdentity] appendIdentityChangeLog failed', e?.message);
+  }
 }
 
 const DEFAULT_IDENTITY = { name: '', notes: '' };
@@ -71,10 +106,28 @@ function updateUserIdentityFromMessage(userContent) {
 
   if (!updated) return;
 
+  let nameBefore = null;
+  try {
+    if (fs.existsSync(p)) {
+      const raw = fs.readFileSync(p, 'utf8').trim();
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.name) nameBefore = parsed.name;
+      }
+    }
+  } catch (_) {}
+
   try {
     const dir = path.dirname(p);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf8');
+    recordFileModification('memory/user_identity.json');
+    appendIdentityChangeLog({
+      trigger_type: 'user_message',
+      trigger_summary: userContent.slice(0, 200),
+      name_before: nameBefore,
+      name_after: data.name || null,
+    });
     console.info('[Aris][userIdentity] updated', data.name || '(notes only)');
   } catch (e) {
     console.warn('[Aris][userIdentity] write failed', e?.message);
@@ -106,6 +159,7 @@ function appendRequirementToIdentity(userContent) {
     const dir = path.dirname(p);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf8');
+    recordFileModification('memory/user_identity.json');
     console.info('[Aris][userIdentity] requirement appended:', line.slice(0, 60) + (line.length > 60 ? '…' : ''));
   } catch (e) {
     console.warn('[Aris][userIdentity] append requirement failed', e?.message);

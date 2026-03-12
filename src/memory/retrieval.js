@@ -16,7 +16,7 @@ function getMetadata(row) {
 /**
  * Semantic retrieval: embed query, search LanceDB, return top-k (user + Aris side).
  */
-async function retrieve(queryText, limit = 10) {
+async function retrieve(queryText, limit = 5) {
   const vector = await embed(queryText);
   if (!vector) {
     console.info('[Aris][memory] embed(query) failed; retrieval skipped');

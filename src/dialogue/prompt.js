@@ -42,28 +42,19 @@ function loadRules() {
 
 const CONTEXT_TEMPLATE = `以下是你需要参考的上下文，用于保持连续性与一致性：
 
-【用户曾告知的身份与要求】以下内容为用户明确提出的身份或表达偏好（如称呼、不要比喻句等），请务必遵守，不得违反。
-{user_identity_and_requirements}
+【用户身份】以下内容为用户明确告知的身份（如称呼等），请务必遵守。
+{user_identity}
 
-【近期其他会话中的对话（用于回忆用户身份、偏好、说过的事）】
-{cross_session_dialogue}
-
-【向量检索到的相关记忆（与当前问题语义相近的片段，可作补充）】
-{retrieved_memory}
-
-【用户曾指出的理解偏差（请在本轮避免并修正）】
-{corrections}
+【用户要求】以下为用户明确提出的表达偏好与要求（如不要比喻句等），请务必遵守，不得违反。
+{user_requirements}
 
 【用户当前窗口（仅用于更懂 TA 在做什么，非工作协助）】
 {window_title}
 
-【当前日期与时间（用户所在时区的真实时间，回答与时间/日期相关问题时请以此为准）】
-{current_datetime}
-
 【你上一次的状态与时间感】
 {last_state_and_subjective_time}
 
-【当前会话最近几轮】（每条消息旁括号内为该条发送时间，回答「过了多久」「摸鱼多久」等时间差问题时请据此计算）
+【当前会话最近几轮】（每条消息旁括号内为该条发送时间，回答「过了多久」「摸鱼多久」等时间差问题时请据此计算；与当前时间/日期相关表述前请先调用 get_current_time）
 {context_window}
 
 【行为规则】
@@ -73,22 +64,11 @@ const PERSONA = loadPersona();
 const RULES = loadRules();
 const SYSTEM_PROMPT = PERSONA + '\n\n' + CONTEXT_TEMPLATE;
 
-function getCurrentDateTime() {
-  const d = new Date();
-  const dateStr = d.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
-  const timeStr = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-  return `${dateStr} ${timeStr}`;
-}
-
-function buildSystemPrompt({ retrievedMemory = '', userIdentityAndRequirements = '', crossSessionDialogue = '', corrections = '', windowTitle = '', contextWindow = '', currentDatetime, lastStateAndSubjectiveTime = '（无）', behavioralRules = RULES }) {
-  const datetime = currentDatetime != null ? currentDatetime : getCurrentDateTime();
+function buildSystemPrompt({ userIdentity = '', userRequirements = '', windowTitle = '', contextWindow = '', lastStateAndSubjectiveTime = '（无）', behavioralRules = RULES }) {
   return SYSTEM_PROMPT
-    .replace('{user_identity_and_requirements}', userIdentityAndRequirements || '（无）')
-    .replace('{cross_session_dialogue}', crossSessionDialogue || '（无）')
-    .replace('{retrieved_memory}', retrievedMemory || '（无）')
-    .replace('{corrections}', corrections || '（无）')
+    .replace('{user_identity}', userIdentity || '（无）')
+    .replace('{user_requirements}', userRequirements || '（无）')
     .replace('{window_title}', windowTitle || '（未知）')
-    .replace('{current_datetime}', datetime)
     .replace('{last_state_and_subjective_time}', lastStateAndSubjectiveTime || '（无）')
     .replace('{context_window}', contextWindow || '（暂无）')
     .replace('{behavioral_rules}', behavioralRules ?? RULES);
