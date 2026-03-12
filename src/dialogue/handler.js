@@ -759,4 +759,84 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   if (vec) await addMemory({ text: pairText, vector: vec, type: 'dialogue_turn' });
 
   // 从回复中解析【情感摘要】并写入 aris_emotion，供 proactive 使用
-  const emotionMatch = (reply ||
+  const emotionMatch = (reply || '').match(/【情感摘要】\s*([^\n]+(?:\n[^\n]+)?)/);
+  if (emotionMatch && emotionMatch[1]) {
+    const emotionText = emotionMatch[1].trim();
+    if (emotionText.length > 0 && emotionText.length <= 500) {
+      // 提取情感标签和强度
+      const { tags, intensity, hasTags } = extractEmotionTagsAndIntensity(emotionText);
+
+      const emotionVec = await embed(emotionText);
+      if (emotionVec) {
+        const metadata = {
+          timestamp: new Date().toISOString(),
+          intensity
+        };
+
+        // 如果有标签，添加到metadata
+        if (hasTags) {
+          metadata.tags = tags;
+        }
+
+        await addMemory({
+          text: emotionText,
+          vector: emotionVec,
+          type: 'aris_emotion',
+          metadata
+        });
+
+        console.info(`[Aris][emotion] 记录情感: ${emotionText.slice(0, 80)}… 标签: ${tags.join(', ') || '无'} 强度: ${intensity}`);
+      }
+    }
+  }
+
+  // 从回复中解析【表达欲望】并写入 aris_expression_desire，供 proactive 使用
+  const expressionDesireMatch = (reply || '').match(/【表达欲望】\s*([^\n]+(?:\n[^\n]+)?)/);
+  if (expressionDesireMatch && expressionDesireMatch[1]) {
+    const desireText = expressionDesireMatch[1].trim();
+    if (desireText.length > 0 && desireText.length <= 500) {
+      // 尝试提取强度评分
+      let intensity = 3; // 默认值
+      const intensityMatch = desireText.match(/强度评分：\s*(\d+)/);
+      if (intensityMatch && intensityMatch[1]) {
+        const parsed = parseInt(intensityMatch[1], 10);
+        if (!isNaN(parsed) && parsed >= 1 && parsed <= 5) {
+          intensity = parsed;
+        }
+      }
+
+      // 移除强度评分部分，只保留表达内容
+      const cleanDesireText = desireText.replace(/强度评分：\s*\d+.*$/, '').trim();
+
+      if (cleanDesireText.length > 0) {
+        const desireVec = await embed(cleanDesireText);
+        if (desireVec) {
+          await addMemory({
+            text: cleanDesireText,
+            vector: desireVec,
+            type: 'aris_expression_desire',
+            metadata: { intensity, timestamp: new Date().toISOString() }
+          });
+        }
+      }
+    }
+  }
+
+  writeState({
+    last_active_time: new Date().toISOString(),
+    last_mental_state: (emotionMatch && emotionMatch[1] ? emotionMatch[1].trim() : null) || (reply ? reply.slice(0, 300) : null),
+  });
+
+  const { identity, requirement } = isIdentityOrRequirement(userContent);
+  if (identity) updateUserIdentityFromMessage(userContent);
+  if (requirement) {
+    appendRequirementToIdentity(userContent);
+    const singleText = `用户要求: ${userContent.slice(0, 400)}`;
+    const singleVec = await embed(singleText);
+    if (singleVec) await addMemory({ text: singleText, vector: singleVec, type: 'user_requirement' });
+  }
+
+  return { content: contentForFrontend, error: err, sessionId };
+}
+
+module.exports = { handleUserMessage, getPromptPreview };

@@ -3,7 +3,7 @@
  */
 require('dotenv').config();
 
-const MAX_TOKENS_STREAM = 1024;
+const MAX_TOKENS_STREAM = Math.min(Number(process.env.ARIS_STREAM_MAX_TOKENS) || 8192, 32768);
 const MAX_TOKENS_TOOLS = Math.min(Number(process.env.ARIS_TOOL_MAX_TOKENS) || 8192, 32768);
 
 async function chat(messages) {
