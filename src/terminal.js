@@ -5,7 +5,7 @@ const { getAgentBasePath } = require('./agentFiles.js');
 const TERMINAL_TIMEOUT_MS = 30000;
 const MAX_OUTPUT_BYTES = 16 * 1024;
 
-const ALLOWED_COMMANDS = new Set(['ls', 'pwd', 'cat', 'head', 'tail', 'node', 'npm', 'npx']);
+const ALLOWED_COMMANDS = new Set(['ls', 'pwd', 'cat', 'head', 'tail', 'node', 'npm', 'npx', 'cp']);
 const NPM_NPX_ALLOWED_SUBCOMMANDS = new Set(['run', 'install', 'exec', 'ci', 'test', 'start']);
 
 function truncate(str, maxBytes) {
@@ -26,7 +26,7 @@ function isSafeArg(arg) {
 function runTerminalCommand({ command, args }) {
   const cmd = typeof command === 'string' ? command.trim() : '';
   if (!ALLOWED_COMMANDS.has(cmd)) {
-    return { ok: false, error: '命令不在白名单内，仅允许: ls, pwd, cat, head, tail, node, npm, npx' };
+    return { ok: false, error: '命令不在白名单内，仅允许: ls, pwd, cat, head, tail, node, npm, npx, cp' };
   }
   const arr = Array.isArray(args) ? args : [];
   for (let i = 0; i < arr.length; i++) {
