@@ -1,6 +1,7 @@
 /**
- * System prompt: 人设/要求从 persona.md 读取，上下文为占位符模板。
- * Placeholders: {cross_session_dialogue}, {retrieved_memory}, {corrections}, {window_title}, {current_datetime}, {context_window}, {behavioral_rules}
+ * System prompt: 人设从 persona.md 读取，上下文为占位符模板。
+ * 当前占位符: {user_identity}, {user_requirements}, {last_state_and_subjective_time}, {context_window}, {behavioral_rules}
+ * 时间/纠错/记忆/跨会话/窗口标题已改为工具按需调用，不再注入此处。
  */
 const path = require('path');
 const fs = require('fs');
@@ -48,9 +49,6 @@ const CONTEXT_TEMPLATE = `以下是你需要参考的上下文，用于保持连
 【用户要求】以下为用户明确提出的表达偏好与要求（如不要比喻句等），请务必遵守，不得违反。
 {user_requirements}
 
-【用户当前窗口（仅用于更懂 TA 在做什么，非工作协助）】
-{window_title}
-
 【你上一次的状态与时间感】
 {last_state_and_subjective_time}
 
@@ -64,11 +62,10 @@ const PERSONA = loadPersona();
 const RULES = loadRules();
 const SYSTEM_PROMPT = PERSONA + '\n\n' + CONTEXT_TEMPLATE;
 
-function buildSystemPrompt({ userIdentity = '', userRequirements = '', windowTitle = '', contextWindow = '', lastStateAndSubjectiveTime = '（无）', behavioralRules = RULES }) {
+function buildSystemPrompt({ userIdentity = '', userRequirements = '', contextWindow = '', lastStateAndSubjectiveTime = '（无）', behavioralRules = RULES }) {
   return SYSTEM_PROMPT
     .replace('{user_identity}', userIdentity || '（无）')
     .replace('{user_requirements}', userRequirements || '（无）')
-    .replace('{window_title}', windowTitle || '（未知）')
     .replace('{last_state_and_subjective_time}', lastStateAndSubjectiveTime || '（无）')
     .replace('{context_window}', contextWindow || '（暂无）')
     .replace('{behavioral_rules}', behavioralRules ?? RULES);

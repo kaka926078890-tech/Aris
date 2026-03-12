@@ -134,6 +134,14 @@ const AGENT_FILE_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'get_window_title',
+      description: '获取用户当前前台窗口/应用名称（仅用于更懂 TA 在做什么，非工作协助）。需要了解用户正在使用什么应用或窗口时调用。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'run_terminal_command',
       description: '在项目根目录下执行白名单内的终端命令。仅当用户明确要求执行命令时使用。工作目录为 Aris 项目根；结果可能被截断。命令仅限：ls, pwd, cat, head, tail, node, npm, npx, cp。',
       parameters: {
@@ -336,6 +344,10 @@ async function runAgentFileTool(name, args) {
       if (text.length > MAX_CHARS) text = text.slice(-MAX_CHARS) + '…';
       return { ok: true, dialogue: text || '（暂无其他会话记录）' };
     }
+    if (name === 'get_window_title') {
+      const title = getActiveWindowTitle();
+      return { ok: true, window_title: title || '（未知）', text: title ? `用户当前前台应用/窗口：${title}` : '（无法获取）' };
+    }
     if (name === 'run_terminal_command') {
       return await runTerminalCommand({ command: a.command, args: a.args });
     }
@@ -527,7 +539,7 @@ function extractEmotionTagsAndIntensity(emotionText) {
   };
 }
 
-async function buildPromptContext(sessionId, recent, windowTitle) {
+async function buildPromptContext(sessionId, recent) {
   const userIdentity = loadUserIdentity();
   const userRequirements = loadUserRequirementsSummary();
   const contextWindow = recent
@@ -544,7 +556,6 @@ async function buildPromptContext(sessionId, recent, windowTitle) {
   const systemPrompt = buildSystemPrompt({
     userIdentity: userIdentity || '（无）',
     userRequirements: userRequirements || '（无）',
-    windowTitle: windowTitle || '（未知）',
     contextWindow,
     lastStateAndSubjectiveTime,
   });
@@ -563,8 +574,7 @@ async function getPromptPreview(userMessage) {
   const recentForBuild = trimmed
     ? [...recentFromDb, { role: 'user', content: trimmed }]
     : recentFromDb;
-  const windowTitle = getActiveWindowTitle();
-  const { systemPrompt, messages } = await buildPromptContext(sessionId, recentForBuild, windowTitle);
+  const { systemPrompt, messages } = await buildPromptContext(sessionId, recentForBuild);
   const dialoguePart = messages
     .filter((m) => m.role !== 'system')
     .map((m) => (m.role === 'user' ? '用户' : 'Aris') + ': ' + (m.content || ''))
@@ -632,19 +642,26 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   }
 
   const recent = await getRecent(sessionId, RECENT_ROUNDS * 2 + 2);
-  const windowTitle = getActiveWindowTitle();
-  const { systemPrompt, messages } = await buildPromptContext(sessionId, recent, windowTitle);
+  const { systemPrompt, messages } = await buildPromptContext(sessionId, recent);
 
   let currentMessages = messages;
   let reply = '';
   let err = false;
   let round = 0;
   let exitedDueToNoToolCalls = false;
+  let roundInputTokens = 0;
+  let roundOutputTokens = 0;
+  let hasOfficialUsage = false;
 
   while (round < MAX_TOOL_ROUNDS) {
     if (signal && signal.aborted) break;
     const res = await chatWithTools(currentMessages, AGENT_FILE_TOOLS, signal);
     if (res.aborted) break;
+    if (res.usage) {
+      roundInputTokens += res.usage.prompt_tokens || 0;
+      roundOutputTokens += res.usage.completion_tokens || 0;
+      hasOfficialUsage = true;
+    }
     reply = res.content || '';
     err = res.error;
     if (!res.tool_calls || res.tool_calls.length === 0) {
@@ -687,6 +704,11 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     const second = await chatStream(currentMessages, null, signal);
     reply = second.content;
     err = second.error;
+    if (second.usage) {
+      roundInputTokens += second.usage.prompt_tokens || 0;
+      roundOutputTokens += second.usage.completion_tokens || 0;
+      hasOfficialUsage = true;
+    }
     if (second.aborted) {
       await append(sessionId, 'assistant', reply || '[已停止]');
       return { content: reply || '', error: false, sessionId, aborted: true };
@@ -697,10 +719,14 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
 
   await append(sessionId, 'assistant', reply);
 
-  // 监控：记录该轮 token 使用（API 未返回 usage 时用字符数/4 估算）
-  const inputChars = currentMessages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
-  const outputChars = (reply || '').length;
-  recordTokenUsage(sessionId, new Date().toISOString(), Math.ceil(inputChars / 4), Math.ceil(outputChars / 4), true);
+  // 监控：优先使用 API 返回的 usage，否则用字符数/4 估算
+  if (hasOfficialUsage && (roundInputTokens > 0 || roundOutputTokens > 0)) {
+    recordTokenUsage(sessionId, new Date().toISOString(), roundInputTokens, roundOutputTokens, false);
+  } else {
+    const inputChars = currentMessages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
+    const outputChars = (reply || '').length;
+    recordTokenUsage(sessionId, new Date().toISOString(), Math.ceil(inputChars / 4), Math.ceil(outputChars / 4), true);
+  }
 
   if (isUserCorrection(userContent) && lastAssistantContent) {
     await recordCorrection(lastAssistantContent, userContent);

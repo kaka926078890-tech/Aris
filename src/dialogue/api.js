@@ -74,7 +74,14 @@ async function chatWithTools(messages, tools, signal) {
     const msg = data.choices?.[0]?.message ?? {};
     const content = msg.content ?? '';
     const tool_calls = msg.tool_calls ?? null;
-    return { content, tool_calls, error: false };
+    const usage = data.usage
+      ? {
+          prompt_tokens: data.usage.prompt_tokens ?? 0,
+          completion_tokens: data.usage.completion_tokens ?? 0,
+          total_tokens: data.usage.total_tokens ?? 0,
+        }
+      : null;
+    return { content, tool_calls, error: false, usage };
   } catch (e) {
     if (e && e.name === 'AbortError') {
       return { content: '', tool_calls: null, error: true, aborted: true };
@@ -126,6 +133,7 @@ async function chatStream(messages, onChunk, signal) {
         max_tokens: MAX_TOKENS_STREAM,
         temperature: 0.7,
         stream: true,
+        stream_options: { include_usage: true },
       }),
     });
     if (!res.ok) {
@@ -137,6 +145,7 @@ async function chatStream(messages, onChunk, signal) {
     const decoder = new TextDecoder();
     let buffer = '';
     let content = '';
+    let usage = null;
     while (true) {
       if (signal && signal.aborted) {
         await reader.cancel();
@@ -159,11 +168,18 @@ async function chatStream(messages, onChunk, signal) {
               content += delta;
               if (onChunk) onChunk(delta);
             }
+            if (obj.usage && typeof obj.usage.prompt_tokens === 'number') {
+              usage = {
+                prompt_tokens: obj.usage.prompt_tokens ?? 0,
+                completion_tokens: obj.usage.completion_tokens ?? 0,
+                total_tokens: obj.usage.total_tokens ?? 0,
+              };
+            }
           } catch (_) {}
         }
       }
     }
-    return { content, error: false };
+    return { content, error: false, usage };
   } catch (e) {
     if (e && e.name === 'AbortError') {
       return { content, error: false, aborted: true };

@@ -21,6 +21,7 @@
   <main class="flex-1 min-h-0 flex flex-col overflow-hidden">
     <div class="flex-shrink-0 px-4 py-2 border-b border-cyan-500/20 no-drag">
       <label class="block text-xs text-slate-400 mb-1">要发送的话（据此生成发给 API 的完整提示词）</label>
+      <p class="text-xs text-slate-500 mb-2">当前预览包含：人设、用户身份、用户要求、上次状态与时间感、最近 5 轮对话、行为规则；时间/纠错/记忆/跨会话/窗口标题由模型按需调工具获取。</p>
       <div class="flex gap-2">
         <textarea id="userInput" rows="2" placeholder="输入一句话…" class="flex-1 min-w-0 bg-black/40 text-cyan-100 border border-cyan-500/40 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-400 resize-none"></textarea>
         <button id="generateBtn" class="self-end px-3 py-2 text-xs rounded border border-cyan-500/50 text-cyan-300 hover:bg-cyan-500/20 focus:outline-none focus:ring-1 focus:ring-cyan-400">生成提示词</button>
