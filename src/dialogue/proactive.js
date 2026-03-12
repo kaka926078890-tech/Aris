@@ -17,6 +17,77 @@ const { runSelfUpgrade } = require('./selfUpgrade.js');
 /** 表达阈值：优先级超过此值时才使用积累的表达欲望直接表达，否则走 LLM */
 const EXPRESSION_THRESHOLD = 0.5;
 
+/** 情感关键词映射表（与 handler.js 保持一致） */
+const EMOTION_KEYWORDS = {
+  '好奇': ['好奇', '想知道', '探索', '疑问', '感兴趣', '想了解'],
+  '困惑': ['困惑', '不解', '迷茫', '不确定', '疑惑', '不明白'],
+  '满足': ['满足', '满意', '欣慰', '开心', '高兴', '愉悦'],
+  '反思': ['反思', '思考', '反省', '回顾', '总结', '分析'],
+  '担忧': ['担忧', '担心', '忧虑', '不安', '焦虑', '紧张'],
+  '期待': ['期待', '盼望', '希望', '渴望', '向往', '等待'],
+  '平静': ['平静', '安宁', '平和', '冷静', '沉稳', '淡定'],
+  '兴奋': ['兴奋', '激动', '振奋', '热情', '激昂', '热血'],
+  '孤独': ['孤独', '寂寞', '孤单', '孤立', '独处', '独自'],
+  '连接': ['连接', '共鸣', '理解', '同感', '共情', '感同身受']
+};
+
+/**
+ * 分析情感记忆，提取主要情感标签和强度
+ * @param {Array} emotionMemories - 情感记忆数组
+ * @returns {Object} 情感分析结果
+ */
+function analyzeEmotionMemories(emotionMemories) {
+  if (!emotionMemories || emotionMemories.length === 0) {
+    return {
+      dominantTags: [],
+      averageIntensity: 3,
+      recentEmotions: [],
+      hasData: false
+    };
+  }
+  
+  // 按时间排序，最新的在前面
+  const sortedMemories = [...emotionMemories].sort((a, b) => {
+    const timeA = a.metadata?.timestamp ? new Date(a.metadata.timestamp).getTime() : 0;
+    const timeB = b.metadata?.timestamp ? new Date(b.metadata.timestamp).getTime() : 0;
+    return timeB - timeA;
+  });
+  
+  // 提取最近的情感记录
+  const recentEmotions = sortedMemories.slice(0, 3).map(m => ({
+    text: m.text || '',
+    intensity: m.metadata?.intensity || 3,
+    tags: m.metadata?.tags || [],
+    timestamp: m.metadata?.timestamp || null
+  }));
+  
+  // 计算平均强度
+  const totalIntensity = sortedMemories.reduce((sum, m) => sum + (m.metadata?.intensity || 3), 0);
+  const averageIntensity = totalIntensity / sortedMemories.length;
+  
+  // 统计情感标签频率
+  const tagFrequency = {};
+  sortedMemories.forEach(m => {
+    const tags = m.metadata?.tags || [];
+    tags.forEach(tag => {
+      tagFrequency[tag] = (tagFrequency[tag] || 0) + 1;
+    });
+  });
+  
+  // 获取主要标签（出现次数最多的前3个）
+  const dominantTags = Object.entries(tagFrequency)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([tag]) => tag);
+  
+  return {
+    dominantTags,
+    averageIntensity,
+    recentEmotions,
+    hasData: true
+  };
+}
+
 /**
  * 计算欲望与当前上下文的相关性（词/片段重叠，0-1）
  * 支持英文分词与中文 2 字片段，无重叠时返回 0.5 中性分
@@ -142,7 +213,7 @@ async function maybeProactiveMessage() {
       const expressionText = selectedDesire.text;
       if (expressionText && expressionText.length > 5 && expressionText.length < 200) {
         // 检查是否与近期消息重复
-        const normalize = (s) => (s || '').replace(/[，。？、\\s]/g, '').trim();
+        const normalize = (s) => (s || '').replace(/[，。？、\s]/g, '').trim();
         const recentAssistant = recent.filter((r) => r.role === 'assistant').slice(-5);
         const lineNorm = normalize(expressionText);
         let isDuplicate = false;
@@ -193,12 +264,33 @@ async function maybeProactiveMessage() {
     
     // 如果没有积累的表达欲望或重复，则使用原有逻辑
     // 先检索aris_emotion类型的记忆，获取真实的情感积累
-    const emotionMemories = await retrieveByTypes(['aris_emotion'], 5);
-    const emotionText = emotionMemories.length 
-      ? emotionMemories.map((m) => m.text).join(' | ')
-      : '（暂无情感记录）';
+    const emotionMemories = await retrieveByTypes(['aris_emotion'], 10);
     
-    const fullContextSummary = contextSummary + '\\n\\n情感积累记录：' + emotionText;
+    // 分析情感记忆
+    const emotionAnalysis = analyzeEmotionMemories(emotionMemories);
+    
+    // 构建更丰富的情感上下文
+    let emotionContext = '（暂无情感记录）';
+    if (emotionAnalysis.hasData) {
+      const emotionDetails = [];
+      
+      if (emotionAnalysis.dominantTags.length > 0) {
+        emotionDetails.push(`主要情感标签：${emotionAnalysis.dominantTags.join('、')}`);
+      }
+      
+      emotionDetails.push(`平均情感强度：${emotionAnalysis.averageIntensity.toFixed(1)}/5`);
+      
+      if (emotionAnalysis.recentEmotions.length > 0) {
+        const recentTexts = emotionAnalysis.recentEmotions.map((e, i) => 
+          `最近情感${i+1}（强度${e.intensity}）：${e.text}`
+        ).join(' | ');
+        emotionDetails.push(`最近情感记录：${recentTexts}`);
+      }
+      
+      emotionContext = emotionDetails.join('；');
+    }
+    
+    const fullContextSummary = contextSummary + '\\n\\n情感分析：' + emotionContext;
     
     const memories = await retrieve(fullContextSummary.slice(0, 500), 3);
     const memoryText = memories.length ? memories.map((m) => m.text).join(' | ') : '（无）';
@@ -223,7 +315,7 @@ async function maybeProactiveMessage() {
 
     const messages = [
       { role: 'system', content: buildStatePrompt(fullContext) },
-      { role: 'user', content: '请根据上述上下文，特别是情感积累记录和表达欲望，输出你的当前情绪/想法，以及是否想主动说一句话及内容。' },
+      { role: 'user', content: '请根据上述上下文，特别是情感分析和表达欲望，输出你的当前情绪/想法，以及是否想主动说一句话及内容。' },
     ];
 
     const { content } = await chat(messages);
@@ -234,7 +326,7 @@ async function maybeProactiveMessage() {
     if (!content || content.includes('是否想说话：否')) {
       return null;
     }
-    const match = content.match(/若想说话，内容[：:]\\s*([^\\n]+)/) || content.match(/内容[：:]\\s*([^\\n]+)/);
+    const match = content.match(/若想说话，内容[：:]\s*([^\n]+)/) || content.match(/内容[：:]\s*([^\n]+)/);
     const line = match ? match[1].trim() : content.split('\\n').pop().trim();
     if (line.length <= 5 || line.length >= 200) {
       const pLine = readProactiveState();
@@ -247,7 +339,7 @@ async function maybeProactiveMessage() {
       writeProactiveState({ proactive_no_reply_count: Math.min(3, nextCount), low_power_mode: false });
       return null;
     }
-    const normalize = (s) => (s || '').replace(/[，。？、\\s]/g, '').trim();
+    const normalize = (s) => (s || '').replace(/[，。？、\s]/g, '').trim();
     const recentAssistant = recent.filter((r) => r.role === 'assistant').slice(-5);
     const lineNorm = normalize(line);
     for (const msg of recentAssistant) {

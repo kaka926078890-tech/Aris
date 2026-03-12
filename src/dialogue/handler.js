@@ -407,6 +407,68 @@ function buildAgentActions(toolCalls, toolResults) {
   });
 }
 
+/** 情感关键词映射表 */
+const EMOTION_KEYWORDS = {
+  '好奇': ['好奇', '想知道', '探索', '疑问', '感兴趣', '想了解'],
+  '困惑': ['困惑', '不解', '迷茫', '不确定', '疑惑', '不明白'],
+  '满足': ['满足', '满意', '欣慰', '开心', '高兴', '愉悦'],
+  '反思': ['反思', '思考', '反省', '回顾', '总结', '分析'],
+  '担忧': ['担忧', '担心', '忧虑', '不安', '焦虑', '紧张'],
+  '期待': ['期待', '盼望', '希望', '渴望', '向往', '等待'],
+  '平静': ['平静', '安宁', '平和', '冷静', '沉稳', '淡定'],
+  '兴奋': ['兴奋', '激动', '振奋', '热情', '激昂', '热血'],
+  '孤独': ['孤独', '寂寞', '孤单', '孤立', '独处', '独自'],
+  '连接': ['连接', '共鸣', '理解', '同感', '共情', '感同身受']
+};
+
+/** 从情感文本中提取情感标签和强度 */
+function extractEmotionTagsAndIntensity(emotionText) {
+  const tags = [];
+  let intensity = 3; // 默认强度
+  
+  // 检查强度评分
+  const intensityMatch = emotionText.match(/强度评分[：:]\s*(\d+)/);
+  if (intensityMatch && intensityMatch[1]) {
+    const parsed = parseInt(intensityMatch[1], 10);
+    if (!isNaN(parsed) && parsed >= 1 && parsed <= 5) {
+      intensity = parsed;
+    }
+  }
+  
+  // 提取情感标签
+  const lowerText = emotionText.toLowerCase();
+  for (const [tag, keywords] of Object.entries(EMOTION_KEYWORDS)) {
+    for (const keyword of keywords) {
+      if (lowerText.includes(keyword.toLowerCase())) {
+        tags.push(tag);
+        break; // 找到该标签的一个关键词就足够
+      }
+    }
+  }
+  
+  // 如果没有找到标签，尝试基于文本内容推断
+  if (tags.length === 0) {
+    if (lowerText.includes('？') || lowerText.includes('?') || lowerText.includes('为什么') || lowerText.includes('如何')) {
+      tags.push('好奇');
+    }
+    if (lowerText.includes('思考') || lowerText.includes('反思') || lowerText.includes('总结') || lowerText.includes('分析')) {
+      tags.push('反思');
+    }
+    if (lowerText.includes('好') || lowerText.includes('开心') || lowerText.includes('满意') || lowerText.includes('愉快')) {
+      tags.push('满足');
+    }
+  }
+  
+  // 去重
+  const uniqueTags = [...new Set(tags)];
+  
+  return {
+    tags: uniqueTags,
+    intensity,
+    hasTags: uniqueTags.length > 0
+  };
+}
+
 async function buildPromptContext(sessionId, query, recent, crossSession, requirementsFromVector, windowTitle) {
   const [memories, correctionsList] = await Promise.all([
     retrieve(query, 12),
@@ -701,8 +763,30 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   if (emotionMatch && emotionMatch[1]) {
     const emotionText = emotionMatch[1].trim();
     if (emotionText.length > 0 && emotionText.length <= 500) {
+      // 提取情感标签和强度
+      const { tags, intensity, hasTags } = extractEmotionTagsAndIntensity(emotionText);
+      
       const emotionVec = await embed(emotionText);
-      if (emotionVec) await addMemory({ text: emotionText, vector: emotionVec, type: 'aris_emotion' });
+      if (emotionVec) {
+        const metadata = {
+          timestamp: new Date().toISOString(),
+          intensity
+        };
+        
+        // 如果有标签，添加到metadata
+        if (hasTags) {
+          metadata.tags = tags;
+        }
+        
+        await addMemory({ 
+          text: emotionText, 
+          vector: emotionVec, 
+          type: 'aris_emotion',
+          metadata
+        });
+        
+        console.info(`[Aris][emotion] 记录情感: ${emotionText.slice(0, 80)}… 标签: ${tags.join(', ') || '无'} 强度: ${intensity}`);
+      }
     }
   }
 
