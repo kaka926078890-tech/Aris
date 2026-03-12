@@ -6,4 +6,5 @@ backup/
 *.backup
 data/
 memory/user_identity.json
+token.md
 .DS_Store
