@@ -202,9 +202,9 @@ async function maybeProactiveMessage() {
     // 尝试选择积累的表达欲望
     const contextSummary = [
       '近期对话（最近几轮）：',
-      recent.map((r) => `${r.role === 'user' ? '用户' : 'Aris'}: ${r.content}`).join('\\n'),
+      recent.map((r) => `${r.role === 'user' ? '用户' : 'Aris'}: ${r.content}`).join('\n'),
       '当前用户窗口：' + (windowTitle || '（未知）'),
-    ].join('\\n');
+    ].join('\n');
     
     const selectedDesire = selectExpressionDesire(desireMemories, contextSummary);
     
@@ -290,26 +290,26 @@ async function maybeProactiveMessage() {
       emotionContext = emotionDetails.join('；');
     }
     
-    const fullContextSummary = contextSummary + '\\n\\n情感分析：' + emotionContext;
+    const fullContextSummary = contextSummary + '\n\n情感分析：' + emotionContext;
     
     const memories = await retrieve(fullContextSummary.slice(0, 500), 3);
     const memoryText = memories.length ? memories.map((m) => m.text).join(' | ') : '（无）';
-    let fullContext = fullContextSummary + '\\n\\n相关记忆：' + memoryText;
+    let fullContext = fullContextSummary + '\n\n相关记忆：' + memoryText;
     
     // 如果有表达欲望记录但未选择，也加入上下文
     if (desireMemories.length > 0) {
       const desireText = desireMemories.slice(0, 3).map((d, i) => 
         `表达欲望${i+1}（强度${d.metadata?.intensity || 3}）：${d.text}`
       ).join(' | ');
-      fullContext += '\\n\\n积累的表达欲望：' + desireText;
+      fullContext += '\n\n积累的表达欲望：' + desireText;
     }
     
     const state = readState();
     const timeDesc = getSubjectiveTimeDescription(state?.last_active_time ?? null);
     const lastStateLine = state?.last_mental_state ? `你上一次的状态/想法是：${state.last_mental_state}` : '';
-    const stateBlock = [timeDesc, lastStateLine].filter(Boolean).join('\\n');
+    const stateBlock = [timeDesc, lastStateLine].filter(Boolean).join('\n');
     if (stateBlock) {
-      fullContext = '【你上一次的状态与时间感】\\n' + stateBlock + '\\n\\n' + fullContext;
+      fullContext = '【你上一次的状态与时间感】\n' + stateBlock + '\n\n' + fullContext;
       console.info('[Aris][proactive] 注入状态与时间:', timeDesc.slice(0, 60) + (timeDesc.length > 60 ? '…' : ''));
     }
 
@@ -321,13 +321,13 @@ async function maybeProactiveMessage() {
     const { content } = await chat(messages);
     // 思考过程：LLM 返回的整段（情绪与想法 + 是否想说话 + 内容）打 log，便于排查/观察
     if (content) {
-      console.info('[Aris][proactive] 思考过程:\\n' + content);
+      console.info('[Aris][proactive] 思考过程:\n' + content);
     }
     if (!content || content.includes('是否想说话：否')) {
       return null;
     }
     const match = content.match(/若想说话，内容[：:]\s*([^\n]+)/) || content.match(/内容[：:]\s*([^\n]+)/);
-    const line = match ? match[1].trim() : content.split('\\n').pop().trim();
+    const line = match ? match[1].trim() : content.split('\n').pop().trim();
     if (line.length <= 5 || line.length >= 200) {
       const pLine = readProactiveState();
       const nextCount = pLine.proactive_no_reply_count + 1;
