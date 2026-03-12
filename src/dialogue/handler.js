@@ -290,6 +290,42 @@ async function runAgentFileTool(name, args) {
   }
 }
 
+/** 工具执行成功后，将 write_file / delete_file 写入向量记忆，便于后续检索「已创建/操作过的文件」避免重复创建 */
+async function recordFileOperationMemories(toolCalls, toolResults, embed, addMemory) {
+  if (!toolCalls || !toolResults || !embed || !addMemory) return;
+  for (let i = 0; i < toolCalls.length; i++) {
+    const tc = toolCalls[i];
+    const name = tc.function?.name;
+    if (name !== 'write_file' && name !== 'delete_file') continue;
+    let result;
+    try {
+      const raw = toolResults[i]?.content;
+      result = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    } catch (_) {
+      continue;
+    }
+    if (!result || result.ok !== true) continue;
+    const a = parseToolArgs(tc.function?.arguments);
+    const relativePath = a.relative_path;
+    if (!relativePath || typeof relativePath !== 'string') continue;
+    const content = a.content || '';
+    const contentPreview = typeof content === 'string' ? content.slice(0, 120).replace(/\s+/g, ' ') : '';
+    let text;
+    let action;
+    if (name === 'write_file') {
+      action = 'write';
+      text = `Aris 写入文件: ${relativePath}。${contentPreview ? `内容摘要: ${contentPreview}` : ''}`.trim();
+    } else {
+      action = 'delete';
+      text = `Aris 删除文件: ${relativePath}`;
+    }
+    try {
+      const vec = await embed(text);
+      if (vec) await addMemory({ text, vector: vec, type: 'aris_file_operation', metadata: { path: relativePath, action } });
+    } catch (_) {}
+  }
+}
+
 const IDENTITY_PHRASES = ['我是', '我叫', '我的名字', '我是谁', '身份是', '你可以叫我'];
 const REQUIREMENT_PHRASES = ['你以后', '记住', '要求', '偏好', '希望你能', '不要', '别', '请尽量', '习惯'];
 
@@ -460,6 +496,46 @@ async function getPromptPreview(userMessage) {
   return { systemPrompt, messages, promptText };
 }
 
+/** 与前端 formatBubbleContent 一致：过滤后再下发，避免先显示再替换导致弹跳；历史仍存完整内容 */
+function filterReplyForDisplay(text) {
+  if (typeof text !== 'string') return '';
+  let s = text;
+  const dsmlTagV1 = /<\s*\/?\s*DSML\s*\|\s*[^>]*>/gi;
+  const dsmlTagV2 = /<\s*\/?\s*\|\s*[\s\S]*?DSML[\s\S]*?>/gi;
+  let prev;
+  do {
+    prev = s;
+    s = s.replace(dsmlTagV1, '').replace(dsmlTagV2, '');
+  } while (s !== prev);
+  s = s.replace(/【情感摘要】[\s\S]*?强度评分[：:]\s*\d[^\n]*/g, '');
+  s = s.replace(/\n*【情感摘要】[\s\S]*$/g, '');
+  return s.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** 将整段回复按小块、带间隔发送，模拟流式效果，避免一次性刷屏 */
+function sendReplyAsChunks(sendChunk, filteredReply, signal) {
+  if (!sendChunk || !filteredReply) return Promise.resolve();
+  const chunkSize = 2;
+  let i = 0;
+  return new Promise((resolve) => {
+    const tick = () => {
+      if (signal && signal.aborted) {
+        resolve();
+        return;
+      }
+      if (i >= filteredReply.length) {
+        resolve();
+        return;
+      }
+      const chunk = filteredReply.slice(i, i + chunkSize);
+      i += chunkSize;
+      sendChunk(chunk);
+      setTimeout(tick, 24);
+    };
+    tick();
+  });
+}
+
 async function handleUserMessage(userContent, sendChunk, sendAgentActions, signal) {
   if (signal && signal.aborted) {
     const sessionId = await getCurrentSessionId();
@@ -579,6 +655,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
         };
       })
     );
+    await recordFileOperationMemories(res.tool_calls, toolResults, embed, addMemory);
     if (typeof sendAgentActions === 'function') {
       const actions = buildAgentActions(res.tool_calls, toolResults);
       if (actions.length > 0) sendAgentActions(actions);
@@ -591,16 +668,20 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     await append(sessionId, 'assistant', reply || '[已停止]');
     return { content: reply || '', error: false, sessionId, aborted: true };
   }
+  let contentForFrontend = reply;
   if (exitedDueToNoToolCalls) {
-    if (sendChunk && reply) sendChunk(reply);
+    contentForFrontend = filterReplyForDisplay(reply);
+    if (sendChunk && contentForFrontend) await sendReplyAsChunks(sendChunk, contentForFrontend, signal);
   } else {
-    const second = await chatStream(currentMessages, sendChunk, signal);
+    const second = await chatStream(currentMessages, null, signal);
     reply = second.content;
     err = second.error;
     if (second.aborted) {
       await append(sessionId, 'assistant', reply || '[已停止]');
       return { content: reply || '', error: false, sessionId, aborted: true };
     }
+    contentForFrontend = filterReplyForDisplay(reply);
+    if (sendChunk && contentForFrontend) await sendReplyAsChunks(sendChunk, contentForFrontend, signal);
   }
 
   await append(sessionId, 'assistant', reply);
@@ -671,7 +752,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     if (singleVec) await addMemory({ text: singleText, vector: singleVec, type: 'user_requirement' });
   }
 
-  return { content: reply, error: err, sessionId };
+  return { content: contentForFrontend, error: err, sessionId };
 }
 
 module.exports = { handleUserMessage, getPromptPreview };

@@ -1,7 +1,7 @@
 /**
  * LanceDB for vector memory. ESM package used via dynamic import.
  * Table: memory (id, text, vector, type, created_at, metadata)
- * Types: user_preference | user_view | correction | aris_thought | aris_emotion | aris_behavior | aris_expression_desire
+ * Types: user_preference | user_view | correction | aris_thought | aris_emotion | aris_behavior | aris_expression_desire | aris_file_operation
  */
 const path = require('path');
 

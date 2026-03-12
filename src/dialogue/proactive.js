@@ -110,6 +110,11 @@ function selectExpressionDesire(desireMemories, contextSummary) {
   return null;
 }
 
+/**
+ * 主动消息：定时每 3 分钟跑一次。会多轮调 API（表达欲望优先 / LLM 思考），
+ * 只有通过「去重、长度、自升级前不发送」等检查的那条才会 append 并 IPC 到页面，其余仅打 log。
+ * 规则：没发送的（去重、长度等原因）也累加「未回应」计数，避免十几轮都凑不到 1 条发送、一直烧 token。
+ */
 async function maybeProactiveMessage() {
   try {
     const proactiveState = readProactiveState();
@@ -153,7 +158,9 @@ async function maybeProactiveMessage() {
         
         if (!isDuplicate) {
           const p = readProactiveState();
-          if (p.proactive_no_reply_count === 2 && !p.self_upgrade_done_today) {
+          // 在发送之前先计算「若发送则计数器」；三次不回应才升级：nextCount===4 时先自升级、不发送；仅升级时进入低功耗
+          const nextCount = p.proactive_no_reply_count + 1;
+          if (nextCount >= 4 && !p.self_upgrade_done_today) {
             await runSelfUpgrade();
             writeProactiveState({ self_upgrade_done_today: true, low_power_mode: true, proactive_no_reply_count: 0 });
             return null;
@@ -165,14 +172,22 @@ async function maybeProactiveMessage() {
             last_active_time: new Date().toISOString(),
             last_mental_state: expressionText.slice(0, 300),
           });
-          const nextCount = p.proactive_no_reply_count + 1;
-          writeProactiveState({ proactive_no_reply_count: nextCount, low_power_mode: nextCount >= 3 });
+          writeProactiveState({ proactive_no_reply_count: Math.min(3, nextCount), low_power_mode: false });
           console.info(`[Aris][proactive] 使用积累表达欲望：${expressionText.slice(0, 50)}…`);
           if (selectedDesire.id != null) {
             await deleteMemoryById(selectedDesire.id);
           }
           return expressionText;
         }
+        // 表达欲望与近期重复：没发送也累加计数，避免十几轮才凑满自升级
+        const pDup = readProactiveState();
+        const nextCountDup = pDup.proactive_no_reply_count + 1;
+        if (nextCountDup >= 4 && !pDup.self_upgrade_done_today) {
+          await runSelfUpgrade();
+          writeProactiveState({ self_upgrade_done_today: true, low_power_mode: true, proactive_no_reply_count: 0 });
+          return null;
+        }
+        writeProactiveState({ proactive_no_reply_count: Math.min(3, nextCountDup), low_power_mode: false });
       }
     }
     
@@ -222,6 +237,14 @@ async function maybeProactiveMessage() {
     const match = content.match(/若想说话，内容[：:]\\s*([^\\n]+)/) || content.match(/内容[：:]\\s*([^\\n]+)/);
     const line = match ? match[1].trim() : content.split('\\n').pop().trim();
     if (line.length <= 5 || line.length >= 200) {
+      const pLine = readProactiveState();
+      const nextCount = pLine.proactive_no_reply_count + 1;
+      if (nextCount >= 4 && !pLine.self_upgrade_done_today) {
+        await runSelfUpgrade();
+        writeProactiveState({ self_upgrade_done_today: true, low_power_mode: true, proactive_no_reply_count: 0 });
+        return null;
+      }
+      writeProactiveState({ proactive_no_reply_count: Math.min(3, nextCount), low_power_mode: false });
       return null;
     }
     const normalize = (s) => (s || '').replace(/[，。？、\\s]/g, '').trim();
@@ -232,11 +255,21 @@ async function maybeProactiveMessage() {
       if (prev.length < 10) continue;
       if (lineNorm === prev || lineNorm.includes(prev) || prev.includes(lineNorm)) {
         console.info('[Aris][proactive] 跳过重复：与近期某条助手消息相同/相似');
+        const pLine = readProactiveState();
+        const nextCount = pLine.proactive_no_reply_count + 1;
+        if (nextCount >= 4 && !pLine.self_upgrade_done_today) {
+          await runSelfUpgrade();
+          writeProactiveState({ self_upgrade_done_today: true, low_power_mode: true, proactive_no_reply_count: 0 });
+          return null;
+        }
+        writeProactiveState({ proactive_no_reply_count: Math.min(3, nextCount), low_power_mode: false });
         return null;
       }
     }
     const pLine = readProactiveState();
-    if (pLine.proactive_no_reply_count === 2 && !pLine.self_upgrade_done_today) {
+    // 在发送之前先计算「若发送则计数器」；三次不回应才升级：nextCount===4 时先自升级、不发送；仅升级时进入低功耗
+    const nextCount = pLine.proactive_no_reply_count + 1;
+    if (nextCount >= 4 && !pLine.self_upgrade_done_today) {
       await runSelfUpgrade();
       writeProactiveState({ self_upgrade_done_today: true, low_power_mode: true, proactive_no_reply_count: 0 });
       return null;
@@ -248,8 +281,7 @@ async function maybeProactiveMessage() {
       last_active_time: new Date().toISOString(),
       last_mental_state: line.slice(0, 300),
     });
-    const nextCount = pLine.proactive_no_reply_count + 1;
-    writeProactiveState({ proactive_no_reply_count: nextCount, low_power_mode: nextCount >= 3 });
+    writeProactiveState({ proactive_no_reply_count: Math.min(3, nextCount), low_power_mode: false });
     console.info('[Aris][proactive] 已发送:', line.slice(0, 50) + (line.length > 50 ? '…' : ''));
     return line;
   } catch (e) {

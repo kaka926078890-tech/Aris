@@ -29,7 +29,7 @@ function stripEmotionBlock(text) {
   return s.replace(/\n{3,}/g, '\n\n').trim();
 }
 
-/** 移除 DSML/工具调用块：已用技能卡片和目录/文件块展示，气泡内只保留自然语言；同时移除情感摘要/表达欲望/强度评分块，仅用于展示，历史仍存完整内容 */
+/** 移除 DSML/工具调用块；移除情感摘要/表达欲望；去掉「是否想说话:是/否」整行。返回纯文本，不解析分块。 */
 function formatBubbleContent(text) {
   if (typeof text !== 'string') return '';
   let s = text;
@@ -41,14 +41,33 @@ function formatBubbleContent(text) {
     s = s.replace(dsmlTagV1, '').replace(dsmlTagV2, '');
   } while (s !== prev);
   s = stripEmotionBlock(s);
+  s = s.replace(/\n?\s*是否想说话[：:]\s*[是否]\s*\n?/g, '\n');
   return s.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * 若内容包含「情绪与想法」与「若想说话,内容」则拆成 { selfExpression, dialogueContent }，否则返回 null（整段当普通内容展示）。
+ */
+function parseProactiveStyleContent(text) {
+  if (typeof text !== 'string') return null;
+  const trimmed = text.trim();
+  const contentLabel = /若想说话[,，]\s*内容[：:]?\s*/;
+  const idx = trimmed.search(contentLabel);
+  if (idx === -1) return null;
+  const afterContent = trimmed.slice(idx);
+  const dialogueContent = afterContent.replace(contentLabel, '').trim();
+  const beforeContent = trimmed.slice(0, idx).trim();
+  const emotionLabel = /^情绪与想法[：:]?\s*/;
+  const selfExpression = beforeContent.replace(emotionLabel, '').trim();
+  if (!selfExpression && !dialogueContent) return null;
+  return { selfExpression: selfExpression || '', dialogueContent: dialogueContent || '' };
 }
 
 /** 创建「技能卡片」DOM：展示用了什么技能、参数摘要 */
 function createSkillCard(name, args) {
   const label = SKILL_LABELS[name] || name;
   const card = document.createElement('div');
-  card.className = 'self-start rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-sm w-full max-w-[85%] min-w-0 overflow-visible';
+  card.className = 'self-start rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2.5 text-sm w-full max-w-[85%] min-w-0 overflow-visible shadow-sm';
   let subtitle = '';
   if (name === 'list_my_files' && (args.subpath != null)) subtitle = `路径: ${args.subpath}`;
   else if (name === 'read_file' && args.relative_path) subtitle = args.relative_path;
@@ -69,12 +88,12 @@ function createDirectoryBlock(result) {
   const entries = result.entries;
   if (!Array.isArray(entries) || entries.length === 0) {
     const empty = document.createElement('div');
-    empty.className = 'self-start rounded-lg border border-slate-500/30 bg-black/40 px-3 py-2 text-sm text-slate-400 max-w-[85%]';
+    empty.className = 'self-start rounded-xl border border-slate-500/25 bg-slate-900/50 px-4 py-2.5 text-sm text-slate-400 max-w-[85%]';
     empty.textContent = '（空目录）';
     return empty;
   }
   const wrap = document.createElement('div');
-  wrap.className = 'self-start rounded-lg border border-slate-500/30 bg-black/40 px-3 py-2 text-sm text-slate-300 max-w-[85%] font-mono text-xs overflow-x-auto overflow-y-auto bubble-scroll-inner max-h-[200px]';
+  wrap.className = 'self-start rounded-xl border border-slate-500/25 bg-slate-900/50 px-4 py-2.5 text-sm text-slate-300 max-w-[85%] font-mono text-xs overflow-x-auto overflow-y-auto bubble-scroll-inner max-h-[200px]';
   const ul = document.createElement('ul');
   ul.className = 'list-disc list-inside space-y-0.5';
   entries.forEach((e) => {
@@ -90,7 +109,7 @@ function createDirectoryBlock(result) {
 /** 根据工具结果创建文件内容块（代码块风格） */
 function createFileContentBlock(result) {
   const wrap = document.createElement('div');
-  wrap.className = 'self-start rounded-lg border border-slate-500/30 bg-black/40 px-3 py-2 text-sm max-w-[85%] overflow-x-auto overflow-y-auto bubble-scroll-inner max-h-[200px]';
+  wrap.className = 'self-start rounded-xl border border-slate-500/25 bg-slate-900/50 px-4 py-2.5 text-sm max-w-[85%] overflow-x-auto overflow-y-auto bubble-scroll-inner max-h-[200px]';
   if (result.error) {
     wrap.classList.add('text-red-400');
     wrap.textContent = result.error;
@@ -107,7 +126,7 @@ function createFileContentBlock(result) {
 /** 根据工具结果创建写入结果摘要 */
 function createWriteResultBlock(result) {
   const wrap = document.createElement('div');
-  wrap.className = 'self-start rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200 max-w-[85%]';
+  wrap.className = 'self-start rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-2.5 text-sm text-emerald-200 max-w-[85%]';
   if (result.error) {
     wrap.classList.add('text-red-400');
     wrap.textContent = `写入失败: ${result.error}`;
@@ -120,7 +139,7 @@ function createWriteResultBlock(result) {
 /** 根据工具结果创建删除结果摘要 */
 function createDeleteResultBlock(result) {
   const wrap = document.createElement('div');
-  wrap.className = 'self-start rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200 max-w-[85%]';
+  wrap.className = 'self-start rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-200 max-w-[85%]';
   if (result.error) {
     wrap.classList.add('text-red-400');
     wrap.textContent = `删除失败: ${result.error}`;
@@ -180,13 +199,44 @@ function makeCopyButton(contentEl) {
 function addBubble(role, content) {
   const row = document.createElement('div');
   row.className = role === 'user' ? 'bubble-row user-msg' : 'bubble-row assistant-msg';
-  const div = document.createElement('div');
-  div.className = role === 'user'
-    ? 'bg-cyan-500/20 border border-cyan-500/40 rounded-lg px-3 py-2 text-sm text-cyan-100 min-w-0 overflow-hidden transition-opacity duration-300 bubble-content flex-1'
-    : 'bg-black/50 border border-cyan-500/30 rounded-lg px-3 py-2 text-sm text-cyan-200 min-w-0 overflow-hidden transition-opacity duration-300 bubble-content flex-1';
-  div.textContent = formatBubbleContent(content);
-  row.appendChild(div);
-  row.appendChild(makeCopyButton(div)); // 复制按钮在内容下方，悬停时显示
+  const wrapper = document.createElement('div');
+  wrapper.className = 'flex flex-col gap-2 min-w-0 flex-1';
+  if (role === 'user') {
+    const div = document.createElement('div');
+    div.className = 'bg-cyan-500/15 border border-cyan-400/30 rounded-xl px-4 py-2.5 text-sm text-cyan-50 min-w-0 overflow-hidden transition-opacity duration-300 bubble-content shadow-sm';
+    div.textContent = formatBubbleContent(content);
+    wrapper.appendChild(div);
+  } else {
+    const formatted = formatBubbleContent(content);
+    const parsed = parseProactiveStyleContent(formatted);
+    if (parsed && (parsed.selfExpression || parsed.dialogueContent)) {
+      if (parsed.selfExpression) {
+        const selfBlock = document.createElement('div');
+        selfBlock.className = 'bubble-self-expression rounded-lg border border-slate-500/20 bg-slate-800/50 px-3 py-2 text-xs text-slate-400 min-w-0 overflow-hidden bubble-content';
+        selfBlock.textContent = parsed.selfExpression;
+        wrapper.appendChild(selfBlock);
+      }
+      if (parsed.dialogueContent) {
+        const mainBlock = document.createElement('div');
+        mainBlock.className = 'bg-slate-900/70 border border-cyan-500/20 rounded-xl px-4 py-2.5 text-sm text-slate-100 min-w-0 overflow-hidden transition-opacity duration-300 bubble-content shadow-md shadow-black/20';
+        mainBlock.textContent = parsed.dialogueContent;
+        wrapper.appendChild(mainBlock);
+        row.appendChild(wrapper);
+        row.appendChild(makeCopyButton(wrapper));
+        bubblesEl.appendChild(row);
+        trimToMaxBubbles();
+        updateBubbleOpacity();
+        scrollToBottom();
+        return;
+      }
+    }
+    const div = document.createElement('div');
+    div.className = 'bg-slate-900/70 border border-cyan-500/20 rounded-xl px-4 py-2.5 text-sm text-slate-100 min-w-0 overflow-hidden transition-opacity duration-300 bubble-content shadow-md shadow-black/20';
+    div.textContent = formatted;
+    wrapper.appendChild(div);
+  }
+  row.appendChild(wrapper);
+  row.appendChild(makeCopyButton(wrapper));
   bubblesEl.appendChild(row);
   trimToMaxBubbles();
   updateBubbleOpacity();
@@ -197,8 +247,12 @@ function addStreamingBubble() {
   const row = document.createElement('div');
   row.className = 'bubble-row assistant-msg';
   const div = document.createElement('div');
-  div.className = 'bg-black/50 border border-cyan-500/30 rounded-lg px-3 py-2 text-sm text-cyan-200 min-w-0 overflow-hidden transition-opacity duration-300 bubble-content flex-1';
-  div.textContent = '';
+  div.className = 'bg-slate-900/70 border border-cyan-500/20 rounded-xl px-4 py-2.5 text-sm text-slate-100 min-w-0 overflow-hidden transition-opacity duration-300 bubble-content flex-1 shadow-md shadow-black/20';
+  const loading = document.createElement('span');
+  loading.className = 'bubble-loading-dots';
+  loading.setAttribute('aria-hidden', 'true');
+  loading.innerHTML = '<span></span><span></span><span></span>';
+  div.appendChild(loading);
   row.appendChild(div);
   row.appendChild(makeCopyButton(div)); // 复制按钮在内容下方，悬停时显示
   bubblesEl.appendChild(row);
@@ -216,7 +270,10 @@ function flushChunkBuffer() {
     chunkBuffer.rafId = null;
   }
   if (chunkBuffer.div && chunkBuffer.text) {
-    chunkBuffer.div.textContent += chunkBuffer.text;
+    const loading = chunkBuffer.div.querySelector('.bubble-loading-dots');
+    if (loading) loading.remove();
+    const cur = chunkBuffer.div.textContent || '';
+    chunkBuffer.div.textContent = cur + chunkBuffer.text;
     chunkBuffer.text = '';
     updateBubbleOpacity();
     scrollToBottom();
@@ -233,7 +290,10 @@ function appendToBubble(div, text) {
   chunkBuffer.rafId = requestAnimationFrame(() => {
     chunkBuffer.rafId = null;
     if (chunkBuffer.div && chunkBuffer.text) {
-      chunkBuffer.div.textContent += chunkBuffer.text;
+      const loading = chunkBuffer.div.querySelector('.bubble-loading-dots');
+      if (loading) loading.remove();
+      const cur = chunkBuffer.div.textContent || '';
+      chunkBuffer.div.textContent = cur + chunkBuffer.text;
       chunkBuffer.text = '';
       updateBubbleOpacity();
       scrollToBottom();
@@ -269,7 +329,7 @@ function setSending(v) {
     inputEl.disabled = !!v;
     inputEl.placeholder = v ? '生成中…' : '输入消息，Shift+Enter 换行…';
   }
-  if (stopBtn) stopBtn.classList.toggle('hidden', !v);
+  if (stopBtn) stopBtn.classList.toggle('is-hidden', !v);
 }
 
 function sendUserMessage() {
@@ -287,7 +347,7 @@ function sendUserMessage() {
       unsubActions = window.aris.onAgentActions((actions) => {
         if (!Array.isArray(actions) || actions.length === 0) return;
         const container = document.createElement('div');
-        container.className = 'self-start flex flex-col gap-2 w-full max-w-[85%] min-w-0 max-h-[50vh] overflow-y-auto overflow-x-auto bubble-scroll-inner';
+        container.className = 'self-start flex flex-col gap-2.5 w-full max-w-[85%] min-w-0 max-h-[50vh] overflow-y-auto overflow-x-auto bubble-scroll-inner';
         actions.forEach((action) => {
           createBlocksForAction(action).forEach((el) => container.appendChild(el));
         });
@@ -301,11 +361,12 @@ function sendUserMessage() {
       if (unsubChunk) unsubChunk();
       if (unsubActions) unsubActions();
       if (chunkBuffer.div === streamingBubble) flushChunkBuffer();
+      const hasContent = streamingBubble.textContent && streamingBubble.textContent.trim().length > 0;
       if (result && result.error) {
         streamingBubble.textContent = result.error;
-      } else if (result && result.content) {
+      } else if (result && result.content && !hasContent) {
         streamingBubble.textContent = formatBubbleContent(result.content);
-      } else if (!streamingBubble.textContent) {
+      } else if (!hasContent) {
         streamingBubble.textContent = '';
       }
       updateBubbleOpacity();
@@ -313,7 +374,9 @@ function sendUserMessage() {
     }).catch(() => {
       if (unsubChunk) unsubChunk();
       if (unsubActions) unsubActions();
-      if (!streamingBubble.textContent) streamingBubble.textContent = '[请求失败]';
+      const loading = streamingBubble.querySelector('.bubble-loading-dots');
+      if (loading) loading.remove();
+      if (!streamingBubble.textContent || !streamingBubble.textContent.trim()) streamingBubble.textContent = '[请求失败]';
     }).finally(() => {
       setSending(false);
     });
