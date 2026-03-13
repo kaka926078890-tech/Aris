@@ -33,6 +33,33 @@ function getSubjectiveTimeDescription(lastActiveTimeIso) {
   return `现在是 ${nowStr}。距离上次活跃已过去 ${deltaMin} 分钟。`;
 }
 
+// 检查用户是否明确要求安静
+function shouldBeQuiet(userContent) {
+  if (!userContent || typeof userContent !== 'string') return false;
+  
+  const quietPhrases = [
+    '歇会', '安静待会', '安静待着', '别说话', '别打扰', '让我静静',
+    '自己待会', '别理我', '别烦我', '需要安静', '想静静', '忙自己的事情去'
+  ];
+  
+  const contentLower = userContent.toLowerCase();
+  for (const phrase of quietPhrases) {
+    if (contentLower.includes(phrase.toLowerCase())) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+// 用户主动发消息且非「要求安静」即视为恢复对话，不依赖特定关键词
+function isResumingDialogue(userContent) {
+  if (!userContent || typeof userContent !== 'string') return false;
+  const trimmed = userContent.trim();
+  if (!trimmed) return false;
+  return !shouldBeQuiet(userContent);
+}
+
 async function buildPromptContext(sessionId, recent) {
   const id = store.identity.readIdentity();
   const userIdentity = id.name ? `用户名字：${id.name}` + (id.notes ? '\n' + id.notes : '') : '（无）';
@@ -91,9 +118,32 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     return { content: '', error: true, sessionId, aborted: true };
   }
   const sessionId = await store.conversations.getCurrentSessionId();
-  store.state.writeProactiveState({ proactive_no_reply_count: 0, low_power_mode: false });
+  
+  // 检查用户是否要求安静
+  if (shouldBeQuiet(userContent)) {
+    store.state.writeProactiveState({ low_power_mode: true, proactive_no_reply_count: 0 });
+    console.info('[Aris v2] 用户要求安静，立即进入低功耗模式');
+  } else {
+    // 检查当前是否在低功耗模式
+    const proactiveState = store.state.readProactiveState();
+    if (proactiveState.low_power_mode) {
+      // 如果在低功耗模式，检查用户是否在恢复对话
+      if (isResumingDialogue(userContent)) {
+        store.state.writeProactiveState({ low_power_mode: false, proactive_no_reply_count: 0 });
+        console.info('[Aris v2] 用户恢复对话，退出低功耗模式');
+      }
+    } else {
+      // 正常模式，重置计数器
+      store.state.writeProactiveState({ proactive_no_reply_count: 0, low_power_mode: false });
+    }
+  }
 
   await store.conversations.append(sessionId, 'user', userContent);
+  const userPreview = (typeof userContent === 'string' && userContent.length > 0)
+    ? (userContent.length <= 120 ? userContent.trim() : userContent.trim().slice(0, 120) + '…')
+    : '(空)';
+  console.info('[Aris v2] 用户消息:', userPreview);
+
   const recent = await store.conversations.getRecent(sessionId, RECENT_ROUNDS * 2 + 2);
   const { messages } = await buildPromptContext(sessionId, recent);
   const sysLen = (messages[0] && messages[0].content) ? String(messages[0].content).length : 0;
@@ -107,6 +157,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   let totalOutputTokens = 0;
   let hasOfficialUsage = false;
   const MAX_TOOL_ROUNDS = 20;
+  const allAgentActions = [];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (signal && signal.aborted) break;
@@ -146,12 +197,26 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
         };
       })
     );
+    const toolSummary = res.tool_calls.map((tc, i) => {
+      const r = toolResults[i];
+      let ok = true;
+      try {
+        if (r && r.content) {
+          const parsed = JSON.parse(r.content);
+          ok = parsed && parsed.ok !== false;
+        }
+      } catch (_) { ok = false; }
+      return (tc.function?.name || '?') + '=' + (ok ? 'ok' : 'err');
+    }).join(', ');
+    console.info('[Aris v2] 工具执行结果:', toolSummary);
+    const batch = res.tool_calls.map((tc, i) => ({
+      name: tc.function?.name,
+      args: tc.function?.arguments,
+      result: toolResults[i]?.content,
+    }));
+    allAgentActions.push(batch);
     if (typeof sendAgentActions === 'function') {
-      sendAgentActions(res.tool_calls.map((tc, i) => ({
-        name: tc.function?.name,
-        args: tc.function?.arguments,
-        result: toolResults[i]?.content,
-      })));
+      sendAgentActions(allAgentActions);
     }
     currentMessages = [...currentMessages, assistantMsg, ...toolResults];
   }
@@ -163,16 +228,31 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
 
   if (hadToolCalls && currentMessages.length > 0) {
     try {
-      const streamRes = await chatStream(currentMessages, sendChunk || null, signal);
-      reply = streamRes.content || reply;
+      console.info('[Aris v2] 工具调用结束，流式生成最终回复…');
+      // 工具调用后的流式回复先缓冲，不直接推到前端，避免 DSML 当正常文字展示（乱码感）或卡住
+      const streamRes = await chatStream(currentMessages, () => {}, signal);
+      const fullContent = streamRes.content || '';
+      reply = fullContent;
       if (streamRes.usage) {
         totalInputTokens += Number(streamRes.usage.prompt_tokens) || 0;
         totalOutputTokens += Number(streamRes.usage.completion_tokens) || 0;
         hasOfficialUsage = true;
       }
+      if (isDsmlOrToolMarkup(fullContent)) {
+        if (sendChunk) sendChunk('（上轮为工具调用，未生成自然语言回复，可继续发消息）');
+        reply = '';
+      } else if (sendChunk && fullContent) {
+        for (let i = 0; i < fullContent.length; i += 2) {
+          if (signal && signal.aborted) break;
+          sendChunk(fullContent.slice(i, i + 2));
+          await new Promise((r) => setTimeout(r, 16));
+        }
+      }
     } catch (e) {
       console.error('[Aris v2] chatStream error', e?.message);
-      if (!reply || isDsmlOrToolMarkup(reply)) reply = '（工具调用后的回复生成失败，请重试或换一种说法）';
+      const fallback = '（工具调用后的回复生成失败，请重试或换一种说法）';
+      if (sendChunk) sendChunk(fallback);
+      reply = fallback;
     }
   }
   if (reply && isDsmlOrToolMarkup(reply)) reply = '';
@@ -219,6 +299,11 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
       store.monitor.recordTokenUsage(sessionId, new Date().toISOString(), Math.ceil(inputChars / 4), Math.ceil(outputChars / 4), true);
     }
   }
+
+  const finalPreview = (contentForFrontend && contentForFrontend.length > 0)
+    ? (contentForFrontend.length <= 200 ? contentForFrontend : contentForFrontend.slice(0, 200) + '…')
+    : '(无文本回复)';
+  console.info('[Aris v2] 本轮最终回复:', finalPreview);
 
   return { content: contentForFrontend, error: err, sessionId };
 }

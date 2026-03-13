@@ -5,16 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Aris v2</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Inter', sans-serif; background: #fafafa; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
     .bubble-user { background: #e0f2fe; color: #0c4a6e; }
     .bubble-assistant { background: #f0fdf4; color: #14532d; }
-    .bubble-wrap { display: flex; width: 100%; min-width: 0; }
+    .bubble-wrap { display: flex; width: 100%; min-width: 0; -webkit-user-select: text; user-select: text; }
     .bubble-wrap.user { justify-content: flex-end; }
     .bubble-wrap.assistant { justify-content: flex-start; }
-    .bubble-wrap .bubble-inner { max-width: 85%; display: inline-block; min-width: 0; overflow-wrap: break-word; word-break: break-word; overflow-x: hidden; }
-    #messages { overflow-x: hidden; overflow-y: auto; }
+    .bubble-wrap .bubble-inner { max-width: 85%; display: inline-block; min-width: 0; overflow-wrap: break-word; word-break: break-word; overflow-x: hidden; -webkit-user-select: text; user-select: text; }
+    #messages { overflow-x: hidden; overflow-y: auto; -webkit-user-select: text; user-select: text; }
+    #input { -webkit-user-select: text; user-select: text; }
     .sidebar-btn { width: 100%; text-align: center; border-left: 3px solid transparent; border-radius: 0; display: flex; align-items: center; justify-content: center; padding: 0.75rem; }
     .sidebar-btn.active { border-left-color: #0ea5e9; background: #f0f9ff; color: #0284c7; }
     .icon-btn { display: inline-flex; align-items: center; justify-content: center; }
@@ -25,6 +28,26 @@
     .bubble-loading-dots span:nth-child(2) { animation-delay: 0.1s; }
     .bubble-loading-dots span:nth-child(3) { animation-delay: 0.2s; }
     @keyframes bubble-dot { 0%, 100% { transform: scale(0.85); opacity: 0.6; } 50% { transform: scale(1.2); opacity: 1; } }
+    .thinking-wrap { max-width: 85%; }
+    .thinking-header { cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .thinking-header .chevron { transition: transform 0.2s ease; flex-shrink: 0; }
+    .thinking-wrap.thinking-collapsed .thinking-header .chevron { transform: rotate(-90deg); }
+    .thinking-body { max-height: 40vh; overflow-y: auto; }
+    .thinking-wrap.thinking-collapsed .thinking-body { display: none; }
+    .bubble-inner.markdown-body { line-height: 1.6; }
+    .bubble-inner.markdown-body p { margin: 0.5em 0; }
+    .bubble-inner.markdown-body p:first-child { margin-top: 0; }
+    .bubble-inner.markdown-body p:last-child { margin-bottom: 0; }
+    .bubble-inner.markdown-body ul, .bubble-inner.markdown-body ol { margin: 0.5em 0; padding-left: 1.5em; }
+    .bubble-inner.markdown-body li { margin: 0.25em 0; }
+    .bubble-inner.markdown-body pre { margin: 0.5em 0; padding: 0.75em; border-radius: 6px; overflow-x: auto; font-size: 0.875em; line-height: 1.4; }
+    .bubble-inner.markdown-body code { padding: 0.15em 0.35em; border-radius: 4px; font-size: 0.9em; }
+    .bubble-inner.markdown-body pre code { padding: 0; }
+    .bubble-inner.markdown-body h1, .bubble-inner.markdown-body h2, .bubble-inner.markdown-body h3 { margin: 0.75em 0 0.35em; font-weight: 600; }
+    .bubble-inner.markdown-body h1:first-child, .bubble-inner.markdown-body h2:first-child, .bubble-inner.markdown-body h3:first-child { margin-top: 0; }
+    .bubble-inner.markdown-body blockquote { margin: 0.5em 0; padding-left: 1em; border-left: 3px solid currentColor; opacity: 0.9; }
+    .bubble-inner.markdown-body strong { font-weight: 600; }
+    .bubble-inner.markdown-body a { color: inherit; text-decoration: underline; }
   </style>
 </head>
 <body class="flex flex-col bg-slate-50 h-screen overflow-hidden">
@@ -191,6 +214,10 @@
       const btn = document.querySelector('.sidebar-btn[data-panel="' + name + '"]');
       if (panel) panel.classList.remove('hidden');
       if (btn) btn.classList.add('active');
+      if (name === 'dialogue') {
+        scrollToBottom();
+        setTimeout(() => scrollToBottom(), 80);
+      }
       if (name === 'history') loadHistorySessions();
       if (name === 'monitor') loadMonitor();
       if (name === 'content') loadContentPanel();
@@ -206,46 +233,112 @@
       });
     }
 
+    function renderMarkdown(text) {
+      if (typeof text !== 'string' || !text.trim()) return '';
+      try {
+        if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+          if (marked.setOptions) marked.setOptions({ breaks: true });
+          const raw = text.trim();
+          const html = (typeof marked.parse === 'function' ? marked.parse(raw) : marked(raw));
+          return DOMPurify.sanitize(html, { ALLOWED_TAGS: ['p', 'br', 'ul', 'ol', 'li', 'strong', 'em', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'a', 'span', 'div'], ALLOWED_ATTR: ['href', 'target'] });
+        }
+      } catch (e) { console.warn('markdown render', e); }
+      return text.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+    }
+
     function addBubble(role, content) {
       const wrap = document.createElement('div');
       wrap.className = 'bubble-wrap ' + (role === 'user' ? 'user' : 'assistant');
       const inner = document.createElement('div');
       inner.className = 'bubble-inner rounded-lg px-3 py-2 ' + (role === 'user' ? 'bubble-user' : 'bubble-assistant');
-      inner.textContent = content;
+      if (role === 'assistant') {
+        inner.classList.add('markdown-body');
+        inner.innerHTML = renderMarkdown(content);
+      } else {
+        inner.textContent = content;
+      }
       wrap.appendChild(inner);
       messagesEl.appendChild(wrap);
       scrollToBottom();
     }
 
+    let currentThinkingRow = null;
+    let currentThinkingBody = null;
+    let currentThinkingStartTime = 0;
+
+    function renderOneAction(a) {
+      const name = (a && a.name) ? a.name : '?';
+      let argsStr = '';
+      try {
+        const ar = a.args;
+        if (ar && typeof ar === 'object') argsStr = JSON.stringify(ar).slice(0, 80);
+        else if (typeof ar === 'string') argsStr = ar.slice(0, 80);
+      } catch (_) {}
+      const resultStr = (a && a.result != null) ? String(a.result).slice(0, 120) : '';
+      const div = document.createElement('div');
+      div.className = 'mt-0.5 text-xs break-words';
+      div.textContent = name + (argsStr ? ': ' + argsStr : '') + (resultStr ? ' → ' + resultStr : '');
+      return div;
+    }
+
+    function setThinkingBodyFull(bodyEl, payload) {
+      if (!bodyEl || !payload || !payload.length) return;
+      bodyEl.innerHTML = '';
+      const isBatches = Array.isArray(payload[0]);
+      if (isBatches) {
+        payload.forEach((batch, roundIndex) => {
+          if (!Array.isArray(batch) || !batch.length) return;
+          const roundTitle = document.createElement('div');
+          roundTitle.className = 'text-xs font-medium text-sky-600 mt-2 first:mt-0';
+          roundTitle.textContent = '第 ' + (roundIndex + 1) + ' 轮';
+          bodyEl.appendChild(roundTitle);
+          batch.forEach((a) => bodyEl.appendChild(renderOneAction(a)));
+        });
+      } else {
+        payload.forEach((a) => bodyEl.appendChild(renderOneAction(a)));
+      }
+    }
+
     function addAgentActionsToDialogue(actions) {
       if (!actions || !actions.length) return;
-      const row = document.createElement('div');
-      row.className = 'bubble-wrap assistant';
-      const wrap = document.createElement('div');
-      wrap.className = 'bubble-inner rounded-lg px-3 py-2 max-w-[85%] border border-sky-200 bg-sky-50/80 text-slate-700 text-sm break-words';
-      const title = document.createElement('div');
-      title.className = 'font-medium text-sky-700 mb-1';
-      title.textContent = '工具调用';
-      wrap.appendChild(title);
-      actions.forEach((a) => {
-        const name = (a && a.name) ? a.name : '?';
-        let argsStr = '';
-        try {
-          const ar = a.args;
-          if (ar && typeof ar === 'object') argsStr = JSON.stringify(ar).slice(0, 80);
-          else if (typeof ar === 'string') argsStr = ar.slice(0, 80);
-        } catch (_) {}
-        const resultStr = (a && a.result != null) ? String(a.result).slice(0, 120) : '';
-        const div = document.createElement('div');
-        div.className = 'mt-0.5 text-xs';
-        div.textContent = name + (argsStr ? ': ' + argsStr : '') + (resultStr ? ' → ' + resultStr : '');
-        wrap.appendChild(div);
-      });
       const streaming = messagesEl.querySelector('.streaming');
       const insertBefore = streaming ? streaming.closest('.bubble-wrap') || streaming : null;
-      if (insertBefore) messagesEl.insertBefore(row, insertBefore);
-      else messagesEl.appendChild(row);
-      row.appendChild(wrap);
+
+      if (!currentThinkingRow) {
+        currentThinkingStartTime = Date.now();
+        const row = document.createElement('div');
+        row.className = 'bubble-wrap assistant thinking-wrap';
+        const wrap = document.createElement('div');
+        wrap.className = 'bubble-inner rounded-lg px-3 py-2 border border-sky-200 bg-sky-50/80 text-slate-700 text-sm thinking-wrap';
+        const header = document.createElement('div');
+        header.className = 'thinking-header font-medium text-sky-700';
+        header.innerHTML = '<span class="thinking-title">已思考 (思考中…)</span><span class="chevron" aria-hidden="true">▼</span>';
+        const body = document.createElement('div');
+        body.className = 'thinking-body mt-2 pt-2 border-t border-sky-200/60';
+        header.addEventListener('click', () => {
+          row.classList.toggle('thinking-collapsed');
+          scrollToBottom();
+        });
+        wrap.appendChild(header);
+        wrap.appendChild(body);
+        row.appendChild(wrap);
+        if (insertBefore) messagesEl.insertBefore(row, insertBefore);
+        else messagesEl.appendChild(row);
+        currentThinkingRow = row;
+        currentThinkingBody = body;
+      }
+      setThinkingBodyFull(currentThinkingBody, actions);
+      scrollToBottom();
+    }
+
+    function collapseThinkingBlock() {
+      if (!currentThinkingRow) return;
+      const elapsed = Math.round((Date.now() - currentThinkingStartTime) / 1000);
+      const titleEl = currentThinkingRow.querySelector('.thinking-title');
+      if (titleEl) titleEl.textContent = '已思考 (用时 ' + elapsed + ' 秒)';
+      currentThinkingRow.classList.add('thinking-collapsed');
+      currentThinkingRow = null;
+      currentThinkingBody = null;
       scrollToBottom();
     }
 
@@ -289,7 +382,12 @@
           const row = last.closest('.bubble-wrap');
           if (row) row.remove();
           else last.remove();
-        } else last.classList.remove('streaming');
+        } else {
+          last.classList.remove('streaming');
+          last.classList.add('markdown-body');
+          const raw = (last.textContent || '').trim();
+          if (raw) last.innerHTML = renderMarkdown(raw);
+        }
       }
       streamBuffer = '';
     }
@@ -308,6 +406,8 @@
       if (!text || !window.aris) return;
       inputEl.value = '';
       hadStreamingChunks = false;
+      currentThinkingRow = null;
+      currentThinkingBody = null;
       addBubble('user', text);
       addLoadingBubble();
       setSending(true);
@@ -322,17 +422,20 @@
       try {
         const result = await window.aris.sendMessage(text);
         finishStream();
+        collapseThinkingBlock();
         unsubChunk && unsubChunk();
         if (unsubActions) unsubActions();
         if (result && result.error) addBubble('assistant', '[出错了]');
         else if (result && result.content && !hadStreamingChunks) addBubble('assistant', result.content);
       } catch (e) {
         finishStream();
+        collapseThinkingBlock();
         unsubChunk && unsubChunk();
         if (unsubActions) unsubActions();
         addBubble('assistant', '[发送失败]');
       } finally {
         setSending(false);
+        scrollToBottom();
       }
     }
 
@@ -343,6 +446,36 @@
     }
 
     btnMinimize.addEventListener('click', () => window.aris && window.aris.minimizeWindow());
+
+    async function loadCurrentDialogue() {
+      if (!messagesEl || !window.aris) return;
+      try {
+        const sessionId = await window.aris.getCurrentSessionId();
+        if (!sessionId) return;
+        const list = await window.aris.getConversation(sessionId);
+        if (!list || list.length === 0) return;
+        messagesEl.innerHTML = '';
+        list.forEach(({ role, content }) => {
+          const wrap = document.createElement('div');
+          wrap.className = 'bubble-wrap ' + (role === 'user' ? 'user' : 'assistant');
+          const inner = document.createElement('div');
+          inner.className = 'bubble-inner rounded-lg px-3 py-2 ' + (role === 'user' ? 'bubble-user' : 'bubble-assistant');
+          if (role === 'assistant') {
+            inner.classList.add('markdown-body');
+            inner.innerHTML = renderMarkdown(content || '');
+          } else {
+            inner.textContent = content || '';
+          }
+          wrap.appendChild(inner);
+          messagesEl.appendChild(wrap);
+        });
+        scrollToBottom();
+        setTimeout(() => scrollToBottom(), 100);
+      } catch (_) {}
+    }
+    if (window.aris) loadCurrentDialogue();
+
+    requestAnimationFrame(() => scrollToBottom());
 
     function formatTime(ts) {
       if (ts == null) return '';
@@ -358,6 +491,8 @@
       ul.innerHTML = '';
       if (!list || list.length === 0) {
         empty.classList.remove('hidden');
+        document.getElementById('history-msg-empty').classList.remove('hidden');
+        document.getElementById('history-messages').innerHTML = '';
         return;
       }
       empty.classList.add('hidden');
@@ -374,6 +509,23 @@
         li.appendChild(btn);
         ul.appendChild(li);
       });
+      if (currentId) {
+        loadHistoryConversation(currentId);
+      } else if (list.length > 0 && list[0].session_id) {
+        loadHistoryConversation(list[0].session_id);
+      }
+    }
+
+    function scrollHistoryToBottom() {
+      const container = document.getElementById('history-messages');
+      if (!container) return;
+      const scrollParent = container.parentElement;
+      if (scrollParent) {
+        requestAnimationFrame(() => {
+          scrollParent.scrollTop = scrollParent.scrollHeight;
+        });
+        setTimeout(() => { scrollParent.scrollTop = scrollParent.scrollHeight; }, 50);
+      }
     }
 
     async function loadHistoryConversation(sessionId) {
@@ -384,6 +536,7 @@
       container.innerHTML = '';
       if (!list || list.length === 0) {
         container.appendChild(document.createTextNode('（无消息）'));
+        scrollHistoryToBottom();
         return;
       }
       list.forEach(({ role, content, created_at }) => {
@@ -399,6 +552,7 @@
         div.appendChild(time);
         container.appendChild(div);
       });
+      scrollHistoryToBottom();
     }
 
     document.getElementById('history-refresh').addEventListener('click', () => loadHistorySessions());

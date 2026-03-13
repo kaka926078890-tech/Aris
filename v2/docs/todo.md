@@ -86,6 +86,8 @@
 - [x] 端到端：启动 Electron → 对话收发、工具调用、记录类仅写 store
 - [ ] 管理端：文档与内容在页面上可读写并持久化（可后续迭代）
 - [x] Proactive 逻辑完整：状态、情感/表达欲望从 store 读，写回 state；低功耗/未回应计数
+- [x] **Proactive 低功耗缺口**：当已在 low_power_mode 且最近用户消息「未恢复对话」时，proactive 应直接 return null，不再发主动消息（已在 proactive.js 中在恢复判断后增加 stateNow.low_power_mode 检查并 return null）
+- [ ] **安静/恢复关键词去硬编码**：shouldBeQuiet、isResumingDialogue 当前为硬编码短语列表，建议改为配置文件或 store 可编辑列表，便于扩展与维护
 - [ ] 可选：监控（token、文件修改）；可选：自升级；可选：getActiveWindowTitle
 - [x] docs/ARCHITECTURE.md：架构图、数据流、与现网关系、对话库与向量库角色
 - [x] 检查：无引用现有 src/；无正则/关键词解析写入身份/要求/纠错/情感/表达

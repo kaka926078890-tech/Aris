@@ -45,10 +45,75 @@ function normalize(s) {
   return (s || '').replace(/[，。？、\s]/g, '').trim();
 }
 
+// 检查用户是否明确要求安静
+function shouldBeQuiet(userContent) {
+  if (!userContent || typeof userContent !== 'string') return false;
+  
+  const quietPhrases = [
+    '歇会', '安静待会', '安静待着', '别说话', '别打扰', '让我静静',
+    '自己待会', '别理我', '别烦我', '需要安静', '想静静', '忙自己的事情去'
+  ];
+  
+  const contentLower = userContent.toLowerCase();
+  for (const phrase of quietPhrases) {
+    if (contentLower.includes(phrase.toLowerCase())) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+// 用户主动发消息且非「要求安静」即视为恢复对话，不依赖特定关键词
+function isResumingDialogue(userContent) {
+  if (!userContent || typeof userContent !== 'string') return false;
+  const trimmed = userContent.trim();
+  if (!trimmed) return false;
+  return !shouldBeQuiet(userContent);
+}
+
 async function maybeProactiveMessage() {
   try {
     const proactiveState = store.state.readProactiveState();
-    if (proactiveState.low_power_mode) return null;
+    
+    // 如果已经在低功耗模式，检查是否可以恢复
+    if (proactiveState.low_power_mode) {
+      const sessionId = await store.conversations.getCurrentSessionId();
+      const recent = await store.conversations.getRecent(sessionId, 5);
+      
+      // 检查最近是否有用户消息
+      const recentUserMessages = recent.filter(r => r.role === 'user');
+      if (recentUserMessages.length > 0) {
+        const latestUserMessage = recentUserMessages[recentUserMessages.length - 1].content;
+        // 如果用户是在恢复对话，就退出低功耗模式
+        if (isResumingDialogue(latestUserMessage)) {
+          store.state.writeProactiveState({ low_power_mode: false, proactive_no_reply_count: 0 });
+          console.info('[Aris v2][proactive] 用户恢复对话，退出低功耗模式');
+        }
+      } else {
+        return null;
+      }
+    }
+
+    // 若仍在低功耗（用户未恢复对话），不发任何主动消息
+    const stateNow = store.state.readProactiveState();
+    if (stateNow.low_power_mode) return null;
+
+    const sessionId = await store.conversations.getCurrentSessionId();
+    const recent = await store.conversations.getRecent(sessionId, 10);
+    
+    // 检查最近用户消息是否要求安静
+    const recentUserMessages = recent.filter(r => r.role === 'user');
+    if (recentUserMessages.length > 0) {
+      const latestUserMessage = recentUserMessages[recentUserMessages.length - 1].content;
+      if (shouldBeQuiet(latestUserMessage)) {
+        if (!proactiveState.low_power_mode) {
+          store.state.writeProactiveState({ low_power_mode: true, proactive_no_reply_count: 0 });
+          console.info('[Aris v2][proactive] 用户要求安静，进入低功耗模式');
+        }
+        return null;
+      }
+    }
 
     const nextCount = proactiveState.proactive_no_reply_count + 1;
     if (nextCount >= 4) {
@@ -57,8 +122,6 @@ async function maybeProactiveMessage() {
     }
     store.state.writeProactiveState({ proactive_no_reply_count: nextCount });
 
-    const sessionId = await store.conversations.getCurrentSessionId();
-    const recent = await store.conversations.getRecent(sessionId, 10);
     const contextLines = recent.map((r) => `${r.role === 'user' ? '用户' : 'Aris'}: ${r.content}`).join('\n');
 
     const desires = store.expressionDesires.getRecent(10);

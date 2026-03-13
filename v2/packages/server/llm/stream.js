@@ -65,6 +65,11 @@ async function chatStream(messages, onChunk, signal) {
       }
     }
     if (usage) console.info('[Aris v2] DeepSeek chatStream done: prompt_tokens=', usage.prompt_tokens, 'completion_tokens=', usage.completion_tokens);
+    const previewLen = 280;
+    if (content && content.length > 0) {
+      const p = content.length <= previewLen ? content : content.slice(0, previewLen) + '…';
+      console.info('[Aris v2] DeepSeek chatStream 返回内容:', p);
+    }
     return { content, error: false, usage, aborted: !!(signal && signal.aborted) };
   } catch (e) {
     if (e && e.name === 'AbortError') return { content: '', error: false, aborted: true };
