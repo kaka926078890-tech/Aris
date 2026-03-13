@@ -11,7 +11,7 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 
 ```bash
 cd v2
-npm install
+npm install   # 根目录安装即可，postinstall 会自动在 apps/renderer 安装前端依赖，无需再进 apps 执行 install
 # 可选：复制 .env（或从项目根复制），配置 DEEPSEEK_API_KEY、OLLAMA_HOST 等
 cp .env.example .env
 # 启动 Electron（会加载 apps/renderer/index.html）

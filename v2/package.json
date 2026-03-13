@@ -6,9 +6,9 @@
   "main": "apps/electron/main.js",
   "scripts": {
     "start": "electron .",
-    "postinstall": "cd apps/renderer && npm install 2>/dev/null || true",
-    "dev:renderer": "cd apps/renderer && npm run dev",
-    "build:renderer": "cd apps/renderer && npm run build"
+    "postinstall": "node scripts/install-renderer.js",
+    "dev:renderer": "node scripts/run-in-renderer.js dev",
+    "build:renderer": "node scripts/run-in-renderer.js build"
   },
   "keywords": ["aris", "electron", "chatbot"],
   "author": "",
