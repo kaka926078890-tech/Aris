@@ -18,6 +18,21 @@ cp .env.example .env
 npm start
 ```
 
+### 常见问题
+
+- **`npm start` 报错：`'electron' 不是内部或外部命令`**
+  - **原因**：当前环境还没有在 `v2` 目录安装依赖（尤其是 `electron`），或安装过程未完成。
+  - **解决方式**：
+    - 确认在 `v2` 目录执行过一次完整的依赖安装：
+      ```bash
+      cd v2
+      npm install
+      ```
+    - 安装完成后重新执行：
+      ```bash
+      npm start
+      ```
+
 ## 文档
 
 - [架构](docs/ARCHITECTURE.md)

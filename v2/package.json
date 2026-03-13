@@ -10,7 +10,11 @@
     "dev:renderer": "node scripts/run-in-renderer.js dev",
     "build:renderer": "node scripts/run-in-renderer.js build"
   },
-  "keywords": ["aris", "electron", "chatbot"],
+  "keywords": [
+    "aris",
+    "electron",
+    "chatbot"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
@@ -18,5 +22,8 @@
     "dotenv": "^16.4.5",
     "jsonrepair": "^3.13.2",
     "sql.js": "^1.10.0"
+  },
+  "devDependencies": {
+    "electron": "^41.0.2"
   }
 }
