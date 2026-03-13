@@ -1,14 +1,19 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '..', '.env') });
 const { app, BrowserWindow, ipcMain, Menu, dialog } = require('electron');
 const path = require('path');
-const { handleUserMessage, getPromptPreview } = require('../../packages/server');
+const { handleUserMessage, getPromptPreview, maybeProactiveMessage } = require('../../packages/server');
 const { exportToFile, importFromFile } = require('./backup.js');
 const store = require('../../packages/store');
 const { RENDERER_INDEX, PRELOAD_SCRIPT } = require('./config.js');
 
+const PROACTIVE_INTERVAL_MS = 3 * 60 * 1000;
+const PROACTIVE_IDLE_MS = 2 * 60 * 1000;
+
 let mainWindow = null;
 let dialogueBusy = false;
 let dialogueAbortController = null;
+let lastDialogueAt = 0;
+let proactiveTimer = null;
 
 function createWindow() {
   const isMac = process.platform === 'darwin';
@@ -104,7 +109,9 @@ ipcMain.handle('dialogue:send', async (event, userContent) => {
     if (event.sender && !event.sender.isDestroyed()) event.sender.send('dialogue:agentActions', actions);
   };
   try {
-    return await handleUserMessage(userContent, sendChunk, sendAgentActions, dialogueAbortController.signal);
+    const result = await handleUserMessage(userContent, sendChunk, sendAgentActions, dialogueAbortController.signal);
+    lastDialogueAt = Date.now();
+    return result;
   } finally {
     dialogueAbortController = null;
     dialogueBusy = false;
@@ -143,8 +150,26 @@ ipcMain.handle('history:clearAll', async () => {
   await store.conversations.clearAllConversations();
 });
 
+function runProactiveCheck() {
+  if (dialogueBusy || !mainWindow || mainWindow.isDestroyed()) return;
+  if (Date.now() - lastDialogueAt < PROACTIVE_IDLE_MS) return;
+  maybeProactiveMessage()
+    .then((msg) => {
+      if (msg && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('aris:proactive', msg);
+      }
+    })
+    .catch((e) => console.warn('[Aris v2][electron] proactive check failed', e?.message));
+}
+
+function startProactiveInterval() {
+  if (proactiveTimer) return;
+  proactiveTimer = setInterval(runProactiveCheck, PROACTIVE_INTERVAL_MS);
+}
+
 app.whenReady().then(() => {
   createWindow();
+  startProactiveInterval();
 });
 
 app.on('window-all-closed', () => {

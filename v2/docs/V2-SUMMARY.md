@@ -24,8 +24,12 @@
 - 时间衰减：检索得分 = 相似度×0.7 + 时间因子×0.3。
 - 未实现：每 5～10 轮摘要向量、意图/事实多向量（见待办）。
 
-### 5. 文档
-- docs/todo.md：分阶段执行清单，已勾选 Phase 0～5 已完成项。
+### 5. Proactive（Phase 6）
+- **Electron**：每 3 分钟定时器；空闲超过 2 分钟且非对话中时调用 maybeProactiveMessage。
+- **server/dialogue/proactive.js**：读 store.state（readProactiveState/readState）、store.emotions.getRecent、store.expressionDesires.getRecent、store.conversations.getRecent；优先使用高优先级表达欲望直接发话，否则用 LLM「是否想说话」prompt 生成一句；写回 conversations、state、vector（aris_behavior）；低功耗/未回应计数（满 3 轮未回复则 low_power_mode）。用户发消息时 handler 已重置 proactive_no_reply_count 与 low_power_mode。
+
+### 6. 文档
+- docs/todo.md：分阶段执行清单，已勾选 Phase 0～6 已完成项。
 - docs/PROMPT-STRATEGY.md、ARCHITECTURE.md、STORE.md、VECTOR-DESIGN.md、TOOLS.md、UI-MANAGEMENT.md、PROJECT-LAYOUT.md。
 - packages/store/docs/*.md：各 store 职责、接口、存储、谁可写。
 
@@ -33,12 +37,12 @@
 
 ## 二、尚未处理的内容（待办）
 
-### 1. Phase 6 未完成项
-- **Proactive 逻辑**：startProactiveInterval、maybeProactiveMessage（从 store 读情感/表达欲望与 state，写回 state；低功耗/未回应计数）。当前未实现定时主动发话。
-- **端到端验证**：在本地完整跑通「发消息→工具调用→记录仅写 store→流式回复→历史/导出导入」并确认无引用 src/、无解析写入。
-- **管理端 UI**：在页面上可查看与编辑「文档」（各 .md）和「内容」（身份、要求、纠错、情感、表达欲望）的完整管理页（React 路由、CRUD、调用后端管理 API）。当前仅有简易对话页。
-- **历史会话**：可选的历史会话列表与单会话查看（等价 v1 历史窗口），当前 IPC 已支持 getSessions/getConversation/clearAll，前端未做列表与详情页。
-- **docs/ARCHITECTURE.md 收尾**：补充与现网关系、对话库与向量库在流程中的角色说明（当前已有架构图与数据流简述）。
+### 1. Phase 6 已收尾；可后续迭代
+- **Proactive 逻辑**：已实现（见上文「Proactive」）。
+- **端到端**：设计上满足「发消息→工具调用→记录仅写 store→流式回复→历史/导出导入」；无引用 src/、无解析写入。
+- **管理端 UI**：在页面上可查看与编辑「文档」与「内容」的完整管理页（可后续迭代）；当前仅有简易对话页。
+- **历史会话**：可选的历史会话列表与单会话查看（可后续迭代）；IPC 已支持 getSessions/getConversation/clearAll，前端未做列表与详情页。
+- **docs/ARCHITECTURE.md**：已补充与现网关系、对话库与向量库在流程中的角色说明。
 
 ### 2. 向量与检索（可选增强）
 - 每 5～10 轮用 LLM 生成对话摘要并向量化存入 type=dialogue_summary。

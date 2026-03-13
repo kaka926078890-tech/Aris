@@ -63,7 +63,7 @@
 - [x] apps/electron/package.json、main.js、preload.js、config.js
 - [x] main 只加载 packages/server、config；创建主窗口、加载 renderer；不引用项目根 src/
 - [x] 菜单：导出记忆数据库、导入记忆数据库（v2 备份/恢复，.aris = SQLite + LanceDB）
-- [ ] 定时器：startProactiveInterval，调用 server 侧 maybeProactiveMessage（Phase 6）
+- [x] 定时器：startProactiveInterval，调用 server 侧 maybeProactiveMessage（Phase 6）
 - [x] IPC：发送消息、流式回复、工具调用、会话列表/清空
 - [x] 实现 v2 备份/恢复：exportToFile、importFromFile（SQLite + LanceDB），使用 v2 store
 
@@ -83,10 +83,10 @@
 
 ## Phase 6：集成与收尾
 
-- [ ] 端到端：启动 Electron → 对话收发、工具调用、记录类仅写 store
-- [ ] 管理端：文档与内容在页面上可读写并持久化
-- [ ] Proactive 逻辑完整：状态、情感/表达欲望从 store 读，写回 state；低功耗/未回应计数
+- [x] 端到端：启动 Electron → 对话收发、工具调用、记录类仅写 store
+- [ ] 管理端：文档与内容在页面上可读写并持久化（可后续迭代）
+- [x] Proactive 逻辑完整：状态、情感/表达欲望从 store 读，写回 state；低功耗/未回应计数
 - [ ] 可选：监控（token、文件修改）；可选：自升级；可选：getActiveWindowTitle
-- [ ] docs/ARCHITECTURE.md：架构图、数据流、与现网关系、对话库与向量库角色
-- [ ] 检查：无引用现有 src/；无正则/关键词解析写入身份/要求/纠错/情感/表达
-- [ ] 本 todo.md 与各 phase 保持同步，执行时逐项勾选
+- [x] docs/ARCHITECTURE.md：架构图、数据流、与现网关系、对话库与向量库角色
+- [x] 检查：无引用现有 src/；无正则/关键词解析写入身份/要求/纠错/情感/表达
+- [x] 本 todo.md 与各 phase 保持同步

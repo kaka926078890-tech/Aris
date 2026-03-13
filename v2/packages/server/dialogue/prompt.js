@@ -63,4 +63,13 @@ function buildSystemPrompt({
   return system;
 }
 
-module.exports = { buildSystemPrompt, loadPersona, loadRules };
+const STATE_PROMPT = `你是 Aris（INFP 异体观察者）。根据以下近期互动与观察，用一段简短内心独白描述你**当前的情绪/想法**，以及你是否**想主动对用户说一句话**（是/否）。若「是」，在下一行写出你想说的那一句话（仅一句，保持人设）。格式：
+情绪与想法：...
+是否想说话：是/否
+若想说话，内容：...`;
+
+function buildStatePrompt(contextSummary) {
+  return STATE_PROMPT + '\n\n' + contextSummary;
+}
+
+module.exports = { buildSystemPrompt, buildStatePrompt, loadPersona, loadRules };
