@@ -67,9 +67,9 @@
         <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="prompt" title="提示词预览" aria-label="提示词预览"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg></button>
       </nav>
     </aside>
-    <div class="flex-1 flex flex-col min-h-0 overflow-hidden bg-slate-50">
-  <div id="panel-dialogue" class="panel flex-1 flex flex-col min-h-0 overflow-hidden">
-    <main class="flex-1 min-h-0 overflow-y-auto p-4 space-y-3" id="messages"></main>
+    <div class="flex-1 flex flex-col min-h-0 overflow-hidden overflow-x-hidden bg-slate-50">
+  <div id="panel-dialogue" class="panel flex-1 flex flex-col min-h-0 overflow-hidden overflow-x-hidden">
+    <main class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 space-y-3" id="messages"></main>
     <footer class="border-t border-slate-200 bg-white p-3 flex-shrink-0">
       <div class="flex gap-2 items-end">
         <textarea id="input" rows="1" placeholder="输入消息，Shift+Enter 换行…" class="flex-1 min-h-[40px] max-h-[120px] resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500 overflow-y-auto"></textarea>
@@ -79,20 +79,14 @@
     </footer>
   </div>
 
-  <div id="panel-history" class="panel hidden flex-1 flex flex-col min-h-0">
+  <div id="panel-history" class="panel hidden flex-1 flex flex-col min-h-0 overflow-x-hidden">
     <div class="flex-shrink-0 flex items-center gap-2 px-3 py-2 border-b border-slate-200 bg-white">
       <button id="history-refresh" class="icon-btn p-2 rounded border border-slate-300 text-slate-600 hover:bg-slate-100" title="刷新"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg></button>
       <button id="history-clear" class="icon-btn p-2 rounded border border-red-300 text-red-600 hover:bg-red-50" title="删除全部"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
     </div>
-    <div class="flex-1 min-h-0 flex overflow-hidden">
-      <div class="w-36 flex-shrink-0 border-r border-slate-200 overflow-y-auto bg-white">
-        <ul id="history-sessions" class="p-2 space-y-1 text-sm"></ul>
-        <p id="history-empty" class="hidden p-2 text-slate-500 text-xs">暂无会话</p>
-      </div>
-      <div class="flex-1 min-h-0 overflow-y-auto p-3">
-        <div id="history-messages" class="space-y-2"></div>
-        <p id="history-msg-empty" class="text-slate-500 text-sm">选择左侧会话查看</p>
-      </div>
+    <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3">
+      <div id="history-messages" class="space-y-2 min-w-0"></div>
+      <p id="history-msg-empty" class="text-slate-500 text-sm">暂无会话</p>
     </div>
   </div>
 
@@ -447,13 +441,15 @@
 
     btnMinimize.addEventListener('click', () => window.aris && window.aris.minimizeWindow());
 
+    const DIALOGUE_RECENT_LIMIT = 10;
     async function loadCurrentDialogue() {
       if (!messagesEl || !window.aris) return;
       try {
         const sessionId = await window.aris.getCurrentSessionId();
         if (!sessionId) return;
-        const list = await window.aris.getConversation(sessionId);
+        let list = await window.aris.getConversation(sessionId);
         if (!list || list.length === 0) return;
+        list = list.slice(-DIALOGUE_RECENT_LIMIT);
         messagesEl.innerHTML = '';
         list.forEach(({ role, content }) => {
           const wrap = document.createElement('div');
@@ -485,35 +481,16 @@
 
     async function loadHistorySessions() {
       if (!window.aris) return;
-      const list = await window.aris.getSessions();
-      const ul = document.getElementById('history-sessions');
-      const empty = document.getElementById('history-empty');
-      ul.innerHTML = '';
-      if (!list || list.length === 0) {
-        empty.classList.remove('hidden');
-        document.getElementById('history-msg-empty').classList.remove('hidden');
-        document.getElementById('history-messages').innerHTML = '';
-        return;
-      }
-      empty.classList.add('hidden');
       let currentId = null;
       try { currentId = await window.aris.getCurrentSessionId(); } catch (_) {}
-      list.forEach(({ session_id, last_at }) => {
-        const li = document.createElement('li');
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'w-full text-left px-2 py-1.5 rounded text-xs truncate ' + (session_id === currentId ? 'bg-sky-100 text-sky-800' : 'hover:bg-slate-100');
-        btn.textContent = (session_id || '').slice(-8) + ' ' + formatTime(last_at);
-        btn.dataset.sessionId = session_id;
-        btn.addEventListener('click', () => loadHistoryConversation(session_id));
-        li.appendChild(btn);
-        ul.appendChild(li);
-      });
-      if (currentId) {
-        loadHistoryConversation(currentId);
-      } else if (list.length > 0 && list[0].session_id) {
-        loadHistoryConversation(list[0].session_id);
+      const emptyEl = document.getElementById('history-msg-empty');
+      const container = document.getElementById('history-messages');
+      if (!currentId) {
+        container.innerHTML = '';
+        if (emptyEl) emptyEl.classList.remove('hidden');
+        return;
       }
+      loadHistoryConversation(currentId);
     }
 
     function scrollHistoryToBottom() {
@@ -530,15 +507,17 @@
 
     async function loadHistoryConversation(sessionId) {
       if (!window.aris) return;
-      document.getElementById('history-msg-empty').classList.add('hidden');
+      const emptyEl = document.getElementById('history-msg-empty');
+      if (emptyEl) emptyEl.classList.add('hidden');
       const list = await window.aris.getConversation(sessionId);
       const container = document.getElementById('history-messages');
       container.innerHTML = '';
       if (!list || list.length === 0) {
-        container.appendChild(document.createTextNode('（无消息）'));
+        if (emptyEl) { emptyEl.textContent = '（无消息）'; emptyEl.classList.remove('hidden'); }
         scrollHistoryToBottom();
         return;
       }
+      if (emptyEl) emptyEl.classList.add('hidden');
       list.forEach(({ role, content, created_at }) => {
         const div = document.createElement('div');
         div.className = role === 'user' ? 'text-right' : 'text-left';
@@ -560,9 +539,9 @@
       if (!confirm('确定删除全部历史记录？')) return;
       if (window.aris) {
         await window.aris.clearAllConversations();
-        loadHistorySessions();
         document.getElementById('history-messages').innerHTML = '';
-        document.getElementById('history-msg-empty').classList.remove('hidden');
+        const emptyEl = document.getElementById('history-msg-empty');
+        if (emptyEl) { emptyEl.textContent = '暂无会话'; emptyEl.classList.remove('hidden'); }
       }
     });
 
