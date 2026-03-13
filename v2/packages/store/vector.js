@@ -165,17 +165,26 @@ async function getRecentByType(type, limit = 10) {
     .slice(0, limit);
 }
 
+function toVectorArray(v) {
+  if (Array.isArray(v) && v.length > 0) return v;
+  if (v && typeof v.length === 'number') return Array.from(v);
+  return [];
+}
+
 async function exportAll() {
   await getLance();
   if (!table) return [];
   const rows = await table.query().limit(100000).toArray();
-  return rows.map((r) => ({
-    text: r.text,
-    vector: Array.isArray(r.vector) ? r.vector : [],
-    type: r.type,
-    created_at: r.created_at,
-    metadata: r.metadata || {},
-  })).filter((r) => r.vector && r.vector.length > 0);
+  return rows.map((r) => {
+    const vector = toVectorArray(r.vector);
+    return {
+      text: r.text,
+      vector,
+      type: r.type,
+      created_at: r.created_at,
+      metadata: r.metadata || {},
+    };
+  }).filter((r) => r.vector && r.vector.length > 0);
 }
 
 async function resetAndImport(records) {
