@@ -14,6 +14,7 @@ async function chatStream(messages, onChunk, signal) {
     return { content: msg, error: true };
   }
   try {
+    console.info('[Aris v2] DeepSeek chatStream request: messages=', messages?.length || 0);
     const res = await fetch(`${DEEPSEEK_API}/v1/chat/completions`, {
       signal: signal || undefined,
       method: 'POST',
@@ -63,6 +64,7 @@ async function chatStream(messages, onChunk, signal) {
         }
       }
     }
+    if (usage) console.info('[Aris v2] DeepSeek chatStream done: prompt_tokens=', usage.prompt_tokens, 'completion_tokens=', usage.completion_tokens);
     return { content, error: false, usage, aborted: !!(signal && signal.aborted) };
   } catch (e) {
     if (e && e.name === 'AbortError') return { content: '', error: false, aborted: true };

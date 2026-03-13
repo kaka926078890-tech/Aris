@@ -14,6 +14,8 @@ async function chat(messages) {
     return { content: '[未配置 API Key]', error: true };
   }
   try {
+    const msgCount = Array.isArray(messages) ? messages.length : 0;
+    console.info('[Aris v2] DeepSeek chat request: messages=', msgCount, 'url=', DEEPSEEK_API);
     const res = await fetch(`${DEEPSEEK_API}/v1/chat/completions`, {
       method: 'POST',
       headers: {
@@ -30,6 +32,8 @@ async function chat(messages) {
     if (!res.ok) throw new Error(`DeepSeek ${res.status}: ${await res.text()}`);
     const data = await res.json();
     const msg = data.choices?.[0]?.message ?? {};
+    const usage = data.usage;
+    if (usage) console.info('[Aris v2] DeepSeek chat response: prompt_tokens=', usage.prompt_tokens, 'completion_tokens=', usage.completion_tokens);
     return { content: msg.content ?? '', tool_calls: msg.tool_calls ?? null, error: false };
   } catch (e) {
     console.error('[Aris v2] chat error', e);
@@ -39,9 +43,12 @@ async function chat(messages) {
 
 async function chatWithTools(messages, tools, signal) {
   if (!API_KEY) {
+    console.warn('[Aris v2] DEEPSEEK_API_KEY not set');
     return { content: '[未配置 API Key]', tool_calls: null, error: true };
   }
   try {
+    const toolCount = Array.isArray(tools) ? tools.length : 0;
+    console.info('[Aris v2] DeepSeek chatWithTools request: messages=', messages?.length || 0, 'tools=', toolCount);
     const res = await fetch(`${DEEPSEEK_API}/v1/chat/completions`, {
       signal: signal || undefined,
       method: 'POST',
@@ -62,6 +69,7 @@ async function chatWithTools(messages, tools, signal) {
     const data = await res.json();
     const msg = data.choices?.[0]?.message ?? {};
     const usage = data.usage ? { prompt_tokens: data.usage.prompt_tokens ?? 0, completion_tokens: data.usage.completion_tokens ?? 0 } : null;
+    if (usage) console.info('[Aris v2] DeepSeek chatWithTools response: prompt_tokens=', usage.prompt_tokens, 'completion_tokens=', usage.completion_tokens);
     return {
       content: msg.content ?? '',
       tool_calls: msg.tool_calls ?? null,

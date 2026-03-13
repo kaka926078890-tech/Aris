@@ -38,10 +38,14 @@ async function runMemoryTool(name, args) {
   const a = args || {};
   try {
     if (name === 'search_memories') {
-      if (!store.vector) return { ok: true, memories: [], text: '（向量库未就绪）' };
+      if (!store.vector) {
+        console.info('[Aris v2] 召回: 向量库未就绪');
+        return { ok: true, memories: [], text: '（向量库未就绪）' };
+      }
       const limit = Math.min(Math.max(Number(a.limit) || 5, 1), 15);
       const rows = await store.vector.search(a.query || '', limit);
       const texts = rows.map((r) => r.text).filter(Boolean);
+      console.info('[Aris v2] 召回:', texts.length, '条, query=', (a.query || '').slice(0, 40));
       return { ok: true, memories: texts, text: texts.length ? texts.join('\n---\n') : '（无相关记忆）' };
     }
     if (name === 'get_corrections') {

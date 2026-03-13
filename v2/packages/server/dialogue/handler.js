@@ -1,13 +1,13 @@
 /**
  * v2 对话 handler：方案 A prompt，工具循环，仅通过工具写入记录，禁止解析用户/助手文本。
  */
-const store = require('../../../store');
-const config = require('../../../config');
+const store = require('../../store');
+const config = require('../../config');
 const { buildSystemPrompt } = require('./prompt.js');
 const { ALL_TOOLS, runTool } = require('./tools/index.js');
 const { chatWithTools } = require('../llm/client.js');
 const { chatStream } = require('../llm/stream.js');
-const { DIALOGUE_CHUNK_PREV_ROUNDS } = require('../../../config/constants.js');
+const { DIALOGUE_CHUNK_PREV_ROUNDS } = require('../../config/constants.js');
 
 const RECENT_ROUNDS = 5;
 
@@ -69,6 +69,22 @@ function filterReplyForDisplay(text) {
   return text.replace(/\n{3,}/g, '\n\n').trim();
 }
 
+/** 检测是否为 DSML/工具标记类内容，避免写回对话导致模型继续输出或卡住 */
+function isDsmlOrToolMarkup(content) {
+  if (typeof content !== 'string' || !content.trim()) return false;
+  const s = content.trim();
+  return (s.includes('DSML') && (s.includes('<') || s.includes('>'))) || (s.includes('function_calls') && s.includes('invoke'));
+}
+
+/** 若为 DSML/标记则不再作为助手正文写回，避免下一轮/流式继续输出 */
+function sanitizeAssistantContent(content) {
+  if (content == null || content === '') return null;
+  const str = String(content).trim();
+  if (!str) return null;
+  if (isDsmlOrToolMarkup(str)) return null;
+  return str;
+}
+
 async function handleUserMessage(userContent, sendChunk, sendAgentActions, signal) {
   if (signal && signal.aborted) {
     const sessionId = await store.conversations.getCurrentSessionId();
@@ -80,11 +96,16 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   await store.conversations.append(sessionId, 'user', userContent);
   const recent = await store.conversations.getRecent(sessionId, RECENT_ROUNDS * 2 + 2);
   const { messages } = await buildPromptContext(sessionId, recent);
+  const sysLen = (messages[0] && messages[0].content) ? String(messages[0].content).length : 0;
+  console.info('[Aris v2] 本轮 prompt: system 约', sysLen, '字, 消息数', messages.length);
 
   let currentMessages = messages;
   let reply = '';
   let err = false;
   let hadToolCalls = false;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let hasOfficialUsage = false;
   const MAX_TOOL_ROUNDS = 20;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -93,19 +114,31 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     if (res.aborted) break;
     reply = res.content || '';
     err = res.error;
+    if (res.usage) {
+      totalInputTokens += Number(res.usage.prompt_tokens) || 0;
+      totalOutputTokens += Number(res.usage.completion_tokens) || 0;
+      hasOfficialUsage = true;
+    }
     if (!res.tool_calls || res.tool_calls.length === 0) break;
 
     hadToolCalls = true;
+    const assistantContent = sanitizeAssistantContent(res.content);
     const assistantMsg = {
       role: 'assistant',
-      content: res.content || null,
+      content: assistantContent || null,
       tool_calls: res.tool_calls,
     };
     const toolResults = await Promise.all(
       res.tool_calls.map(async (tc) => {
         const name = tc.function?.name;
         const args = tc.function?.arguments;
-        const result = await runTool(name, args);
+        let result;
+        try {
+          result = await runTool(name, args);
+        } catch (e) {
+          console.warn('[Aris v2] runTool error', name, e?.message);
+          result = { ok: false, error: String(e?.message || '执行异常') };
+        }
         return {
           role: 'tool',
           tool_call_id: tc.id,
@@ -129,9 +162,20 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   }
 
   if (hadToolCalls && currentMessages.length > 0) {
-    const streamRes = await chatStream(currentMessages, sendChunk || null, signal);
-    reply = streamRes.content || reply;
+    try {
+      const streamRes = await chatStream(currentMessages, sendChunk || null, signal);
+      reply = streamRes.content || reply;
+      if (streamRes.usage) {
+        totalInputTokens += Number(streamRes.usage.prompt_tokens) || 0;
+        totalOutputTokens += Number(streamRes.usage.completion_tokens) || 0;
+        hasOfficialUsage = true;
+      }
+    } catch (e) {
+      console.error('[Aris v2] chatStream error', e?.message);
+      if (!reply || isDsmlOrToolMarkup(reply)) reply = '（工具调用后的回复生成失败，请重试或换一种说法）';
+    }
   }
+  if (reply && isDsmlOrToolMarkup(reply)) reply = '';
   let contentForFrontend = filterReplyForDisplay(reply);
   if (sendChunk && contentForFrontend && !hadToolCalls) {
     for (let i = 0; i < contentForFrontend.length; i += 2) {
@@ -165,6 +209,16 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     last_active_time: new Date().toISOString(),
     last_mental_state: reply ? reply.slice(0, 300) : null,
   });
+
+  if (store.monitor && store.monitor.recordTokenUsage) {
+    if (hasOfficialUsage && (totalInputTokens > 0 || totalOutputTokens > 0)) {
+      store.monitor.recordTokenUsage(sessionId, new Date().toISOString(), totalInputTokens, totalOutputTokens, false);
+    } else {
+      const inputChars = currentMessages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
+      const outputChars = (reply || '').length;
+      store.monitor.recordTokenUsage(sessionId, new Date().toISOString(), Math.ceil(inputChars / 4), Math.ceil(outputChars / 4), true);
+    }
+  }
 
   return { content: contentForFrontend, error: err, sessionId };
 }

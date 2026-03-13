@@ -150,6 +150,43 @@ ipcMain.handle('history:clearAll', async () => {
   await store.conversations.clearAllConversations();
 });
 
+function serializeVectorRow(r) {
+  return {
+    text: r.text != null ? String(r.text) : '',
+    type: r.type != null ? String(r.type) : '',
+    created_at: r.created_at,
+  };
+}
+
+ipcMain.handle('vector:search', async (_, query, limit) => {
+  if (!store.vector) return [];
+  const rows = await store.vector.search(String(query || ''), Number(limit) || 10);
+  return rows.map((r) => ({ ...serializeVectorRow(r), _score: Number(r._score) || 0 }));
+});
+
+ipcMain.handle('vector:getRecent', async (_, type, limit) => {
+  if (!store.vector) return [];
+  const rows = await store.vector.getRecentByType(String(type || 'dialogue_turn'), Number(limit) || 50);
+  return rows.map(serializeVectorRow);
+});
+
+ipcMain.handle('monitor:getTokenUsageRecords', async () => {
+  return (store.monitor && store.monitor.getTokenUsageRecords) ? store.monitor.getTokenUsageRecords() : [];
+});
+
+ipcMain.handle('monitor:getFileModifications', async () => {
+  return (store.monitor && store.monitor.getFileModifications) ? store.monitor.getFileModifications() : [];
+});
+
+ipcMain.handle('content:getIdentity', () => (store.identity ? store.identity.readIdentity() : { name: '', notes: '' }));
+ipcMain.handle('content:writeIdentity', (_, data) => { if (store.identity) store.identity.writeIdentity(data); });
+ipcMain.handle('content:getRequirements', () => (store.requirements ? store.requirements.listRecent(50) : []));
+ipcMain.handle('content:getState', () => (store.state ? store.state.readState() : null));
+ipcMain.handle('content:getProactiveState', () => (store.state ? store.state.readProactiveState() : null));
+ipcMain.handle('content:getEmotionsRecent', (_, limit) => (store.emotions ? store.emotions.getRecent(Number(limit) || 20) : []));
+ipcMain.handle('content:getExpressionDesiresRecent', (_, limit) => (store.expressionDesires ? store.expressionDesires.getRecent(Number(limit) || 20) : []));
+ipcMain.handle('content:getCorrectionsRecent', (_, limit) => (store.corrections ? store.corrections.getRecent(Number(limit) || 20) : []));
+
 function runProactiveCheck() {
   if (dialogueBusy || !mainWindow || mainWindow.isDestroyed()) return;
   if (Date.now() - lastDialogueAt < PROACTIVE_IDLE_MS) return;

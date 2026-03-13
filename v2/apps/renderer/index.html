@@ -7,83 +7,644 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Inter', sans-serif; background: #fafafa; }
+    body { font-family: 'Inter', sans-serif; background: #fafafa; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
     .bubble-user { background: #e0f2fe; color: #0c4a6e; }
     .bubble-assistant { background: #f0fdf4; color: #14532d; }
+    .bubble-wrap { display: flex; width: 100%; min-width: 0; }
+    .bubble-wrap.user { justify-content: flex-end; }
+    .bubble-wrap.assistant { justify-content: flex-start; }
+    .bubble-wrap .bubble-inner { max-width: 85%; display: inline-block; min-width: 0; overflow-wrap: break-word; word-break: break-word; overflow-x: hidden; }
+    #messages { overflow-x: hidden; overflow-y: auto; }
+    .sidebar-btn { width: 100%; text-align: center; border-left: 3px solid transparent; border-radius: 0; display: flex; align-items: center; justify-content: center; padding: 0.75rem; }
+    .sidebar-btn.active { border-left-color: #0ea5e9; background: #f0f9ff; color: #0284c7; }
+    .icon-btn { display: inline-flex; align-items: center; justify-content: center; }
+    .btn-stop-hidden { display: none !important; }
+    .btn-send-hidden { display: none !important; }
+    .bubble-loading-dots { display: inline-flex; gap: 4px; align-items: center; }
+    .bubble-loading-dots span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.6; animation: bubble-dot 0.6s ease-in-out infinite both; }
+    .bubble-loading-dots span:nth-child(2) { animation-delay: 0.1s; }
+    .bubble-loading-dots span:nth-child(3) { animation-delay: 0.2s; }
+    @keyframes bubble-dot { 0%, 100% { transform: scale(0.85); opacity: 0.6; } 50% { transform: scale(1.2); opacity: 1; } }
   </style>
 </head>
-<body class="min-h-screen flex flex-col bg-slate-50">
-  <header class="bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between">
-    <h1 class="text-lg font-medium text-slate-800">Aris v2</h1>
-    <button id="btn-minimize" class="p-1 rounded hover:bg-slate-100 text-slate-600">−</button>
+<body class="flex flex-col bg-slate-50 h-screen overflow-hidden">
+  <header class="bg-white border-b border-slate-200 pl-14 pr-2 py-1.5 flex items-center justify-between flex-shrink-0">
+    <h1 class="text-base font-medium text-slate-800 truncate">Aris v2</h1>
+    <button id="btn-minimize" class="icon-btn p-2 rounded hover:bg-slate-100 text-slate-600" title="最小化" aria-label="最小化"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg></button>
   </header>
-  <main class="flex-1 overflow-y-auto p-4 space-y-3" id="messages"></main>
-  <footer class="border-t border-slate-200 bg-white p-3">
-    <div class="flex gap-2">
-      <input type="text" id="input" placeholder="输入消息…" class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500" />
-      <button id="btn-send" class="rounded-lg bg-sky-600 text-white px-4 py-2 text-sm font-medium hover:bg-sky-700">发送</button>
+
+  <div class="flex flex-1 min-h-0 overflow-hidden">
+    <aside class="w-14 flex-shrink-0 bg-white border-r border-slate-200 flex flex-col py-2 overflow-y-auto">
+      <nav class="flex flex-col gap-0.5">
+        <button type="button" class="sidebar-btn active rounded-r hover:bg-slate-100" data-panel="dialogue" title="对话" aria-label="对话"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg></button>
+        <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="history" title="历史记录" aria-label="历史记录"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></button>
+        <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="vector" title="向量数据库" aria-label="向量数据库"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg></button>
+        <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="content" title="用户与 Aris" aria-label="用户与 Aris"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg></button>
+        <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="monitor" title="监控面板" aria-label="监控面板"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg></button>
+        <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="prompt" title="提示词预览" aria-label="提示词预览"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg></button>
+      </nav>
+    </aside>
+    <div class="flex-1 flex flex-col min-h-0 overflow-hidden bg-slate-50">
+  <div id="panel-dialogue" class="panel flex-1 flex flex-col min-h-0 overflow-hidden">
+    <main class="flex-1 min-h-0 overflow-y-auto p-4 space-y-3" id="messages"></main>
+    <footer class="border-t border-slate-200 bg-white p-3 flex-shrink-0">
+      <div class="flex gap-2 items-end">
+        <textarea id="input" rows="1" placeholder="输入消息，Shift+Enter 换行…" class="flex-1 min-h-[40px] max-h-[120px] resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500 overflow-y-auto"></textarea>
+        <button id="btn-send" class="icon-btn rounded-lg bg-sky-600 text-white p-2.5 hover:bg-sky-700 flex-shrink-0" title="发送" aria-label="发送"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9 2zm0 0v-8"/></svg></button>
+        <button id="btn-stop" class="icon-btn rounded-lg bg-red-500 text-white p-2.5 hover:bg-red-600 flex-shrink-0 btn-stop-hidden" title="停止生成" aria-label="停止生成"><svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg></button>
+      </div>
+    </footer>
+  </div>
+
+  <div id="panel-history" class="panel hidden flex-1 flex flex-col min-h-0">
+    <div class="flex-shrink-0 flex items-center gap-2 px-3 py-2 border-b border-slate-200 bg-white">
+      <button id="history-refresh" class="icon-btn p-2 rounded border border-slate-300 text-slate-600 hover:bg-slate-100" title="刷新"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg></button>
+      <button id="history-clear" class="icon-btn p-2 rounded border border-red-300 text-red-600 hover:bg-red-50" title="删除全部"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
     </div>
-  </footer>
+    <div class="flex-1 min-h-0 flex overflow-hidden">
+      <div class="w-36 flex-shrink-0 border-r border-slate-200 overflow-y-auto bg-white">
+        <ul id="history-sessions" class="p-2 space-y-1 text-sm"></ul>
+        <p id="history-empty" class="hidden p-2 text-slate-500 text-xs">暂无会话</p>
+      </div>
+      <div class="flex-1 min-h-0 overflow-y-auto p-3">
+        <div id="history-messages" class="space-y-2"></div>
+        <p id="history-msg-empty" class="text-slate-500 text-sm">选择左侧会话查看</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="panel-content" class="panel hidden flex-1 flex flex-col min-h-0 overflow-hidden">
+    <div class="flex-1 min-h-0 overflow-y-auto p-3 space-y-4">
+      <section class="rounded-lg border border-slate-200 bg-white p-3">
+        <h2 class="text-sm font-medium text-slate-700 mb-2">用户信息</h2>
+        <div class="space-y-2 text-sm">
+          <div><label class="text-slate-500 block mb-0.5">姓名 / 称呼</label><input id="content-identity-name" type="text" placeholder="（空）" class="w-full rounded border border-slate-300 px-2 py-1.5" /></div>
+          <div><label class="text-slate-500 block mb-0.5">备注</label><textarea id="content-identity-notes" rows="3" placeholder="（空）" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm resize-y"></textarea></div>
+          <button type="button" id="content-identity-save" class="icon-btn rounded bg-sky-600 text-white p-2 hover:bg-sky-700" title="保存"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg></button>
+        </div>
+        <div class="mt-3 pt-3 border-t border-slate-100">
+          <div class="text-slate-500 text-xs mb-1">用户要求（由对话中 record 工具写入，只读）</div>
+          <ul id="content-requirements-list" class="text-sm text-slate-700 space-y-0.5"></ul>
+          <p id="content-requirements-empty" class="text-slate-400 text-sm hidden">暂无</p>
+        </div>
+      </section>
+      <section class="rounded-lg border border-slate-200 bg-white p-3">
+        <h2 class="text-sm font-medium text-slate-700 mb-2">Aris 状态与更新</h2>
+        <div class="space-y-2 text-sm">
+          <div><span class="text-slate-500">上次活跃</span><span id="content-state-active" class="ml-2 text-slate-700">—</span></div>
+          <div><span class="text-slate-500">上次心理状态</span><pre id="content-state-mental" class="mt-0.5 p-2 rounded bg-slate-50 text-xs text-slate-600 whitespace-pre-wrap max-h-24 overflow-y-auto">—</pre></div>
+          <div><span class="text-slate-500">主动发话</span><span id="content-proactive-summary" class="ml-2 text-slate-700">—</span></div>
+        </div>
+        <div class="mt-3 pt-3 border-t border-slate-100">
+          <div class="text-slate-500 text-xs mb-1">最近情感记录</div>
+          <ul id="content-emotions-list" class="text-sm text-slate-700 space-y-0.5 max-h-20 overflow-y-auto"></ul>
+          <p id="content-emotions-empty" class="text-slate-400 text-sm hidden">暂无</p>
+        </div>
+        <div class="mt-2">
+          <div class="text-slate-500 text-xs mb-1">最近表达欲望</div>
+          <ul id="content-desires-list" class="text-sm text-slate-700 space-y-0.5 max-h-20 overflow-y-auto"></ul>
+          <p id="content-desires-empty" class="text-slate-400 text-sm hidden">暂无</p>
+        </div>
+        <div class="mt-2">
+          <div class="text-slate-500 text-xs mb-1">最近纠错</div>
+          <ul id="content-corrections-list" class="text-sm text-slate-700 space-y-0.5 max-h-20 overflow-y-auto"></ul>
+          <p id="content-corrections-empty" class="text-slate-400 text-sm hidden">暂无</p>
+        </div>
+        <button type="button" id="content-refresh" class="icon-btn mt-2 p-2 rounded border border-slate-300 hover:bg-slate-100" title="刷新"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg></button>
+      </section>
+    </div>
+  </div>
+
+  <div id="panel-vector" class="panel hidden flex-1 flex flex-col min-h-0 overflow-hidden">
+    <div class="flex-shrink-0 p-3 space-y-2 border-b border-slate-200 bg-white">
+      <div class="flex gap-2">
+        <input type="text" id="vector-query" placeholder="语义检索…" class="flex-1 rounded border border-slate-300 px-2 py-1.5 text-sm" />
+        <input type="number" id="vector-limit" value="10" min="1" max="50" class="w-14 rounded border border-slate-300 px-2 py-1.5 text-sm" />
+        <button id="vector-search" class="icon-btn rounded bg-sky-600 text-white p-2 hover:bg-sky-700" title="检索"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg></button>
+      </div>
+      <div class="flex gap-2 flex-wrap">
+        <button type="button" class="vector-recent-btn text-xs px-2 py-1 rounded border border-slate-300" data-type="dialogue_turn">最近对话</button>
+        <button type="button" class="vector-recent-btn text-xs px-2 py-1 rounded border border-slate-300" data-type="aris_behavior">Aris 行为</button>
+      </div>
+    </div>
+    <div id="vector-results" class="flex-1 overflow-y-auto p-3 text-sm space-y-2"></div>
+  </div>
+
+  <div id="panel-monitor" class="panel hidden flex-1 flex flex-col min-h-0 overflow-hidden">
+    <div class="flex-shrink-0 flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
+      <button type="button" id="monitor-tab-token" class="monitor-tab active px-2 py-1.5 text-sm rounded border border-sky-300 text-sky-700 bg-sky-50">Token 统计</button>
+      <button type="button" id="monitor-tab-files" class="monitor-tab px-2 py-1.5 text-sm rounded border border-slate-300 text-slate-600">文件修改</button>
+      <button type="button" id="monitor-refresh" class="icon-btn ml-auto p-2 rounded border border-slate-300 hover:bg-slate-100" title="刷新"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg></button>
+    </div>
+    <section id="monitor-panel-token" class="flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div class="flex-shrink-0 px-3 py-2 flex items-center gap-2 border-b border-slate-100 flex-wrap">
+        <input id="monitor-filter-date" type="date" class="rounded border border-slate-300 px-2 py-1 text-sm" />
+        <input id="monitor-filter-session" type="text" placeholder="会话 ID…" class="flex-1 min-w-0 max-w-[120px] rounded border border-slate-300 px-2 py-1 text-sm" />
+        <span id="monitor-token-summary" class="text-xs text-slate-500"></span>
+      </div>
+      <div class="flex-1 min-h-0 overflow-auto px-3 py-2">
+        <table class="w-full text-sm border-collapse">
+          <thead><tr class="text-left text-slate-500 border-b border-slate-200"><th class="py-1 pr-2">时间</th><th class="py-1 pr-2">会话</th><th class="py-1 pr-2 text-right">输入</th><th class="py-1 pr-2 text-right">输出</th><th class="py-1 text-right">估算</th></tr></thead>
+          <tbody id="monitor-token-body"></tbody>
+        </table>
+        <p id="monitor-token-empty" class="text-slate-500 text-sm py-3 hidden">暂无 token 记录</p>
+      </div>
+    </section>
+    <section id="monitor-panel-files" class="hidden flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div class="flex-shrink-0 px-3 py-2 border-b border-slate-100"><input id="monitor-filter-path" type="text" placeholder="路径包含…" class="w-full max-w-xs rounded border border-slate-300 px-2 py-1 text-sm" /></div>
+      <div class="flex-1 min-h-0 overflow-auto px-3 py-2">
+        <table class="w-full text-sm border-collapse">
+          <thead><tr class="text-left text-slate-500 border-b border-slate-200"><th class="py-1 pr-2">路径</th><th class="py-1 pr-2 text-right">次数</th><th class="py-1">最后修改</th></tr></thead>
+          <tbody id="monitor-files-body"></tbody>
+        </table>
+        <p id="monitor-files-empty" class="text-slate-500 text-sm py-3 hidden">暂无文件修改记录</p>
+      </div>
+    </section>
+  </div>
+
+  <div id="panel-prompt" class="panel hidden flex-1 flex flex-col min-h-0 overflow-hidden">
+    <div class="flex-shrink-0 p-3 border-b border-slate-200 bg-white flex gap-2">
+      <input type="text" id="prompt-preview-input" placeholder="可选：模拟用户输入" class="flex-1 rounded border border-slate-300 px-2 py-1.5 text-sm" />
+      <button id="prompt-preview-btn" class="icon-btn rounded bg-sky-600 text-white p-2 hover:bg-sky-700" title="获取预览"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg></button>
+    </div>
+    <pre id="prompt-preview-output" class="flex-1 overflow-auto p-3 text-xs bg-slate-100 border border-slate-200 rounded m-3 whitespace-pre-wrap font-sans"></pre>
+  </div>
+    </div>
+  </div>
+
   <script>
     const messagesEl = document.getElementById('messages');
     const inputEl = document.getElementById('input');
     const btnSend = document.getElementById('btn-send');
+    const btnStop = document.getElementById('btn-stop');
     const btnMinimize = document.getElementById('btn-minimize');
 
+    function setSending(sending) {
+      if (btnSend) btnSend.classList.toggle('btn-send-hidden', sending);
+      if (btnStop) btnStop.classList.toggle('btn-stop-hidden', !sending);
+    }
+
+    function showPanel(name) {
+      document.querySelectorAll('.panel').forEach((el) => el.classList.add('hidden'));
+      document.querySelectorAll('.sidebar-btn').forEach((el) => el.classList.remove('active'));
+      const panel = document.getElementById('panel-' + name);
+      const btn = document.querySelector('.sidebar-btn[data-panel="' + name + '"]');
+      if (panel) panel.classList.remove('hidden');
+      if (btn) btn.classList.add('active');
+      if (name === 'history') loadHistorySessions();
+      if (name === 'monitor') loadMonitor();
+      if (name === 'content') loadContentPanel();
+    }
+
+    document.querySelectorAll('.sidebar-btn').forEach((btn) => {
+      btn.addEventListener('click', () => showPanel(btn.dataset.panel));
+    });
+
+    function scrollToBottom() {
+      requestAnimationFrame(() => {
+        if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+      });
+    }
+
     function addBubble(role, content) {
-      const div = document.createElement('div');
-      div.className = 'rounded-lg px-3 py-2 max-w-[85%] ' + (role === 'user' ? 'bubble-user ml-auto' : 'bubble-assistant mr-auto');
-      div.textContent = content;
-      messagesEl.appendChild(div);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+      const wrap = document.createElement('div');
+      wrap.className = 'bubble-wrap ' + (role === 'user' ? 'user' : 'assistant');
+      const inner = document.createElement('div');
+      inner.className = 'bubble-inner rounded-lg px-3 py-2 ' + (role === 'user' ? 'bubble-user' : 'bubble-assistant');
+      inner.textContent = content;
+      wrap.appendChild(inner);
+      messagesEl.appendChild(wrap);
+      scrollToBottom();
+    }
+
+    function addAgentActionsToDialogue(actions) {
+      if (!actions || !actions.length) return;
+      const row = document.createElement('div');
+      row.className = 'bubble-wrap assistant';
+      const wrap = document.createElement('div');
+      wrap.className = 'bubble-inner rounded-lg px-3 py-2 max-w-[85%] border border-sky-200 bg-sky-50/80 text-slate-700 text-sm break-words';
+      const title = document.createElement('div');
+      title.className = 'font-medium text-sky-700 mb-1';
+      title.textContent = '工具调用';
+      wrap.appendChild(title);
+      actions.forEach((a) => {
+        const name = (a && a.name) ? a.name : '?';
+        let argsStr = '';
+        try {
+          const ar = a.args;
+          if (ar && typeof ar === 'object') argsStr = JSON.stringify(ar).slice(0, 80);
+          else if (typeof ar === 'string') argsStr = ar.slice(0, 80);
+        } catch (_) {}
+        const resultStr = (a && a.result != null) ? String(a.result).slice(0, 120) : '';
+        const div = document.createElement('div');
+        div.className = 'mt-0.5 text-xs';
+        div.textContent = name + (argsStr ? ': ' + argsStr : '') + (resultStr ? ' → ' + resultStr : '');
+        wrap.appendChild(div);
+      });
+      const streaming = messagesEl.querySelector('.streaming');
+      const insertBefore = streaming ? streaming.closest('.bubble-wrap') || streaming : null;
+      if (insertBefore) messagesEl.insertBefore(row, insertBefore);
+      else messagesEl.appendChild(row);
+      row.appendChild(wrap);
+      scrollToBottom();
+    }
+
+    function addLoadingBubble() {
+      const row = document.createElement('div');
+      row.className = 'bubble-wrap assistant';
+      const wrap = document.createElement('div');
+      wrap.className = 'bubble-inner rounded-lg px-3 py-2 bubble-assistant streaming';
+      const dots = document.createElement('span');
+      dots.className = 'bubble-loading-dots';
+      dots.setAttribute('aria-hidden', 'true');
+      dots.innerHTML = '<span></span><span></span><span></span>';
+      wrap.appendChild(dots);
+      row.appendChild(wrap);
+      messagesEl.appendChild(row);
+      scrollToBottom();
     }
 
     let streamBuffer = '';
+    let hadStreamingChunks = false;
     function appendChunk(chunk) {
+      hadStreamingChunks = true;
       streamBuffer += chunk;
       let last = messagesEl.querySelector('.streaming');
       if (!last) {
+        const row = document.createElement('div');
+        row.className = 'bubble-wrap assistant';
         last = document.createElement('div');
-        last.className = 'rounded-lg px-3 py-2 max-w-[85%] bubble-assistant mr-auto streaming';
-        messagesEl.appendChild(last);
+        last.className = 'bubble-inner rounded-lg px-3 py-2 bubble-assistant streaming';
+        row.appendChild(last);
+        messagesEl.appendChild(row);
       }
       last.textContent = streamBuffer;
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+      scrollToBottom();
     }
 
     function finishStream() {
       const last = messagesEl.querySelector('.streaming');
-      if (last) last.classList.remove('streaming');
+      if (last) {
+        if (!hadStreamingChunks) {
+          const row = last.closest('.bubble-wrap');
+          if (row) row.remove();
+          else last.remove();
+        } else last.classList.remove('streaming');
+      }
       streamBuffer = '';
     }
 
     btnSend.addEventListener('click', send);
-    inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+    inputEl.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      if (e.isComposing) return;
+      if (e.shiftKey) return;
+      e.preventDefault();
+      setTimeout(() => send(), 0);
+    });
 
     async function send() {
-      const text = inputEl.value.trim();
+      const text = (inputEl.value || '').trim();
       if (!text || !window.aris) return;
       inputEl.value = '';
+      hadStreamingChunks = false;
       addBubble('user', text);
+      addLoadingBubble();
+      setSending(true);
       const unsubChunk = window.aris.onDialogueChunk(appendChunk);
+      let unsubActions;
+      if (window.aris.onAgentActions) {
+        unsubActions = window.aris.onAgentActions((actions) => {
+          if (!Array.isArray(actions) || actions.length === 0) return;
+          addAgentActionsToDialogue(actions);
+        });
+      }
       try {
         const result = await window.aris.sendMessage(text);
         finishStream();
         unsubChunk && unsubChunk();
-        if (result && result.content) addBubble('assistant', result.content);
+        if (unsubActions) unsubActions();
         if (result && result.error) addBubble('assistant', '[出错了]');
+        else if (result && result.content && !hadStreamingChunks) addBubble('assistant', result.content);
       } catch (e) {
         finishStream();
         unsubChunk && unsubChunk();
+        if (unsubActions) unsubActions();
         addBubble('assistant', '[发送失败]');
+      } finally {
+        setSending(false);
       }
     }
+
+    if (btnStop) btnStop.addEventListener('click', () => { if (window.aris && window.aris.abortDialogue) window.aris.abortDialogue(); });
 
     if (window.aris && window.aris.onProactive) {
       window.aris.onProactive((msg) => addBubble('assistant', msg));
     }
 
     btnMinimize.addEventListener('click', () => window.aris && window.aris.minimizeWindow());
+
+    function formatTime(ts) {
+      if (ts == null) return '';
+      const d = new Date(typeof ts === 'number' ? ts * 1000 : ts);
+      return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    }
+
+    async function loadHistorySessions() {
+      if (!window.aris) return;
+      const list = await window.aris.getSessions();
+      const ul = document.getElementById('history-sessions');
+      const empty = document.getElementById('history-empty');
+      ul.innerHTML = '';
+      if (!list || list.length === 0) {
+        empty.classList.remove('hidden');
+        return;
+      }
+      empty.classList.add('hidden');
+      let currentId = null;
+      try { currentId = await window.aris.getCurrentSessionId(); } catch (_) {}
+      list.forEach(({ session_id, last_at }) => {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'w-full text-left px-2 py-1.5 rounded text-xs truncate ' + (session_id === currentId ? 'bg-sky-100 text-sky-800' : 'hover:bg-slate-100');
+        btn.textContent = (session_id || '').slice(-8) + ' ' + formatTime(last_at);
+        btn.dataset.sessionId = session_id;
+        btn.addEventListener('click', () => loadHistoryConversation(session_id));
+        li.appendChild(btn);
+        ul.appendChild(li);
+      });
+    }
+
+    async function loadHistoryConversation(sessionId) {
+      if (!window.aris) return;
+      document.getElementById('history-msg-empty').classList.add('hidden');
+      const list = await window.aris.getConversation(sessionId);
+      const container = document.getElementById('history-messages');
+      container.innerHTML = '';
+      if (!list || list.length === 0) {
+        container.appendChild(document.createTextNode('（无消息）'));
+        return;
+      }
+      list.forEach(({ role, content, created_at }) => {
+        const div = document.createElement('div');
+        div.className = role === 'user' ? 'text-right' : 'text-left';
+        const bubble = document.createElement('div');
+        bubble.className = (role === 'user' ? 'bubble-user ml-auto' : 'bubble-assistant mr-auto') + ' rounded-lg px-3 py-2 max-w-[85%] inline-block text-sm';
+        bubble.textContent = content || '';
+        div.appendChild(bubble);
+        const time = document.createElement('div');
+        time.className = 'text-xs text-slate-500 mt-0.5';
+        time.textContent = formatTime(created_at);
+        div.appendChild(time);
+        container.appendChild(div);
+      });
+    }
+
+    document.getElementById('history-refresh').addEventListener('click', () => loadHistorySessions());
+    document.getElementById('history-clear').addEventListener('click', async () => {
+      if (!confirm('确定删除全部历史记录？')) return;
+      if (window.aris) {
+        await window.aris.clearAllConversations();
+        loadHistorySessions();
+        document.getElementById('history-messages').innerHTML = '';
+        document.getElementById('history-msg-empty').classList.remove('hidden');
+      }
+    });
+
+    const VECTOR_EMPTY_HINT = '无结果。请确认：1) 已进行过对话（每轮会自动写入）；2) 语义检索需 Ollama 已启动并执行 ollama pull nomic-embed-text。';
+    document.getElementById('vector-search').addEventListener('click', async () => {
+      const query = document.getElementById('vector-query').value.trim();
+      const limit = parseInt(document.getElementById('vector-limit').value, 10) || 10;
+      if (!window.aris || !query) return;
+      const results = await window.aris.vectorSearch(query, limit);
+      const el = document.getElementById('vector-results');
+      el.innerHTML = '';
+      if (!results || results.length === 0) {
+        const p = document.createElement('p');
+        p.className = 'text-slate-500 text-sm';
+        p.textContent = VECTOR_EMPTY_HINT;
+        el.appendChild(p);
+        return;
+      }
+      results.forEach((r) => {
+        const div = document.createElement('div');
+        div.className = 'p-2 rounded bg-white border border-slate-200';
+        div.innerHTML = '<span class="text-slate-500 text-xs">' + (r.type || '') + '</span><br/><span class="break-words">' + (r.text || '').slice(0, 300) + (r.text && r.text.length > 300 ? '…' : '') + '</span>';
+        el.appendChild(div);
+      });
+    });
+
+    document.querySelectorAll('.vector-recent-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const type = btn.dataset.type;
+        if (!window.aris) return;
+        const results = await window.aris.vectorGetRecent(type, 30);
+        const el = document.getElementById('vector-results');
+        el.innerHTML = '';
+        if (!results || results.length === 0) {
+          const p = document.createElement('p');
+          p.className = 'text-slate-500 text-sm';
+          p.textContent = VECTOR_EMPTY_HINT;
+          el.appendChild(p);
+          return;
+        }
+        results.forEach((r) => {
+          const div = document.createElement('div');
+          div.className = 'p-2 rounded bg-white border border-slate-200';
+          const text = (r.text != null ? r.text : (r.content != null ? r.content : ''));
+          const created = r.created_at != null ? formatTime(r.created_at) : '';
+          div.innerHTML = '<span class="text-slate-500 text-xs">' + (r.type || '') + ' ' + created + '</span><br/><span class="break-words">' + String(text).slice(0, 300) + (String(text).length > 300 ? '…' : '') + '</span>';
+          el.appendChild(div);
+        });
+      });
+    });
+
+    let _tokenList = [];
+    let _fileList = [];
+    function renderMonitorToken(list) {
+      const dateVal = document.getElementById('monitor-filter-date')?.value || '';
+      const sessionVal = (document.getElementById('monitor-filter-session')?.value || '').trim().toLowerCase();
+      let filtered = (list || []).filter((r) => (!dateVal || (r.created_at || '').startsWith(dateVal)) && (!sessionVal || (r.session_id || '').toLowerCase().includes(sessionVal)));
+      const body = document.getElementById('monitor-token-body');
+      const empty = document.getElementById('monitor-token-empty');
+      const summary = document.getElementById('monitor-token-summary');
+      if (!body) return;
+      body.innerHTML = '';
+      if (filtered.length === 0) {
+        if (empty) empty.classList.remove('hidden');
+        if (summary) summary.textContent = '';
+        return;
+      }
+      if (empty) empty.classList.add('hidden');
+      const totalIn = filtered.reduce((s, r) => s + (Number(r.input_tokens) || 0), 0);
+      const totalOut = filtered.reduce((s, r) => s + (Number(r.output_tokens) || 0), 0);
+      if (summary) summary.textContent = '共 ' + filtered.length + ' 条 | 输入 ' + totalIn + ' | 输出 ' + totalOut;
+      filtered.forEach((r) => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-b border-slate-100';
+        const created = r.created_at ? new Date(r.created_at).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'medium' }) : '';
+        tr.innerHTML = '<td class="py-1 pr-2 text-slate-600">' + created + '</td><td class="py-1 pr-2 text-slate-500 font-mono text-xs truncate max-w-[80px]" title="' + (r.session_id || '') + '">' + (r.session_id || '').slice(-10) + '</td><td class="py-1 pr-2 text-right">' + (r.input_tokens ?? 0) + '</td><td class="py-1 pr-2 text-right">' + (r.output_tokens ?? 0) + '</td><td class="py-1 text-right text-slate-400">' + (r.is_estimated ? '是' : '') + '</td>';
+        body.appendChild(tr);
+      });
+    }
+    function renderMonitorFiles(list) {
+      const pathVal = (document.getElementById('monitor-filter-path')?.value || '').trim().toLowerCase();
+      let filtered = (list || []).filter((r) => !pathVal || (r.path || '').toLowerCase().includes(pathVal));
+      const body = document.getElementById('monitor-files-body');
+      const empty = document.getElementById('monitor-files-empty');
+      if (!body) return;
+      body.innerHTML = '';
+      if (filtered.length === 0) {
+        if (empty) empty.classList.remove('hidden');
+        return;
+      }
+      if (empty) empty.classList.add('hidden');
+      filtered.forEach((r) => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-b border-slate-100';
+        const last = r.lastModifiedAt ? new Date(r.lastModifiedAt).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'medium' }) : '';
+        tr.innerHTML = '<td class="py-1 pr-2 text-sky-700 font-mono text-xs break-all">' + (r.path || '').replace(/</g, '&lt;') + '</td><td class="py-1 pr-2 text-right">' + (r.modificationCount ?? 0) + '</td><td class="py-1 text-slate-500">' + last + '</td>';
+        body.appendChild(tr);
+      });
+    }
+    async function loadMonitor() {
+      if (!window.aris) return;
+      try {
+        const [tokenList, fileList] = await Promise.all([window.aris.getTokenUsageRecords(), window.aris.getFileModifications()]);
+        _tokenList = tokenList || [];
+        _fileList = fileList || [];
+        renderMonitorToken(_tokenList);
+        renderMonitorFiles(_fileList);
+      } catch (e) { console.error(e); }
+    }
+    document.getElementById('monitor-refresh')?.addEventListener('click', loadMonitor);
+    document.getElementById('monitor-tab-token')?.addEventListener('click', () => {
+      document.getElementById('monitor-panel-token')?.classList.remove('hidden');
+      document.getElementById('monitor-panel-files')?.classList.add('hidden');
+      document.querySelectorAll('#panel-monitor .monitor-tab').forEach((t) => { t.classList.remove('active', 'bg-sky-50', 'border-sky-300', 'text-sky-700'); t.classList.add('border-slate-300', 'text-slate-600'); });
+      document.getElementById('monitor-tab-token')?.classList.add('active', 'bg-sky-50', 'border-sky-300', 'text-sky-700');
+    });
+    document.getElementById('monitor-tab-files')?.addEventListener('click', () => {
+      document.getElementById('monitor-panel-files')?.classList.remove('hidden');
+      document.getElementById('monitor-panel-token')?.classList.add('hidden');
+      document.querySelectorAll('#panel-monitor .monitor-tab').forEach((t) => { t.classList.remove('active', 'bg-sky-50', 'border-sky-300', 'text-sky-700'); t.classList.add('border-slate-300', 'text-slate-600'); });
+      document.getElementById('monitor-tab-files')?.classList.add('active', 'bg-sky-50', 'border-sky-300', 'text-sky-700');
+    });
+    document.getElementById('monitor-filter-date')?.addEventListener('change', () => renderMonitorToken(_tokenList));
+    document.getElementById('monitor-filter-session')?.addEventListener('input', () => renderMonitorToken(_tokenList));
+    document.getElementById('monitor-filter-path')?.addEventListener('input', () => renderMonitorFiles(_fileList));
+
+    async function loadContentPanel() {
+      if (!window.aris) return;
+      try {
+        const [identity, requirements, state, proactiveState, emotions, desires, corrections] = await Promise.all([
+          window.aris.getIdentity(),
+          window.aris.getRequirements(),
+          window.aris.getState(),
+          window.aris.getProactiveState(),
+          window.aris.getEmotionsRecent(20),
+          window.aris.getExpressionDesiresRecent(20),
+          window.aris.getCorrectionsRecent(20),
+        ]);
+        const nameEl = document.getElementById('content-identity-name');
+        const notesEl = document.getElementById('content-identity-notes');
+        if (nameEl) nameEl.value = (identity && identity.name) ? identity.name : '';
+        if (notesEl) notesEl.value = (identity && identity.notes) ? identity.notes : '';
+        const reqList = document.getElementById('content-requirements-list');
+        const reqEmpty = document.getElementById('content-requirements-empty');
+        if (reqList) {
+          reqList.innerHTML = '';
+          const list = Array.isArray(requirements) ? requirements : [];
+          if (list.length === 0) {
+            if (reqEmpty) reqEmpty.classList.remove('hidden');
+          } else {
+            if (reqEmpty) reqEmpty.classList.add('hidden');
+            list.forEach((t) => {
+              const li = document.createElement('li');
+              li.textContent = typeof t === 'string' ? t : (t && t.text) || '';
+              reqList.appendChild(li);
+            });
+          }
+        }
+        const activeEl = document.getElementById('content-state-active');
+        const mentalEl = document.getElementById('content-state-mental');
+        if (activeEl) activeEl.textContent = (state && state.last_active_time) ? new Date(state.last_active_time).toLocaleString('zh-CN') : '—';
+        if (mentalEl) mentalEl.textContent = (state && state.last_mental_state) ? state.last_mental_state : '—';
+        const proEl = document.getElementById('content-proactive-summary');
+        if (proEl && proactiveState) {
+          const parts = [];
+          if (proactiveState.low_power_mode) parts.push('低功耗');
+          parts.push('未回应计数 ' + (proactiveState.proactive_no_reply_count ?? 0));
+          if (proactiveState.today_off_work) parts.push('今日已下班');
+          proEl.textContent = parts.length ? parts.join('；') : '—';
+        }
+        const emotionsList = document.getElementById('content-emotions-list');
+        const emotionsEmpty = document.getElementById('content-emotions-empty');
+        if (emotionsList) {
+          emotionsList.innerHTML = '';
+          const arr = Array.isArray(emotions) ? emotions : [];
+          if (arr.length === 0) {
+            if (emotionsEmpty) emotionsEmpty.classList.remove('hidden');
+          } else {
+            if (emotionsEmpty) emotionsEmpty.classList.add('hidden');
+            arr.slice(-10).reverse().forEach((e) => {
+              const li = document.createElement('li');
+              li.textContent = (e.text || '').slice(0, 120) + (e.created_at ? ' (' + new Date(e.created_at).toLocaleTimeString('zh-CN', { hour12: false }) + ')' : '');
+              emotionsList.appendChild(li);
+            });
+          }
+        }
+        const desiresList = document.getElementById('content-desires-list');
+        const desiresEmpty = document.getElementById('content-desires-empty');
+        if (desiresList) {
+          desiresList.innerHTML = '';
+          const arr = Array.isArray(desires) ? desires : [];
+          if (arr.length === 0) {
+            if (desiresEmpty) desiresEmpty.classList.remove('hidden');
+          } else {
+            if (desiresEmpty) desiresEmpty.classList.add('hidden');
+            arr.slice(-10).reverse().forEach((d) => {
+              const li = document.createElement('li');
+              li.textContent = (d.text || '').slice(0, 120) + (d.created_at ? ' (' + new Date(d.created_at).toLocaleTimeString('zh-CN', { hour12: false }) + ')' : '');
+              desiresList.appendChild(li);
+            });
+          }
+        }
+        const correctionsList = document.getElementById('content-corrections-list');
+        const correctionsEmpty = document.getElementById('content-corrections-empty');
+        if (correctionsList) {
+          correctionsList.innerHTML = '';
+          const arr = Array.isArray(corrections) ? corrections : [];
+          if (arr.length === 0) {
+            if (correctionsEmpty) correctionsEmpty.classList.remove('hidden');
+          } else {
+            if (correctionsEmpty) correctionsEmpty.classList.add('hidden');
+            arr.slice(-10).reverse().forEach((t) => {
+              const li = document.createElement('li');
+              li.className = 'break-words';
+              li.textContent = (typeof t === 'string' ? t : '').slice(0, 200);
+              correctionsList.appendChild(li);
+            });
+          }
+        }
+      } catch (e) { console.error(e); }
+    }
+    document.getElementById('content-identity-save')?.addEventListener('click', async () => {
+      if (!window.aris) return;
+      const name = document.getElementById('content-identity-name')?.value ?? '';
+      const notes = document.getElementById('content-identity-notes')?.value ?? '';
+      await window.aris.writeIdentity({ name: name.trim(), notes: notes.trim() });
+    });
+    document.getElementById('content-refresh')?.addEventListener('click', loadContentPanel);
+
+    document.getElementById('prompt-preview-btn').addEventListener('click', async () => {
+      const input = document.getElementById('prompt-preview-input').value.trim();
+      if (!window.aris) return;
+      const data = await window.aris.getPromptPreview(input || undefined);
+      const pre = document.getElementById('prompt-preview-output');
+      pre.textContent = data && data.promptText ? data.promptText : (data ? JSON.stringify(data, null, 2) : '无数据');
+    });
   </script>
 </body>
 </html>

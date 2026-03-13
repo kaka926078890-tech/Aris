@@ -9,6 +9,7 @@ const expressionDesires = require('./expressionDesires.js');
 const conversations = require('./conversations.js');
 const state = require('./state.js');
 const db = require('./db.js');
+const monitor = require('./monitor.js');
 
 let vectorModule = null;
 try {
@@ -27,4 +28,5 @@ module.exports = {
   state,
   vector: vectorModule,
   db,
+  monitor,
 };

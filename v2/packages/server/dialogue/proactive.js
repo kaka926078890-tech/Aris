@@ -1,7 +1,7 @@
 /**
  * v2 主动发话：从 store 读情感/表达欲望与状态，低功耗/未回应计数，可选 LLM 生成或使用积累的表达欲望。
  */
-const store = require('../../../store');
+const store = require('../../store');
 const { buildStatePrompt } = require('./prompt.js');
 const { chat } = require('../llm/client.js');
 

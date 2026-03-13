@@ -2,8 +2,9 @@ const { RECORD_TOOLS, runRecordTool } = require('./record.js');
 const { FILE_TOOLS, runFileTool } = require('./file.js');
 const { MEMORY_TOOLS, runMemoryTool } = require('./memory.js');
 const { TIME_TOOLS, runTimeTool } = require('./time.js');
+const { GIT_TOOLS, runGitTool } = require('./git.js');
 
-const ALL_TOOLS = [...RECORD_TOOLS, ...FILE_TOOLS, ...MEMORY_TOOLS, ...TIME_TOOLS];
+const ALL_TOOLS = [...RECORD_TOOLS, ...FILE_TOOLS, ...MEMORY_TOOLS, ...TIME_TOOLS, ...GIT_TOOLS];
 
 function parseToolArgs(args) {
   if (args == null) return {};
@@ -33,6 +34,9 @@ async function runTool(name, args) {
   }
   if (TIME_TOOLS.some((t) => t.function.name === name)) {
     return runTimeTool(name);
+  }
+  if (GIT_TOOLS.some((t) => t.function.name === name)) {
+    return runGitTool(name, a);
   }
   return { ok: false, error: 'Unknown tool: ' + name };
 }
