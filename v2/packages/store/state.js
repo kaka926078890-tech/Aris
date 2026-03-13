@@ -1,0 +1,98 @@
+/**
+ * 运行状态：aris_state.json、aris_proactive_state.json
+ */
+const fs = require('fs');
+const { getStatePath, getProactiveStatePath, getDataDir } = require('../config/paths.js');
+
+function getTodayDateStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function readState() {
+  try {
+    const p = getStatePath();
+    if (!fs.existsSync(p)) return null;
+    const raw = fs.readFileSync(p, 'utf8');
+    const data = JSON.parse(raw);
+    return {
+      last_active_time: data.last_active_time || null,
+      last_mental_state: data.last_mental_state || null,
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeState(updates) {
+  try {
+    const current = readState() || {};
+    const data = {
+      last_active_time: updates.last_active_time !== undefined ? updates.last_active_time : current.last_active_time,
+      last_mental_state: updates.last_mental_state !== undefined ? updates.last_mental_state : current.last_mental_state,
+    };
+    const dir = getDataDir();
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(getStatePath(), JSON.stringify(data, null, 2), 'utf8');
+  } catch (e) {
+    console.warn('[Aris v2][store/state] writeState failed', e?.message);
+  }
+}
+
+function readProactiveState() {
+  const today = getTodayDateStr();
+  const defaults = {
+    state_date: today,
+    today_off_work: false,
+    self_upgrade_done_today: false,
+    proactive_no_reply_count: 0,
+    low_power_mode: false,
+  };
+  try {
+    const p = getProactiveStatePath();
+    if (!fs.existsSync(p)) return defaults;
+    const raw = fs.readFileSync(p, 'utf8');
+    const data = JSON.parse(raw);
+    const state = {
+      state_date: data.state_date || today,
+      today_off_work: Boolean(data.today_off_work),
+      self_upgrade_done_today: Boolean(data.self_upgrade_done_today),
+      proactive_no_reply_count: Math.min(3, Math.max(0, Number(data.proactive_no_reply_count) || 0)),
+      low_power_mode: Boolean(data.low_power_mode),
+    };
+    if (state.state_date !== today) {
+      state.state_date = today;
+      state.today_off_work = false;
+      state.self_upgrade_done_today = false;
+      const dir = getDataDir();
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(p, JSON.stringify(state, null, 2), 'utf8');
+    }
+    return state;
+  } catch (_) {
+    return defaults;
+  }
+}
+
+function writeProactiveState(updates) {
+  try {
+    const current = readProactiveState();
+    const merged = { ...current, ...updates };
+    if (merged.proactive_no_reply_count != null) {
+      merged.proactive_no_reply_count = Math.min(3, Math.max(0, Number(merged.proactive_no_reply_count)));
+    }
+    const dir = getDataDir();
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(getProactiveStatePath(), JSON.stringify(merged, null, 2), 'utf8');
+  } catch (e) {
+    console.warn('[Aris v2][store/state] writeProactiveState failed', e?.message);
+  }
+}
+
+module.exports = {
+  readState,
+  writeState,
+  readProactiveState,
+  writeProactiveState,
+  getTodayDateStr,
+};

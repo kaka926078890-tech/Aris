@@ -48,6 +48,23 @@ function appendIdentityChangeLog(entry) {
 
 const DEFAULT_IDENTITY = { name: '', notes: '' };
 
+/** 明显不是人名的词（疑问/指代等），避免「我是谁」被写成用户名「谁」 */
+const NOT_NAME_WORDS = new Set([
+  '谁', '什么', '啥', '哪个', '怎样', '如何', '多少', '哪里', '为什么', '什么时候',
+  '怎么', '咋', '啥样', '啥时候', '为啥', '咋样', '咋办', '哪个', '谁啊', '什么人',
+]);
+
+/** 整句是否为「询问身份」类问句（如「我是谁」「我叫什么」），此类不当作身份声明也不写入 notes */
+function isIdentityQuestion(text) {
+  if (!text || typeof text !== 'string') return false;
+  const t = text.trim();
+  if (/我是谁\s*[？?]?\s*$/.test(t) || /^我是谁\s*[？?]?\s*$/.test(t)) return true;
+  if (/我叫什么(\s*名字?)?\s*[？?]?\s*$/.test(t) || /^我叫什么(\s*名字?)?\s*[？?]?\s*$/.test(t)) return true;
+  if (/你知道我是谁|你记得我是谁|你还记得我叫什么/i.test(t)) return true;
+  if (/^(谁|什么|啥)(\s*[？?！!])?\s*$/.test(t)) return true;
+  return false;
+}
+
 function loadUserIdentity() {
   try {
     const p = getIdentityPath();
@@ -85,12 +102,18 @@ function updateUserIdentityFromMessage(userContent) {
     }
   } catch (_) {}
 
+  // 询问类（如「我是谁」「我叫什么」）不当作身份声明，不更新也不写 notes
+  if (isIdentityQuestion(t)) return;
+
   let updated = false;
-  // 我叫 X / 我是 X / 你可以叫我 X
+  // 我叫 X / 我是 X / 你可以叫我 X（排除疑问词如「谁」「什么」）
   const nameMatch = t.match(/(?:我叫|我是|你可以叫我|我的名字是?)\s*([^\s,，。！？]+)/);
   if (nameMatch && nameMatch[1]) {
-    data.name = nameMatch[1].trim();
-    updated = true;
+    const candidate = nameMatch[1].trim();
+    if (candidate && !NOT_NAME_WORDS.has(candidate)) {
+      data.name = candidate;
+      updated = true;
+    }
   }
   // 身份是 X
   const identityMatch = t.match(/身份是\s*([^\n]+)/);
@@ -98,8 +121,8 @@ function updateUserIdentityFromMessage(userContent) {
     data.notes = (data.notes ? data.notes + '\n' : '') + identityMatch[1].trim();
     updated = true;
   }
-  // 若整句像身份描述但没匹配到名字，整句记入 notes
-  if (!updated && (t.includes('我是') || t.includes('我叫') || t.includes('你可以叫我'))) {
+  // 若整句像身份描述但没匹配到名字，整句记入 notes（排除问句）
+  if (!updated && (t.includes('我是') || t.includes('我叫') || t.includes('你可以叫我')) && !isIdentityQuestion(t)) {
     data.notes = (data.notes ? data.notes + '\n' : '') + t.slice(0, 500);
     updated = true;
   }
@@ -166,4 +189,4 @@ function appendRequirementToIdentity(userContent) {
   }
 }
 
-module.exports = { loadUserIdentity, updateUserIdentityFromMessage, appendRequirementToIdentity, getIdentityPath };
+module.exports = { loadUserIdentity, updateUserIdentityFromMessage, appendRequirementToIdentity, getIdentityPath, isIdentityQuestion };

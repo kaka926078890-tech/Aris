@@ -14,7 +14,7 @@ const { getCurrentSessionId, append, getRecent, getRecentFromOtherSessions } = r
 const { addMemory } = require('../memory/lancedb.js');
 const { embed } = require('../memory/embedding.js');
 const { getActiveWindowTitle } = require('../context/windowTitle.js');
-const { loadUserIdentity, updateUserIdentityFromMessage, appendRequirementToIdentity } = require('./userIdentity.js');
+const { loadUserIdentity, updateUserIdentityFromMessage, appendRequirementToIdentity, isIdentityQuestion } = require('./userIdentity.js');
 const { loadUserRequirementsSummary, updateUserRequirementsSummary } = require('./userRequirementsSummary.js');
 const { recordTokenUsage, recordFileModification } = require('../store/monitor.js');
 const { listMyFiles, readFile, writeFile, deleteFile } = require('../agentFiles.js');
@@ -417,7 +417,7 @@ async function recordFileOperationMemories(toolCalls, toolResults, embed, addMem
   }
 }
 
-const IDENTITY_PHRASES = ['我是', '我叫', '我的名字', '我是谁', '身份是', '你可以叫我'];
+const IDENTITY_PHRASES = ['我是', '我叫', '我的名字', '身份是', '你可以叫我'];
 const REQUIREMENT_PHRASES = ['你以后', '记住', '要求', '偏好', '希望你能', '不要', '别', '请尽量', '习惯'];
 
 /** 用户表达「下班」的短语，用于标记今日已下班（触发自升级条件之一） */
@@ -808,7 +808,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   });
 
   const { identity, requirement } = isIdentityOrRequirement(userContent);
-  if (identity) updateUserIdentityFromMessage(userContent);
+  if (identity && !isIdentityQuestion(userContent)) updateUserIdentityFromMessage(userContent);
   if (requirement) {
     appendRequirementToIdentity(userContent);
     const singleText = `用户要求: ${userContent.slice(0, 400)}`;

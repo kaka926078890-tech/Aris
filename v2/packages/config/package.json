@@ -1,0 +1,6 @@
+{
+  "name": "@aris-v2/config",
+  "version": "0.2.0",
+  "private": true,
+  "main": "index.js"
+}

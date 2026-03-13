@@ -1,0 +1,22 @@
+{
+  "name": "aris-v2",
+  "version": "0.2.0",
+  "description": "Aris v2 - Full refactor, LLM-driven recording, separate backend/frontend",
+  "private": true,
+  "main": "apps/electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "postinstall": "cd apps/renderer && npm install 2>/dev/null || true",
+    "dev:renderer": "cd apps/renderer && npm run dev",
+    "build:renderer": "cd apps/renderer && npm run build"
+  },
+  "keywords": ["aris", "electron", "chatbot"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@lancedb/lancedb": "^0.26.0",
+    "dotenv": "^16.4.5",
+    "jsonrepair": "^3.13.2",
+    "sql.js": "^1.10.0"
+  }
+}
