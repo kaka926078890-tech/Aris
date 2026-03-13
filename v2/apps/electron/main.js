@@ -55,7 +55,7 @@ function setupAppMenu() {
       label: '文件',
       submenu: [
         {
-          label: '导出记忆数据库',
+          label: '导出全部数据',
           click: async () => {
             const { filePath } = await dialog.showSaveDialog(mainWindow, {
               defaultPath: `aris-v2-backup-${new Date().toISOString().slice(0, 10)}.aris`,
@@ -64,7 +64,11 @@ function setupAppMenu() {
             if (filePath) {
               try {
                 const r = await exportToFile(filePath);
-                dialog.showMessageBox(mainWindow, { type: 'info', title: '导出成功', message: `已导出到 ${filePath}${r.memoryCount != null ? `，向量 ${r.memoryCount} 条` : ''}` });
+                const parts = [`已导出到 ${filePath}`];
+                if (r.memoryCount != null) parts.push(`向量 ${r.memoryCount} 条`);
+                if (r.hasConversations) parts.push('对话');
+                if (r.hasIdentity) parts.push('用户信息');
+                dialog.showMessageBox(mainWindow, { type: 'info', title: '导出成功', message: parts.join('，') + '。回家后可用「导入全部数据」一键恢复。' });
               } catch (e) {
                 dialog.showErrorBox('导出失败', e.message);
               }
@@ -72,7 +76,7 @@ function setupAppMenu() {
           },
         },
         {
-          label: '导入记忆数据库',
+          label: '导入全部数据',
           click: async () => {
             const { filePaths } = await dialog.showOpenDialog(mainWindow, {
               properties: ['openFile'],
@@ -81,7 +85,7 @@ function setupAppMenu() {
             if (filePaths && filePaths[0]) {
               try {
                 await importFromFile(filePaths[0]);
-                dialog.showMessageBox(mainWindow, { type: 'info', title: '导入成功', message: '记忆与对话已恢复。' });
+                dialog.showMessageBox(mainWindow, { type: 'info', title: '导入成功', message: '对话、向量记忆、用户信息、状态与监控等已恢复。建议重启应用后查看。' });
               } catch (e) {
                 dialog.showErrorBox('导入失败', e.message);
               }
