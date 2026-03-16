@@ -18,6 +18,9 @@ function getMemoryFiles() {
       emotions: 'emotions.json',
       expression_desires: 'expression_desires.json',
       associations: 'associations.json',
+      quiet_phrases: 'quiet_phrases.json',
+      retrieval_config: 'retrieval_config.json',
+      session_summaries: 'session_summaries.json',
     };
   }
   return memoryFiles;
@@ -72,6 +75,21 @@ function getAssociationsPath() {
   return path.join(getMemoryDir(), getMemoryFiles().associations);
 }
 
+function getQuietPhrasesPath() {
+  const name = getMemoryFiles().quiet_phrases || 'quiet_phrases.json';
+  return path.join(getMemoryDir(), name);
+}
+
+function getRetrievalConfigPath() {
+  const name = getMemoryFiles().retrieval_config || 'retrieval_config.json';
+  return path.join(getMemoryDir(), name);
+}
+
+function getSessionSummariesPath() {
+  const name = getMemoryFiles().session_summaries || 'session_summaries.json';
+  return path.join(getMemoryDir(), name);
+}
+
 function getSqlitePath() {
   return path.join(getDataDir(), 'aris.db');
 }
@@ -99,6 +117,9 @@ module.exports = {
   getEmotionsPath,
   getExpressionDesiresPath,
   getAssociationsPath,
+  getQuietPhrasesPath,
+  getRetrievalConfigPath,
+  getSessionSummariesPath,
   getSqlitePath,
   getLanceDbPath,
   getStatePath,

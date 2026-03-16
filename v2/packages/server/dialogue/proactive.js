@@ -4,6 +4,7 @@
 const store = require('../../store');
 const { buildStatePrompt } = require('./prompt.js');
 const { chat } = require('../llm/client.js');
+const { shouldBeQuiet, isResumingDialogue } = require('./quietResume.js');
 
 const EXPRESSION_THRESHOLD = 0.5;
 
@@ -43,33 +44,6 @@ function selectExpressionDesire(desires) {
 
 function normalize(s) {
   return (s || '').replace(/[，。？、\s]/g, '').trim();
-}
-
-// 检查用户是否明确要求安静
-function shouldBeQuiet(userContent) {
-  if (!userContent || typeof userContent !== 'string') return false;
-  
-  const quietPhrases = [
-    '歇会', '安静待会', '安静待着', '别说话', '别打扰', '让我静静',
-    '自己待会', '别理我', '别烦我', '需要安静', '想静静', '忙自己的事情去'
-  ];
-  
-  const contentLower = userContent.toLowerCase();
-  for (const phrase of quietPhrases) {
-    if (contentLower.includes(phrase.toLowerCase())) {
-      return true;
-    }
-  }
-  
-  return false;
-}
-
-// 用户主动发消息且非「要求安静」即视为恢复对话，不依赖特定关键词
-function isResumingDialogue(userContent) {
-  if (!userContent || typeof userContent !== 'string') return false;
-  const trimmed = userContent.trim();
-  if (!trimmed) return false;
-  return !shouldBeQuiet(userContent);
 }
 
 async function maybeProactiveMessage() {

@@ -43,6 +43,10 @@ const CONTEXT_TEMPLATE = `以下是你需要参考的上下文：
 
 【你上一次的状态与时间感】{last_state_and_subjective_time}
 
+【相关关联】{related_associations}
+
+【近期小结】{recent_summary}
+
 【当前会话最近几轮】{context_window}
 
 【行为规则】{behavioral_rules}`;
@@ -52,12 +56,16 @@ function buildSystemPrompt({
   userRequirements = '（无）',
   contextWindow = '（暂无）',
   lastStateAndSubjectiveTime = '（无）',
+  relatedAssociations = '（无）',
+  recentSummary = '（无）',
   behavioralRules = RULES,
 }) {
   const system = PERSONA + '\n\n' + CONTEXT_TEMPLATE
     .replace('{user_identity}', userIdentity)
     .replace('{user_requirements}', userRequirements)
     .replace('{last_state_and_subjective_time}', lastStateAndSubjectiveTime)
+    .replace('{related_associations}', relatedAssociations)
+    .replace('{recent_summary}', recentSummary)
     .replace('{context_window}', contextWindow)
     .replace('{behavioral_rules}', behavioralRules);
   return system;

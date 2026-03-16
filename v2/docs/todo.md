@@ -57,7 +57,7 @@
 
 - [x] 端到端对话、工具调用、记录仅写 store；Proactive 与低功耗
 - [ ] 管理端：文档与内容在页面上可读写并持久化（可后续迭代）
-- [ ] 安静/恢复关键词去硬编码：shouldBeQuiet、isResumingDialogue 改为配置文件或 store 可编辑列表
+- [x] 安静/恢复关键词可配置：shouldBeQuiet、isResumingDialogue 从 memory/quiet_phrases.json 读取，handler 与 proactive 共用 quietResume.js
 - [ ] 可选：监控（token、文件修改）；自升级；getActiveWindowTitle
 - [x] docs/architecture.md；无引用 src/、无解析写入
 
@@ -87,7 +87,7 @@
 
 | 待办 | 来源 | 说明 |
 |------|------|------|
-| [ ] 安静/恢复关键词可配置 | todo Phase 6 | shouldBeQuiet、isResumingDialogue 当前为硬编码短语列表，改为配置文件或 store 可编辑列表，便于扩展 |
+| [x] 安静/恢复关键词可配置 | todo Phase 6 | 已改为 memory/quiet_phrases.json（可编辑），quietResume.js 供 handler 与 proactive 共用 |
 
 ### 4. 可选功能
 
@@ -116,8 +116,8 @@
 
 | 待办 | 来源 | 说明 |
 |------|------|------|
-| [ ] 无引用现网 src | v2_summary | 确认全仓库无 `require('../src/` 或 `require('../../src/`）等 |
-| [ ] 无解析写入 | v2_summary | 确认无 `updateUserIdentityFromMessage`、`appendRequirementToIdentity`、从回复中解析【情感摘要】/【表达欲望】并写入等代码 |
+| [x] 无引用现网 src | v2_summary | 已检查：v2 内无 require 引用 src/ |
+| [x] 无解析写入 | v2_summary | 已检查：身份/要求/纠错/情感/表达仅经工具写入，无解析用户或助手文本后自动写入 |
 
 ---
 

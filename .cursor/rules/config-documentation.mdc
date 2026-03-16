@@ -1,0 +1,13 @@
+---
+description: 新增可配置项时须在 README 或配置文档中补充说明
+globs:
+alwaysApply: true
+---
+
+# 配置参数须同步文档
+
+当新增或修改**可配置参数**（如环境变量、JSON 配置文件、memory 下的可编辑文件）时，必须同步更新文档，避免日后遗忘有哪些东西可以配置。
+
+- **推荐位置**：在 `v2/README.md` 的「可配置项」或「配置」小节中，列出新增项及其含义、默认值、可选值或示例。
+- 若配置较复杂（如整份 schema 或多种文件），可在 `v2/docs/` 下单独写配置说明文档，并在 README 中加链接。
+- 涉及的文件包括但不限于：`.env` 变量、`memory/*.json`（如 `quiet_phrases.json`、`retrieval_config.json`）、`memory_files.json` 中的文件名映射等。

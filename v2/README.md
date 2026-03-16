@@ -13,6 +13,40 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 - **打包分发**：无需 .env。安装后打开应用，在侧栏进入 **设置** 页填写 DeepSeek API Key 与 API 地址（可选），保存即可。设置会写入 Electron userData 目录，下次启动自动生效。
 - **Ollama**：对话不依赖 Ollama；仅需「语义记忆/向量检索」时可选安装 [Ollama](https://ollama.com) 并执行 `ollama pull nomic-embed-text`，设置页有说明。
 
+### 可配置项一览（memory 与 JSON）
+
+以下文件位于 v2 数据目录下的 `memory/` 中（路径可由 `packages/config/memory_files.json` 中的文件名覆盖）。新增配置时请同步更新本表与对应文档。
+
+| 文件 / 配置 | 说明 | 主要字段 / 格式 |
+|-------------|------|------------------|
+| **quiet_phrases.json** | 用户说哪些话时进入「安静」模式（不主动回复） | `quiet_phrases`: 字符串数组，如 `["歇会","安静待会","别说话"]`。命中则进入低功耗，未命中且非空消息可视为恢复对话。 |
+| **retrieval_config.json** | 记忆检索与小结行为 | `enable_association_inject`（boolean）：是否在 system 中注入关联 1～3 行；`max_association_lines`（number）：关联最多几行；`source_types`（array）：如 `["identity","requirement"]`；`requirement_id_max`（number）：用几条 requirement 拉关联；`enable_summary`（boolean）：是否每 N 轮生成会话小结；`summary_rounds_interval`（number）：每多少轮生成一次小结（2～50）。缺省时由代码默认值或首次写入默认文件。 |
+| **session_summaries.json** | 各会话最新小结（自动生成，一般无需手改） | 按 session 存 `content`、`updated_at`、`round_index`。 |
+| **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`quiet_phrases`、`retrieval_config`、`session_summaries` 等，值为实际文件名（如 `identity.json`）。 |
+
+### 数据目录与 memory 文件在哪里（想改数据时怎么找）
+
+这些 JSON 都是**真实存在磁盘上的文件**，不是看不见的缓存；只是数据目录和项目源码目录是分开的。
+
+- **数据目录**（所有 memory 文件都在其下的 `memory/` 里）：
+  - **用 Electron 跑**（`npm start` 或安装包）：在系统「应用数据」里，例如  
+    - macOS：`~/Library/Application Support/<应用名>/aris-v2/`  
+    - Windows：`%APPDATA%\<应用名>\aris-v2\`  
+    其中的 `memory/` 里就是 `identity.json`、`quiet_phrases.json`、`retrieval_config.json` 等，用任意文本编辑器打开即可修改。
+  - **想直接在项目里看到并修改**：在启动前设置环境变量，把数据目录指到项目内：  
+    `ARIS_V2_DATA_DIR=v2/data`（或在 Windows 下 `set ARIS_V2_DATA_DIR=v2\data`）。  
+    这样数据会落在 **`v2/data/memory/`**，在资源管理器/ Finder 里打开该文件夹即可编辑上述 JSON 文件。
+- 未设置 `ARIS_V2_DATA_DIR` 且未在 Electron 环境时，默认也会使用 **`v2/data`**，即 `v2/data/memory/` 下就是这些文件。
+
+### 之前没用 ARIS_V2_DATA_DIR 时，旧数据在哪？怎么还原？
+
+改环境变量后，应用会从 `v2/data` 读数据，**旧数据不会被删**，还在 Electron 的应用数据目录里：
+
+- **macOS**：`~/Library/Application Support/aris-v2/aris-v2/`（或若以 `Electron` 开发运行则为 `~/Library/Application Support/Electron/aris-v2/`）
+- **Windows**：`%APPDATA%\aris-v2\aris-v2\`（或 `%APPDATA%\Electron\aris-v2\`）
+
+**还原步骤**：把上述目录里的内容（整份拷贝即可，包含 `memory/`、`aris.db`、`lancedb/` 等）复制到 **`v2/data/`**，覆盖或合并进现有文件。之后用当前环境变量启动，就会用 `v2/data` 里的数据。
+
 ## 运行
 
 ```bash

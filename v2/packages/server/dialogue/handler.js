@@ -4,12 +4,15 @@
 const store = require('../../store');
 const config = require('../../config');
 const { buildSystemPrompt } = require('./prompt.js');
+const { getRelatedAssociationsLines } = require('./associationContext.js');
+const { maybeGenerateSummary } = require('./summaryGeneration.js');
 const { ALL_TOOLS, runTool } = require('./tools/index.js');
 const { chatWithTools } = require('../llm/client.js');
 const { chatStream } = require('../llm/stream.js');
 const { DIALOGUE_CHUNK_PREV_ROUNDS } = require('../../config/constants.js');
+const { shouldBeQuiet, isResumingDialogue } = require('./quietResume.js');
 
-const RECENT_ROUNDS = 5;
+const RECENT_ROUNDS = 3;
 
 function formatMessageTime(created_at) {
   if (created_at == null) return '';
@@ -33,33 +36,6 @@ function getSubjectiveTimeDescription(lastActiveTimeIso) {
   return `现在是 ${nowStr}。距离上次活跃已过去 ${deltaMin} 分钟。`;
 }
 
-// 检查用户是否明确要求安静
-function shouldBeQuiet(userContent) {
-  if (!userContent || typeof userContent !== 'string') return false;
-  
-  const quietPhrases = [
-    '歇会', '安静待会', '安静待着', '别说话', '别打扰', '让我静静',
-    '自己待会', '别理我', '别烦我', '需要安静', '想静静', '忙自己的事情去'
-  ];
-  
-  const contentLower = userContent.toLowerCase();
-  for (const phrase of quietPhrases) {
-    if (contentLower.includes(phrase.toLowerCase())) {
-      return true;
-    }
-  }
-  
-  return false;
-}
-
-// 用户主动发消息且非「要求安静」即视为恢复对话，不依赖特定关键词
-function isResumingDialogue(userContent) {
-  if (!userContent || typeof userContent !== 'string') return false;
-  const trimmed = userContent.trim();
-  if (!trimmed) return false;
-  return !shouldBeQuiet(userContent);
-}
-
 async function buildPromptContext(sessionId, recent) {
   const id = store.identity.readIdentity();
   const userIdentity = id.name ? `用户名字：${id.name}` + (id.notes ? '\n' + id.notes : '') : '（无）';
@@ -75,11 +51,16 @@ async function buildPromptContext(sessionId, recent) {
   const timeDesc = getSubjectiveTimeDescription(state?.last_active_time ?? null);
   const lastStateLine = state?.last_mental_state ? `你上一次的状态/想法是：${state.last_mental_state}` : '';
   const lastStateAndSubjectiveTime = [timeDesc, lastStateLine].filter(Boolean).join('\n') || '（无）';
+  const relatedAssociations = await getRelatedAssociationsLines(sessionId, recent);
+  const recentSummaryEntry = store.summaries?.readSummary(sessionId);
+  const recentSummary = recentSummaryEntry?.content?.trim() || '（无）';
   const systemPrompt = buildSystemPrompt({
     userIdentity,
     userRequirements,
     contextWindow,
     lastStateAndSubjectiveTime,
+    relatedAssociations,
+    recentSummary,
   });
   const recentMessages = recent.slice(-(RECENT_ROUNDS * 2));
   return {
@@ -311,6 +292,10 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     ? (contentForFrontend.length <= 200 ? contentForFrontend : contentForFrontend.slice(0, 200) + '…')
     : '(无文本回复)';
   console.info('[Aris v2] 本轮最终回复:', finalPreview);
+
+  setImmediate(() => {
+    maybeGenerateSummary(sessionId).catch((e) => console.warn('[Aris v2] 小结异步任务异常', e?.message));
+  });
 
   return { content: contentForFrontend, error: err, sessionId };
 }
