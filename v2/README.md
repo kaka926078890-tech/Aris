@@ -54,9 +54,9 @@ npm run build:linux # 产出 AppImage（Linux）
 
 ## 文档
 
-- [架构](docs/ARCHITECTURE.md)
-- [提示词策略（方案 A）](docs/PROMPT-STRATEGY.md)
-- [Store 层](docs/STORE.md)
-- [向量设计](docs/VECTOR-DESIGN.md)
-- [工具](docs/TOOLS.md)
+- [架构](docs/architecture.md)
+- [提示词策略（方案 A）](docs/prompt_strategy.md)
+- [Store 层](docs/store.md)
+- [向量设计](docs/vector_design.md)
+- [工具](docs/tools.md)
 - [分阶段执行清单](docs/todo.md)

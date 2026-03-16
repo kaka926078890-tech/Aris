@@ -8,17 +8,17 @@ alwaysApply: false
 
 ## 文档命名
 
-- **所有文档文件**（含 `docs/`、`memory/`、根目录及子目录下的 `.md`、`.mdc` 等）统一使用 **小写 + 连字符** 命名。
-- 格式：`lowercase-with-hyphens.md`，禁止使用大写、下划线或驼峰。
+- **所有文档文件**（含 `docs/`、各子项目下的文档目录及 `.md`、`.mdc` 等）统一使用 **小写英文字母 + 下划线** 命名。
+- 格式：`lowercase_with_underscores.md`，禁止使用大写、连字符或驼峰。
 - 示例：
-  - ✅ `project-plan.md`、`agent-files-design.md`、`self-upgrade-and-lowpower-solution.md`
-  - ❌ `PROJECT_PLAN.md`、`AgentFilesDesign.md`、`self_upgrade_and_lowpower_solution.md`
+  - ✅ `project_layout.md`、`record_mechanism_improvement.md`、`distribution_embedding_options.md`
+  - ❌ `PROJECT-LAYOUT.md`、`RecordMechanismImprovement.md`、`distribution-embedding-options.md`
 - 新建或重命名文档时一律遵循此规范。
 
 ## 项目约定（当前代码库）
 
-- **前端**：`src/renderer/` 为 HTML + 原生 JS（esbuild 打包），样式用 Tailwind；主入口 `index.html`，逻辑 `main.js` → 打包为 `dist/bundle.js`。
-- **主进程**：`electron.main.js` 为 Electron 主进程入口；预加载脚本 `preload.js`，通过 `window.aris` 暴露 IPC。
-- **模块**：`src/` 下按功能分目录（`dialogue/`、`memory/`、`context/`、`engine/`、`store/` 等），CommonJS `require`，无 TypeScript。
-- **配置与密钥**：环境变量与密钥用 `dotenv`，不提交 `.env`；API 等配置从 `process.env` 读取。
-- **文档与设计**：设计类、架构类文档放 `docs/`；Aris 运行时生成的内容（情感记录、操作日志等）放 `memory/`；详见 `docs/project-structure-and-conventions.md`。
+- **前端**：`src/renderer/` 或 v2 `apps/renderer/` 为界面入口；v2 使用 React + Tailwind。
+- **主进程**：Electron 主进程入口为 `main.js`；预加载通过 `window.aris` 暴露 IPC。
+- **模块**：v2 下 `packages/server`、`packages/store`、`packages/config`；CommonJS，无 TypeScript。
+- **配置与密钥**：环境变量用 `dotenv`，不提交 `.env`；API 等从 `process.env` 或运行时 config 读取。
+- **文档**：设计/架构类文档放 `docs/`，命名采用小写_下划线。

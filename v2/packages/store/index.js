@@ -3,6 +3,7 @@
  */
 const identity = require('./identity.js');
 const requirements = require('./requirements.js');
+const associations = require('./associations.js');
 const corrections = require('./corrections.js');
 const emotions = require('./emotions.js');
 const expressionDesires = require('./expressionDesires.js');
@@ -21,6 +22,7 @@ try {
 module.exports = {
   identity,
   requirements,
+  associations,
   corrections,
   emotions,
   expressionDesires,

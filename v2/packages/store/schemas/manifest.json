@@ -1,0 +1,5 @@
+{
+  "identity": "identity.schema.json",
+  "requirements": "requirements.schema.json",
+  "associations": "associations.schema.json"
+}

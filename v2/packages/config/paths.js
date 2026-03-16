@@ -1,8 +1,27 @@
 /**
  * v2 数据与 memory 路径。与现网隔离，不使用项目根 src/ 或现有 userData/aris。
+ * memory 文件名从 memory_files.json 读取，不硬编码。
  */
 const path = require('path');
 const fs = require('fs');
+
+let memoryFiles = null;
+function getMemoryFiles() {
+  if (memoryFiles) return memoryFiles;
+  try {
+    memoryFiles = require('./memory_files.json');
+  } catch (_) {
+    memoryFiles = {
+      identity: 'identity.json',
+      requirements: 'requirements.json',
+      corrections: 'corrections.json',
+      emotions: 'emotions.json',
+      expression_desires: 'expression_desires.json',
+      associations: 'associations.json',
+    };
+  }
+  return memoryFiles;
+}
 
 function getV2Root() {
   return path.join(__dirname, '..', '..');
@@ -30,23 +49,27 @@ function getMemoryDir() {
 }
 
 function getIdentityPath() {
-  return path.join(getMemoryDir(), 'identity.json');
+  return path.join(getMemoryDir(), getMemoryFiles().identity);
 }
 
 function getRequirementsPath() {
-  return path.join(getMemoryDir(), 'requirements.json');
+  return path.join(getMemoryDir(), getMemoryFiles().requirements);
 }
 
 function getCorrectionsPath() {
-  return path.join(getMemoryDir(), 'corrections.json');
+  return path.join(getMemoryDir(), getMemoryFiles().corrections);
 }
 
 function getEmotionsPath() {
-  return path.join(getMemoryDir(), 'emotions.json');
+  return path.join(getMemoryDir(), getMemoryFiles().emotions);
 }
 
 function getExpressionDesiresPath() {
-  return path.join(getMemoryDir(), 'expression_desires.json');
+  return path.join(getMemoryDir(), getMemoryFiles().expression_desires);
+}
+
+function getAssociationsPath() {
+  return path.join(getMemoryDir(), getMemoryFiles().associations);
 }
 
 function getSqlitePath() {
@@ -69,11 +92,13 @@ module.exports = {
   getV2Root,
   getDataDir,
   getMemoryDir,
+  getMemoryFiles,
   getIdentityPath,
   getRequirementsPath,
   getCorrectionsPath,
   getEmotionsPath,
   getExpressionDesiresPath,
+  getAssociationsPath,
   getSqlitePath,
   getLanceDbPath,
   getStatePath,

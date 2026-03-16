@@ -1,0 +1,21 @@
+{
+  "list_key": "requirements",
+  "text_field": "text",
+  "id_field": "id",
+  "created_at_field": "created_at",
+  "updated_at_field": "updated_at",
+  "frequency_field": "frequency",
+  "embedding_field": "embedding",
+  "similarity_threshold": 0.85,
+  "item_fields": {
+    "id": { "required": true, "type": "string" },
+    "text": { "required": true, "type": "string" },
+    "category": { "required": false, "type": "string" },
+    "tags": { "required": false, "type": "array" },
+    "created_at": { "required": true, "type": "string" },
+    "updated_at": { "required": false, "type": "string" },
+    "frequency": { "required": false, "type": "number" },
+    "related_to": { "required": false, "type": "array" },
+    "embedding": { "required": false, "type": "array" }
+  }
+}

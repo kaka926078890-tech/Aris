@@ -1,0 +1,17 @@
+{
+  "list_key": "associations",
+  "source_type_field": "source_type",
+  "source_id_field": "source_id",
+  "target_type_field": "target_type",
+  "target_id_field": "target_id",
+  "relationship_field": "relationship",
+  "strength_field": "strength",
+  "item_fields": {
+    "source_type": { "type": "string" },
+    "source_id": { "type": "string" },
+    "target_type": { "type": "string" },
+    "target_id": { "type": "string" },
+    "relationship": { "type": "string" },
+    "strength": { "type": "number" }
+  }
+}

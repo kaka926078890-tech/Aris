@@ -1,65 +1,94 @@
 /**
- * 用户身份：仅被 record_user_identity 工具或管理 API 调用，不做任何从对话文本的解析。
+ * 用户身份：仅被 record_user_identity 工具或管理 API 调用。
+ * 累积式更新 + 历史，结构由 schema 定义，无硬编码字段。
  */
 const fs = require('fs');
-const {
-  getIdentityPath,
-  getMemoryDir,
-} = require('../config/paths.js');
+const { getIdentityPath, getMemoryDir } = require('../config/paths.js');
+const { loadSchema } = require('./schemaLoader.js');
 
-const DEFAULT = { name: '', notes: '' };
+function getSchema() {
+  const schema = loadSchema('identity');
+  if (!schema || !Array.isArray(schema.current_fields)) {
+    return { current_fields: ['name', 'notes'], history_key: 'history', history_entry_fields: ['timestamp', 'name', 'notes', 'source'], defaults: { name: '', notes: '' } };
+  }
+  return schema;
+}
 
-function readIdentity() {
+function readIdentity(options = {}) {
+  const schema = getSchema();
+  const defaults = schema.defaults || {};
+  const currentFields = schema.current_fields;
   try {
     const p = getIdentityPath();
     if (fs.existsSync(p)) {
       const raw = fs.readFileSync(p, 'utf8').trim();
       if (raw) {
         const data = JSON.parse(raw);
-        return { ...DEFAULT, ...data };
+        const current = {};
+        for (const key of currentFields) {
+          current[key] = data[key] !== undefined ? data[key] : (defaults[key] !== undefined ? defaults[key] : '');
+        }
+        if (options.includeHistory && schema.history_key && Array.isArray(data[schema.history_key])) {
+          current[schema.history_key] = data[schema.history_key];
+        }
+        return current;
       }
     }
   } catch (e) {
     console.warn('[Aris v2][store/identity] read failed', e?.message);
   }
-  return { ...DEFAULT };
+  const fallback = {};
+  for (const key of currentFields) {
+    fallback[key] = defaults[key] !== undefined ? defaults[key] : '';
+  }
+  return fallback;
 }
 
-function writeIdentity({ name, notes }) {
+function writeIdentity(payload) {
+  const schema = getSchema();
   const p = getIdentityPath();
   const dir = getMemoryDir();
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  
-  const existing = readIdentity();
-  let data = { ...existing };
-  
-  // 如果提供了名字（无论是否为空），则重置整个身份记录
-  if (name !== undefined) {
-    // 名字更新时，重置整个记录
-    data.name = String(name ?? '').trim();
-    
-    // 如果同时提供了备注，则使用新备注
-    if (notes !== undefined) {
-      data.notes = String(notes ?? '').trim();
-    } else {
-      // 如果没有提供备注，则清空备注（因为名字更新意味着新用户或重置）
-      data.notes = '';
+
+  const currentFields = schema.current_fields;
+  const historyKey = schema.history_key;
+  const historyEntryFields = schema.history_entry_fields || currentFields;
+  let data = {};
+  try {
+    if (fs.existsSync(p)) {
+      const raw = fs.readFileSync(p, 'utf8').trim();
+      if (raw) data = JSON.parse(raw);
     }
-  } else if (notes !== undefined) {
-    // 只更新备注时，追加到现有备注后面
-    const newNotes = String(notes ?? '').trim();
-    if (newNotes) {
-      if (data.notes) {
-        // 追加，用换行分隔
-        data.notes = data.notes + '\n' + newNotes;
-      } else {
-        data.notes = newNotes;
+  } catch (_) {}
+  const defaults = schema.defaults || {};
+  for (const key of currentFields) {
+    if (data[key] === undefined) data[key] = defaults[key] !== undefined ? defaults[key] : '';
+  }
+  const previous = { ...data };
+  let changed = false;
+  for (const key of currentFields) {
+    if (payload[key] !== undefined) {
+      const newVal = typeof payload[key] === 'string' ? payload[key].trim() : (payload[key] ?? '');
+      if (data[key] !== newVal) {
+        data[key] = newVal;
+        changed = true;
       }
     }
   }
-  
+  if (changed && historyKey && historyEntryFields.length) {
+    const entry = {};
+    const now = new Date().toISOString();
+    for (const f of historyEntryFields) {
+      if (f === 'timestamp') entry[f] = now;
+      else if (f === 'source') entry[f] = '用户告知';
+      else entry[f] = previous[f] !== undefined ? previous[f] : '';
+    }
+    if (!Array.isArray(data[historyKey])) data[historyKey] = [];
+    data[historyKey].push(entry);
+  }
   fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf8');
-  console.info('[Aris v2][store/identity] written', { name: data.name, notesLength: data.notes.length });
+  const preview = currentFields.map((k) => `${k}:${String(data[k]).length}`).join(', ');
+  console.info('[Aris v2][store/identity] written', preview);
 }
 
 module.exports = { readIdentity, writeIdentity };

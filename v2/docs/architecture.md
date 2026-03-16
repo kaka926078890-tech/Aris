@@ -44,7 +44,7 @@ flowchart TB
 
 - **对话**：用户消息 → Electron IPC → server/handler → 组 prompt（方案 A）→ LLM（含 tools）→ 执行工具 → 写 conversations（SQLite）、向量块（LanceDB）、state。
 - **记录**：仅当 LLM 调用 record_* 工具时，handler 执行工具 → store 对应模块写入（identity/requirements/corrections/emotions/expressionDesires）。
-- **检索**：search_memories 工具 → store/vector.search（query 加 search_query:）→ 返回片段注入或供模型使用。
+- **检索**：search_memories 工具 → store/vector.search（query 加 search_query:）→ 返回片段注入或供模型参考。
 
 ## 记忆的数据库
 

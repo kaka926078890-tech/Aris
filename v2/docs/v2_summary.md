@@ -16,7 +16,7 @@
 
 ### 3. 提示词策略（方案 A）
 - 首轮：完整 system prompt（人设、规则、身份、要求、上次状态与时间、当前会话）。
-- 后续轮：人设+规则+工具定义每轮保留；身份/要求用 store 读出的简短摘要注入。若后续改为方案 B，需更新 prompt.js 与 PROMPT-STRATEGY.md。
+- 后续轮：人设+规则+工具定义每轮保留；身份/要求用 store 读出的简短摘要注入。若后续改为方案 B，需更新 prompt.js 与 prompt_strategy.md。
 
 ### 4. 向量设计（已实现部分）
 - 结构化拼接块：每轮写入「上一轮+本轮」对话块，embed 时加 search_document 前缀，写入 type=dialogue_turn。
@@ -30,7 +30,7 @@
 
 ### 6. 文档
 - docs/todo.md：分阶段执行清单，已勾选 Phase 0～6 已完成项。
-- docs/PROMPT-STRATEGY.md、ARCHITECTURE.md、STORE.md、VECTOR-DESIGN.md、TOOLS.md、UI-MANAGEMENT.md、PROJECT-LAYOUT.md。
+- docs/prompt_strategy.md、architecture.md、store.md、vector_design.md、tools.md、ui_management.md、project_layout.md。
 - packages/store/docs/*.md：各 store 职责、接口、存储、谁可写。
 
 ---
@@ -42,7 +42,7 @@
 - **端到端**：设计上满足「发消息→工具调用→记录仅写 store→流式回复→历史/导出导入」；无引用 src/、无解析写入。
 - **管理端 UI**：在页面上可查看与编辑「文档」与「内容」的完整管理页（可后续迭代）；当前仅有简易对话页。
 - **历史会话**：可选的历史会话列表与单会话查看（可后续迭代）；IPC 已支持 getSessions/getConversation/clearAll，前端未做列表与详情页。
-- **docs/ARCHITECTURE.md**：已补充与现网关系、对话库与向量库在流程中的角色说明。
+- **docs/architecture.md**：已补充与现网关系、对话库与向量库在流程中的角色说明。
 
 ### 2. 向量与检索（可选增强）
 - 每 5～10 轮用 LLM 生成对话摘要并向量化存入 type=dialogue_summary。

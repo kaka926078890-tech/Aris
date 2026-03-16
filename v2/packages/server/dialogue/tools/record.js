@@ -89,6 +89,40 @@ const RECORD_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'record_association',
+      description: '建立两条信息之间的关联（如身份与偏好、要求与要求）。用于形成用户认知图。',
+      parameters: {
+        type: 'object',
+        properties: {
+          source_type: { type: 'string', description: '来源类型，如 identity / requirement' },
+          source_id: { type: 'string', description: '来源 id 或键，如 name 或 req_xxx' },
+          target_type: { type: 'string', description: '目标类型' },
+          target_id: { type: 'string', description: '目标 id 或键' },
+          relationship: { type: 'string', description: '关系描述，如 prefers / related_to' },
+          strength: { type: 'number', description: '关联强度 0-1', default: 1 },
+        },
+        required: ['source_type', 'source_id', 'target_type', 'target_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_associations',
+      description: '查询某条信息的所有关联（如某身份关联了哪些要求）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          source_type: { type: 'string', description: '来源类型' },
+          source_id: { type: 'string', description: '来源 id 或键' },
+        },
+        required: ['source_type', 'source_id'],
+      },
+    },
+  },
 ];
 
 async function runRecordTool(name, args) {
@@ -103,7 +137,10 @@ async function runRecordTool(name, args) {
       return { ok: true, identity };
     }
     if (name === 'record_user_requirement') {
-      if (a.text) store.requirements.appendRequirement(a.text);
+      if (a.text) {
+        const res = await store.requirements.appendRequirement(a.text);
+        return { ok: !!res?.success, message: res?.message || '已记录' };
+      }
       return { ok: true, message: '已记录' };
     }
     if (name === 'record_correction') {
@@ -117,6 +154,21 @@ async function runRecordTool(name, args) {
     if (name === 'record_expression_desire') {
       if (a.text) store.expressionDesires.appendDesire({ text: a.text, intensity: a.intensity });
       return { ok: true, message: '已记录' };
+    }
+    if (name === 'record_association') {
+      const res = store.associations.addAssociation({
+        source_type: a.source_type,
+        source_id: a.source_id,
+        target_type: a.target_type,
+        target_id: a.target_id,
+        relationship: a.relationship,
+        strength: a.strength,
+      });
+      return res;
+    }
+    if (name === 'get_associations') {
+      const list = store.associations.getAssociationsFor(a.source_type, a.source_id);
+      return { ok: true, associations: list };
     }
   } catch (e) {
     console.warn('[Aris v2] record tool error', name, e?.message);

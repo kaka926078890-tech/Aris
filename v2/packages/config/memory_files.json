@@ -1,0 +1,8 @@
+{
+  "identity": "identity.json",
+  "requirements": "requirements.json",
+  "corrections": "corrections.json",
+  "emotions": "emotions.json",
+  "expression_desires": "expression_desires.json",
+  "associations": "associations.json"
+}

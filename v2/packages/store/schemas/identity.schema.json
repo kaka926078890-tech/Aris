@@ -1,0 +1,6 @@
+{
+  "current_fields": ["name", "notes"],
+  "history_key": "history",
+  "history_entry_fields": ["timestamp", "name", "notes", "source"],
+  "defaults": { "name": "", "notes": "" }
+}
