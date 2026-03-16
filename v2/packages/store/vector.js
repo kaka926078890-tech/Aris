@@ -136,13 +136,35 @@ function timeDecayFactor(createdAt) {
   return Math.max(0, 1 - daysSince / 365);
 }
 
+/** 判断一条记录的 metadata.related_entities 是否与给定实体列表有交集 */
+function rowMatchesEntities(row, filterByEntities) {
+  if (!filterByEntities || filterByEntities.length === 0) return true;
+  const meta = row.metadata || {};
+  const rel = meta.related_entities;
+  if (!Array.isArray(rel) || rel.length === 0) return false;
+  for (const f of filterByEntities) {
+    for (const r of rel) {
+      if (r && String(r.type) === String(f.type) && String(r.id) === String(f.id)) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * 检索：query 加 search_query 前缀后 embed，再向量搜索，最后用时间衰减融合得分并重排。
+ * @param {string} queryText
+ * @param {number} limit
+ * @param {{ filterByEntities?: { type: string, id: string }[] }} options - 分层记忆：只保留与这些实体相关的经历
  */
-async function search(queryText, limit = 10) {
+async function search(queryText, limit = 10, options = {}) {
   const queryVector = await embed(queryText, { prefix: 'query' });
   if (!queryVector) return [];
-  const raw = await _rawSearch(queryVector, Math.max(limit * 2, 20));
+  const filterByEntities = options.filterByEntities;
+  const fetchLimit = filterByEntities && filterByEntities.length > 0 ? Math.max(limit * 4, 50) : Math.max(limit * 2, 20);
+  let raw = await _rawSearch(queryVector, fetchLimit);
+  if (filterByEntities && filterByEntities.length > 0) {
+    raw = raw.filter((r) => rowMatchesEntities(r, filterByEntities));
+  }
   if (!raw.length) return [];
   const withScore = raw.map((r) => {
     const dist = r._distance != null ? r._distance : (r.distance != null ? r.distance : 0);

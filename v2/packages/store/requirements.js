@@ -77,12 +77,16 @@ function _readRaw() {
   return [];
 }
 
-function _writeList(list) {
+function _writeList(list, lastWrittenItem) {
   const schema = getSchema();
   const listKey = schema.list_key;
   const dir = getMemoryDir();
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(getRequirementsPath(), JSON.stringify({ [listKey]: list }, null, 2), 'utf8');
+  if (lastWrittenItem != null) {
+    const timeline = require('./timeline.js');
+    timeline.appendEntry({ type: 'requirement', payload: lastWrittenItem, actor: 'system' });
+  }
 }
 
 /** 智能添加：语义去重（有向量时）或精确去重，否则追加；结构依 schema */
@@ -142,7 +146,7 @@ async function appendRequirement(text) {
         item[updatedAtField] = now;
         item[frequencyField] = (Number(item[frequencyField]) || 0) + 1;
         if (embeddingField) item[embeddingField] = newVec;
-        _writeList(list);
+        _writeList(list, item);
         console.info('[Aris v2][store/requirements] 语义合并', bestSim.toFixed(2));
         return { success: true, merged: true, message: '已与已有要求合并' };
       }
@@ -154,7 +158,7 @@ async function appendRequirement(text) {
     const item = list[exactIdx];
     item[updatedAtField] = now;
     item[frequencyField] = (Number(item[frequencyField]) || 0) + 1;
-    _writeList(list);
+    _writeList(list, item);
     return { success: true, merged: true, message: '已与已有要求合并' };
   }
 
@@ -167,7 +171,7 @@ async function appendRequirement(text) {
     newItem[embeddingField] = newVec;
   }
   list.push(newItem);
-  _writeList(list);
+  _writeList(list, newItem);
   console.info('[Aris v2][store/requirements] 追加', list.length, '项');
   return { success: true, merged: false, count: list.length, message: '已记录' };
 }
@@ -182,12 +186,13 @@ function simpleAppendRequirement(text) {
   if (list.some((item) => String(item[textField]).trim() === line)) return;
   const idField = schema.id_field;
   const createdAtField = schema.created_at_field;
-  list.push({
+  const newItem = {
     [idField]: genId(),
     [textField]: line,
     [createdAtField]: new Date().toISOString(),
-  });
-  _writeList(list);
+  };
+  list.push(newItem);
+  _writeList(list, newItem);
   console.info('[Aris v2][store/requirements] 简单追加', list.length);
   return { success: true, count: list.length };
 }
@@ -252,7 +257,7 @@ async function triggerRefinement() {
         [createdAtField]: new Date().toISOString(),
       };
     });
-    _writeList(newList);
+    _writeList(newList, { action: 'refine', count: newList.length });
     const stats = refiner.getStatistics(texts.length, newList.length);
     return {
       success: true,

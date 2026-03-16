@@ -87,6 +87,12 @@ function writeIdentity(payload) {
     data[historyKey].push(entry);
   }
   fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf8');
+  if (changed) {
+    const timeline = require('./timeline.js');
+    const payload = {};
+    for (const k of currentFields) payload[k] = data[k];
+    timeline.appendEntry({ type: 'identity', payload, actor: 'system' });
+  }
   const preview = currentFields.map((k) => `${k}:${String(data[k]).length}`).join(', ');
   console.info('[Aris v2][store/identity] written', preview);
 }

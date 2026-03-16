@@ -23,10 +23,13 @@ function _readList() {
 function appendCorrection(previous, correction) {
   const text = `[纠错] 我此前说: ${String(previous ?? '').slice(0, 500)}\n用户纠正: ${String(correction ?? '').slice(0, 500)}`;
   const list = _readList();
-  list.push({ text, created_at: new Date().toISOString() });
+  const item = { text, created_at: new Date().toISOString() };
+  list.push(item);
   const dir = getMemoryDir();
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(getCorrectionsPath(), JSON.stringify(list, null, 2), 'utf8');
+  const timeline = require('./timeline.js');
+  timeline.appendEntry({ type: 'correction', payload: item, actor: 'system' });
   console.info('[Aris v2][store/corrections] appended');
 }
 

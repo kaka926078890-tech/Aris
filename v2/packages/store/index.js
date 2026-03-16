@@ -10,6 +10,8 @@ const expressionDesires = require('./expressionDesires.js');
 const conversations = require('./conversations.js');
 const state = require('./state.js');
 const summaries = require('./summaries.js');
+const preferences = require('./preferences.js');
+const timeline = require('./timeline.js');
 const db = require('./db.js');
 const monitor = require('./monitor.js');
 
@@ -30,6 +32,8 @@ module.exports = {
   conversations,
   state,
   summaries,
+  preferences,
+  timeline,
   vector: vectorModule,
   db,
   monitor,

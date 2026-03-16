@@ -77,6 +77,8 @@ function addAssociation(payload) {
   if (idx >= 0) list[idx] = entry;
   else list.push(entry);
   _writeList(list);
+  const timeline = require('./timeline.js');
+  timeline.appendEntry({ type: 'association', payload: entry, actor: 'system' });
   console.info('[Aris v2][store/associations] add', newKey);
   return { ok: true, message: '已记录关联' };
 }

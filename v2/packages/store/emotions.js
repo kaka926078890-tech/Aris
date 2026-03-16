@@ -24,15 +24,18 @@ function appendEmotion({ text, intensity, tags }) {
   const line = String(text ?? '').trim();
   if (!line) return;
   const list = _readList();
-  list.push({
+  const item = {
     text: line,
     intensity: intensity ?? 3,
     tags: Array.isArray(tags) ? tags : [],
     created_at: new Date().toISOString(),
-  });
+  };
+  list.push(item);
   const dir = getMemoryDir();
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(getEmotionsPath(), JSON.stringify(list, null, 2), 'utf8');
+  const timeline = require('./timeline.js');
+  timeline.appendEntry({ type: 'emotion', payload: item, actor: 'system' });
   console.info('[Aris v2][store/emotions] appended');
 }
 

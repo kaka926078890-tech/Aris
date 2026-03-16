@@ -23,11 +23,19 @@ async function getCurrentSessionId() {
 
 async function append(sessionId, role, content) {
   const db = await getDb();
+  const ts = Math.floor(Date.now() / 1000);
   const stmt = db.prepare('INSERT INTO conversations (session_id, role, content, created_at) VALUES (?, ?, ?, ?)');
-  stmt.bind([sessionId, role, content, Math.floor(Date.now() / 1000)]);
+  stmt.bind([sessionId, role, content, ts]);
   stmt.step();
   stmt.free();
   persist();
+  const timeline = require('./timeline.js');
+  const preview = typeof content === 'string' ? content.slice(0, 200) : '';
+  timeline.appendEntry({
+    type: 'conversation',
+    payload: { session_id: sessionId, role, content_preview: preview, created_at: ts },
+    actor: role === 'user' ? 'user' : 'system',
+  });
 }
 
 async function getRecent(sessionId, limit = 20) {

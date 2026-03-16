@@ -52,12 +52,15 @@ function readSummary(sessionId) {
 function writeSummary(sessionId, content, roundIndex) {
   if (!sessionId) return;
   const bySession = _readRaw();
-  bySession[sessionId] = {
+  const entry = {
     content: String(content).trim() || '（无）',
     updated_at: new Date().toISOString(),
     round_index: Math.max(0, Math.floor(Number(roundIndex) || 0)),
   };
+  bySession[sessionId] = entry;
   _write(bySession);
+  const timeline = require('./timeline.js');
+  timeline.appendEntry({ type: 'session_summary', payload: { session_id: sessionId, ...entry }, actor: 'system' });
 }
 
 module.exports = { readSummary, writeSummary };

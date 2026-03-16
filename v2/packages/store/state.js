@@ -34,6 +34,8 @@ function writeState(updates) {
     const dir = getDataDir();
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(getStatePath(), JSON.stringify(data, null, 2), 'utf8');
+    const timeline = require('./timeline.js');
+    timeline.appendEntry({ type: 'state', payload: data, actor: 'system' });
   } catch (e) {
     console.warn('[Aris v2][store/state] writeState failed', e?.message);
   }
@@ -47,6 +49,8 @@ function readProactiveState() {
     self_upgrade_done_today: false,
     proactive_no_reply_count: 0,
     low_power_mode: false,
+    last_tired_or_quiet_at: null,
+    recent_mood_or_scene: '',
   };
   try {
     const p = getProactiveStatePath();
@@ -59,6 +63,8 @@ function readProactiveState() {
       self_upgrade_done_today: Boolean(data.self_upgrade_done_today),
       proactive_no_reply_count: Math.min(3, Math.max(0, Number(data.proactive_no_reply_count) || 0)),
       low_power_mode: Boolean(data.low_power_mode),
+      last_tired_or_quiet_at: data.last_tired_or_quiet_at || null,
+      recent_mood_or_scene: typeof data.recent_mood_or_scene === 'string' ? data.recent_mood_or_scene : '',
     };
     if (state.state_date !== today) {
       state.state_date = today;
@@ -84,6 +90,8 @@ function writeProactiveState(updates) {
     const dir = getDataDir();
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(getProactiveStatePath(), JSON.stringify(merged, null, 2), 'utf8');
+    const timeline = require('./timeline.js');
+    timeline.appendEntry({ type: 'proactive_state', payload: merged, actor: 'system' });
   } catch (e) {
     console.warn('[Aris v2][store/state] writeProactiveState failed', e?.message);
   }
