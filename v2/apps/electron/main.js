@@ -1,4 +1,7 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '..', '.env') });
+const { loadAndApplyRuntimeConfig, readConfig, writeConfig } = require('./runtimeConfig.js');
+loadAndApplyRuntimeConfig();
+
 const { app, BrowserWindow, ipcMain, Menu, dialog } = require('electron');
 const path = require('path');
 const { handleUserMessage, getPromptPreview, maybeProactiveMessage } = require('../../packages/server');
@@ -202,6 +205,12 @@ ipcMain.handle('content:getProactiveState', () => (store.state ? store.state.rea
 ipcMain.handle('content:getEmotionsRecent', (_, limit) => (store.emotions ? store.emotions.getRecent(Number(limit) || 20) : []));
 ipcMain.handle('content:getExpressionDesiresRecent', (_, limit) => (store.expressionDesires ? store.expressionDesires.getRecent(Number(limit) || 20) : []));
 ipcMain.handle('content:getCorrectionsRecent', (_, limit) => (store.corrections ? store.corrections.getRecent(Number(limit) || 20) : []));
+
+ipcMain.handle('config:get', () => readConfig());
+ipcMain.handle('config:set', (_, data) => {
+  writeConfig(data || {});
+  return { ok: true };
+});
 
 function runProactiveCheck() {
   if (dialogueBusy || !mainWindow || mainWindow.isDestroyed()) return;

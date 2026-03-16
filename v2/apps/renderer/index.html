@@ -65,6 +65,7 @@
         <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="content" title="用户与 Aris" aria-label="用户与 Aris"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg></button>
         <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="monitor" title="监控面板" aria-label="监控面板"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg></button>
         <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="prompt" title="提示词预览" aria-label="提示词预览"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg></button>
+        <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="settings" title="设置" aria-label="设置"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg></button>
       </nav>
     </aside>
     <div class="flex-1 flex flex-col min-h-0 overflow-hidden overflow-x-hidden bg-slate-50">
@@ -186,6 +187,37 @@
     </div>
     <pre id="prompt-preview-output" class="flex-1 overflow-auto p-3 text-xs bg-slate-100 border border-slate-200 rounded m-3 whitespace-pre-wrap font-sans"></pre>
   </div>
+
+  <div id="panel-settings" class="panel hidden flex-1 flex flex-col min-h-0 overflow-hidden overflow-x-hidden">
+    <div class="flex-1 overflow-y-auto p-4 space-y-4">
+      <section class="rounded-lg border border-slate-200 bg-white p-4">
+        <h2 class="text-sm font-medium text-slate-700 mb-3">Aris 配置</h2>
+        <p class="text-xs text-slate-500 mb-3">打包版无需编辑 .env，在此填写并保存即可生效。</p>
+        <div class="space-y-3 text-sm">
+          <div>
+            <label class="text-slate-600 block mb-1">DeepSeek API Key <span class="text-red-500">*</span></label>
+            <input type="password" id="settings-api-key" placeholder="sk-..." class="w-full rounded border border-slate-300 px-3 py-2 text-sm" autocomplete="off" />
+          </div>
+          <div>
+            <label class="text-slate-600 block mb-1">API 地址（可选）</label>
+            <input type="text" id="settings-api-url" placeholder="https://api.deepseek.com" class="w-full rounded border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <button type="button" id="settings-save" class="rounded bg-sky-600 text-white px-4 py-2 text-sm hover:bg-sky-700">保存</button>
+          <p id="settings-save-msg" class="text-xs text-slate-500 hidden"></p>
+        </div>
+      </section>
+      <section class="rounded-lg border border-slate-200 bg-white p-4">
+        <h2 class="text-sm font-medium text-slate-700 mb-2">关于 Ollama（可选）</h2>
+        <p class="text-sm text-slate-600 mb-2">对话与回复<strong>不依赖</strong> Ollama，仅配置 DeepSeek API Key 即可使用。</p>
+        <p class="text-sm text-slate-600 mb-2">若需<strong>语义记忆/向量检索</strong>（对话内容可被召回），可额外安装 Ollama 并拉取嵌入模型：</p>
+        <ul class="text-sm text-slate-600 list-disc list-inside space-y-1 mb-2">
+          <li>安装：<a href="https://ollama.com" target="_blank" rel="noopener" class="text-sky-600 underline">ollama.com</a></li>
+          <li>终端执行：<code class="bg-slate-100 px-1 rounded text-xs">ollama pull nomic-embed-text</code></li>
+        </ul>
+        <p class="text-xs text-slate-500">不安装时，对话照常，仅「向量数据库」面板无数据、对话不会写入向量记忆。</p>
+      </section>
+    </div>
+  </div>
     </div>
   </div>
 
@@ -215,6 +247,7 @@
       if (name === 'history') loadHistorySessions();
       if (name === 'monitor') loadMonitor();
       if (name === 'content') loadContentPanel();
+      if (name === 'settings') loadSettingsPanel();
     }
 
     document.querySelectorAll('.sidebar-btn').forEach((btn) => {
@@ -224,6 +257,13 @@
     function scrollToBottom() {
       requestAnimationFrame(() => {
         if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+      });
+    }
+
+    function scrollThinkingBodyToBottom() {
+      if (!currentThinkingBody) return;
+      requestAnimationFrame(() => {
+        if (currentThinkingBody) currentThinkingBody.scrollTop = currentThinkingBody.scrollHeight;
       });
     }
 
@@ -322,6 +362,7 @@
         currentThinkingBody = body;
       }
       setThinkingBodyFull(currentThinkingBody, actions);
+      scrollThinkingBodyToBottom();
       scrollToBottom();
     }
 
@@ -770,6 +811,33 @@
       await window.aris.writeIdentity({ name: name.trim(), notes: notes.trim() });
     });
     document.getElementById('content-refresh')?.addEventListener('click', loadContentPanel);
+
+    async function loadSettingsPanel() {
+      if (!window.aris || !window.aris.getRuntimeConfig) return;
+      try {
+        const c = await window.aris.getRuntimeConfig();
+        const keyEl = document.getElementById('settings-api-key');
+        const urlEl = document.getElementById('settings-api-url');
+        if (keyEl) keyEl.value = (c && c.DEEPSEEK_API_KEY) ? c.DEEPSEEK_API_KEY : '';
+        if (urlEl) urlEl.value = (c && c.DEEPSEEK_API_URL) ? c.DEEPSEEK_API_URL : '';
+        const msgEl = document.getElementById('settings-save-msg');
+        if (msgEl) { msgEl.classList.add('hidden'); msgEl.textContent = ''; }
+      } catch (e) { console.error(e); }
+    }
+    document.getElementById('settings-save')?.addEventListener('click', async () => {
+      if (!window.aris || !window.aris.setRuntimeConfig) return;
+      const keyEl = document.getElementById('settings-api-key');
+      const urlEl = document.getElementById('settings-api-url');
+      const msgEl = document.getElementById('settings-save-msg');
+      const key = (keyEl && keyEl.value) ? keyEl.value.trim() : '';
+      const url = (urlEl && urlEl.value) ? urlEl.value.trim() : '';
+      try {
+        await window.aris.setRuntimeConfig({ DEEPSEEK_API_KEY: key, DEEPSEEK_API_URL: url || 'https://api.deepseek.com' });
+        if (msgEl) { msgEl.classList.remove('hidden'); msgEl.textContent = '已保存，下次对话将使用新配置。'; msgEl.className = 'text-xs text-green-600'; }
+      } catch (e) {
+        if (msgEl) { msgEl.classList.remove('hidden'); msgEl.textContent = '保存失败：' + (e?.message || e); msgEl.className = 'text-xs text-red-600'; }
+      }
+    });
 
     document.getElementById('prompt-preview-btn').addEventListener('click', async () => {
       const input = document.getElementById('prompt-preview-input').value.trim();

@@ -7,16 +7,35 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 - **数据**：使用 v2 独立数据目录（Electron userData/aris-v2 或 `v2/data`），与现有 Aris 数据分离。
 - **记录**：身份、要求、纠错、情感、表达欲望仅由 LLM 通过工具写入，禁止代码内解析自动写入。
 
+## 配置
+
+- **开发/本地**：可复制 `.env.example` 为 `.env`，配置 `DEEPSEEK_API_KEY`、`DEEPSEEK_API_URL`、`OLLAMA_HOST` 等。
+- **打包分发**：无需 .env。安装后打开应用，在侧栏进入 **设置** 页填写 DeepSeek API Key 与 API 地址（可选），保存即可。设置会写入 Electron userData 目录，下次启动自动生效。
+- **Ollama**：对话不依赖 Ollama；仅需「语义记忆/向量检索」时可选安装 [Ollama](https://ollama.com) 并执行 `ollama pull nomic-embed-text`，设置页有说明。
+
 ## 运行
 
 ```bash
 cd v2
-npm install   # 根目录安装即可，postinstall 会自动在 apps/renderer 安装前端依赖，无需再进 apps 执行 install
-# 可选：复制 .env（或从项目根复制），配置 DEEPSEEK_API_KEY、OLLAMA_HOST 等
+npm install   # 根目录安装即可，postinstall 会自动在 apps/renderer 安装前端依赖
+# 可选：复制 .env 配置 DEEPSEEK_API_KEY 等；也可启动后在应用内「设置」页配置
 cp .env.example .env
-# 启动 Electron（会加载 apps/renderer/index.html）
 npm start
 ```
+
+## 打包
+
+```bash
+cd v2
+npm install
+npm run build       # 按当前平台打包（Mac / Windows / Linux）
+# 或指定平台
+npm run build:mac   # 产出 dmg、zip（macOS）
+npm run build:win   # 产出 nsis 安装包、portable（Windows）
+npm run build:linux # 产出 AppImage（Linux）
+```
+
+产出目录：`v2/dist/`。
 
 ### 常见问题
 

@@ -8,7 +8,11 @@
     "start": "electron .",
     "postinstall": "node scripts/install-renderer.js",
     "dev:renderer": "node scripts/run-in-renderer.js dev",
-    "build:renderer": "node scripts/run-in-renderer.js build"
+    "build:renderer": "node scripts/run-in-renderer.js build",
+    "build": "npm run build:renderer && electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux"
   },
   "keywords": [
     "aris",
@@ -24,6 +28,22 @@
     "sql.js": "^1.10.0"
   },
   "devDependencies": {
-    "electron": "^41.0.2"
+    "electron": "^41.0.2",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.aris.v2",
+    "productName": "Aris v2",
+    "directories": { "output": "dist" },
+    "files": [
+      "apps/**/*",
+      "packages/**/*",
+      "persona.md",
+      "rules.md"
+    ],
+    "extraResources": [],
+    "mac": { "category": "public.app-category.utilities", "target": ["dmg", "zip"] },
+    "win": { "target": ["nsis", "portable"] },
+    "linux": { "target": ["AppImage"] }
   }
 }

@@ -229,8 +229,15 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   if (hadToolCalls && currentMessages.length > 0) {
     try {
       console.info('[Aris v2] 工具调用结束，流式生成最终回复…');
-      // 工具调用后的流式回复先缓冲，不直接推到前端，避免 DSML 当正常文字展示（乱码感）或卡住
-      const streamRes = await chatStream(currentMessages, () => {}, signal);
+      // 追加一条明确要求：只输出自然语言总结，避免模型返回 DSML/工具调用导致无法展示
+      const messagesForSummary = [
+        ...currentMessages,
+        {
+          role: 'user',
+          content: '请用一两句自然语言总结你刚才做了什么或接下来打算做什么，不要输出任何 DSML、XML 或工具调用，只回复纯文本。',
+        },
+      ];
+      const streamRes = await chatStream(messagesForSummary, () => {}, signal);
       const fullContent = streamRes.content || '';
       reply = fullContent;
       if (streamRes.usage) {

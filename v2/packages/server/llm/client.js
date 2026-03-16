@@ -5,9 +5,14 @@ require('dotenv').config();
 
 const MAX_TOKENS_STREAM = Math.min(Number(process.env.ARIS_STREAM_MAX_TOKENS) || 8192, 32768);
 const MAX_TOKENS_TOOLS = Math.min(Number(process.env.ARIS_TOOL_MAX_TOKENS) || 8192, 32768);
-const DEEPSEEK_API = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com';
-const API_KEY = process.env.DEEPSEEK_API_KEY || '';
 const LOG_PREVIEW_LEN = 280;
+
+function getApiConfig() {
+  return {
+    apiKey: process.env.DEEPSEEK_API_KEY || '',
+    apiUrl: process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com',
+  };
+}
 
 function preview(str, maxLen) {
   if (str == null || typeof str !== 'string') return '';
@@ -17,18 +22,19 @@ function preview(str, maxLen) {
 }
 
 async function chat(messages) {
-  if (!API_KEY) {
+  const { apiKey, apiUrl } = getApiConfig();
+  if (!apiKey) {
     console.warn('[Aris v2] DEEPSEEK_API_KEY not set');
-    return { content: '[未配置 API Key]', error: true };
+    return { content: '[未配置 API Key，请在设置中填写]', error: true };
   }
   try {
     const msgCount = Array.isArray(messages) ? messages.length : 0;
-    console.info('[Aris v2] DeepSeek chat request: messages=', msgCount, 'url=', DEEPSEEK_API);
-    const res = await fetch(`${DEEPSEEK_API}/v1/chat/completions`, {
+    console.info('[Aris v2] DeepSeek chat request: messages=', msgCount, 'url=', apiUrl);
+    const res = await fetch(`${apiUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: 'deepseek-chat',
@@ -52,19 +58,20 @@ async function chat(messages) {
 }
 
 async function chatWithTools(messages, tools, signal) {
-  if (!API_KEY) {
+  const { apiKey, apiUrl } = getApiConfig();
+  if (!apiKey) {
     console.warn('[Aris v2] DEEPSEEK_API_KEY not set');
-    return { content: '[未配置 API Key]', tool_calls: null, error: true };
+    return { content: '[未配置 API Key，请在设置中填写]', tool_calls: null, error: true };
   }
   try {
     const toolCount = Array.isArray(tools) ? tools.length : 0;
     console.info('[Aris v2] DeepSeek chatWithTools request: messages=', messages?.length || 0, 'tools=', toolCount);
-    const res = await fetch(`${DEEPSEEK_API}/v1/chat/completions`, {
+    const res = await fetch(`${apiUrl}/v1/chat/completions`, {
       signal: signal || undefined,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: 'deepseek-chat',

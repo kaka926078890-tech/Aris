@@ -37,4 +37,6 @@ contextBridge.exposeInMainWorld('aris', {
   getEmotionsRecent: (limit) => ipcRenderer.invoke('content:getEmotionsRecent', limit),
   getExpressionDesiresRecent: (limit) => ipcRenderer.invoke('content:getExpressionDesiresRecent', limit),
   getCorrectionsRecent: (limit) => ipcRenderer.invoke('content:getCorrectionsRecent', limit),
+  getRuntimeConfig: () => ipcRenderer.invoke('config:get'),
+  setRuntimeConfig: (data) => ipcRenderer.invoke('config:set', data),
 });

@@ -4,23 +4,23 @@
 require('dotenv').config();
 
 const MAX_TOKENS_STREAM = Math.min(Number(process.env.ARIS_STREAM_MAX_TOKENS) || 8192, 32768);
-const DEEPSEEK_API = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com';
-const API_KEY = process.env.DEEPSEEK_API_KEY || '';
 
 async function chatStream(messages, onChunk, signal) {
-  if (!API_KEY) {
-    const msg = '[未配置 API Key]';
+  const apiKey = process.env.DEEPSEEK_API_KEY || '';
+  const apiUrl = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com';
+  if (!apiKey) {
+    const msg = '[未配置 API Key，请在设置中填写]';
     if (onChunk) onChunk(msg);
     return { content: msg, error: true };
   }
   try {
     console.info('[Aris v2] DeepSeek chatStream request: messages=', messages?.length || 0);
-    const res = await fetch(`${DEEPSEEK_API}/v1/chat/completions`, {
+    const res = await fetch(`${apiUrl}/v1/chat/completions`, {
       signal: signal || undefined,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: 'deepseek-chat',
