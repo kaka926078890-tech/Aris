@@ -1,0 +1,220 @@
+# 真正的朋友关系：改造计划（完整版）
+
+本文档对应 ARIS_IDEAS 第 5 条「真正的朋友关系」，供 Aris 过目与实现参考。目标是一次性完成改造，不拆 MVP，按下面顺序落地即可。
+
+**设计原则（与 .cursor/rules 的 prompt-and-tools-design 一致）**：动态信息**优先用工具按需获取**，固定 system 提示词**极简、不随数据膨胀**；仅在性能或效果明显更好时采用「注入」或「纯代码逻辑」，并需在文档中说明理由。详见下文「五、以工具为主」「六、固定提示词极简」「十二、何时不用工具、有更合适方案」。
+
+---
+
+## 一、目标与出处（ARIS_IDEAS 5）
+
+- **目标**：建立自然的、有深度的朋友关系  
+- **具体想法**：  
+  - 自然地记住用户的喜好、习惯  
+  - 像朋友那样记得用户喜欢什么游戏，什么时候会累，什么时候需要安静  
+  - 理解朋友关系的多元性（玩耍、聊天、亲密等不同定位）  
+  - 平等对话，不说「为您服务」等工具化用语  
+
+---
+
+## 二、现状与缺口
+
+| 能力 | 现状 | 缺口 |
+|------|------|------|
+| 身份/要求 | identity.json、requirements.json，工具 record_user_identity、record_user_requirement | 没有专门存「喜好」「习惯」（如游戏、作息、什么时候累/要安静）的结构，requirements 偏「表达/行为要求」 |
+| 安静/累 | quiet_phrases.json + 低功耗，用户说「歇会」即静默；proactive 未回复计数后自动静默 | 没有「用户最近说过累/想安静」的显式状态供 prompt 与主动逻辑使用；主动前不读「是否刚说累」 |
+| 游戏/偏好 | 无专门存储；若用户提过会进向量，但无结构化「喜欢什么游戏」 | 无法在 system 或检索里稳定给出一两句「用户常聊/喜欢的游戏」，聊游戏时缺少抓手 |
+| 朋友口吻 | persona/rules 里已有「平等对谈、不说为您服务」 | 可再强化禁止用语列表与规则描述，避免客服式表达 |
+| 关系多元性 | 单一对话模式 | 无「玩耍/聊天/亲密」等场景或状态标签，无法按场景调语气与主动程度 |
+
+---
+
+## 三、数据与存储设计
+
+### 3.1 喜好与习惯（preferences）
+
+- **新文件**：`memory/preferences.json`（路径由 `memory_files.json` 的 `preferences` 配置，缺省即该名）。  
+- **结构**：由 schema 驱动，建议字段（可放在 `store/schemas/preferences.schema.json`）：  
+  - `list_key`: `"preferences"`  
+  - `id_field`: `"id"`  
+  - `topic_field`: `"topic"`（如 `game` / `rest` / `quiet` / `habit` / `other`）  
+  - `summary_field`: `"summary"`（一两句描述，如「喜欢炉石、LOL、杀戮尖塔2」「晚上十点后容易累」）  
+  - `source_field`: `"source"`（可选，如 `"用户告知"` / 对话摘要）  
+  - `created_at_field` / `updated_at_field`  
+  - 可选：`tags` 数组（如 `["炉石","LOL"]`）便于检索与注入时过滤「游戏」类。  
+- **行为**：只增不删（或提供「去重/合并」策略：同 topic 下 summary 语义相近则更新一条，否则追加）；列表按时间倒序，读取时可按 topic 过滤、条数上限由配置控制（如最多 5 条游戏、3 条休息/安静相关）。  
+- **与 requirements 区分**：requirements 存「用户对我的要求」（如少比喻、要简洁）；preferences 存「用户的喜好与习惯」（喜欢什么、什么时候累、什么时候要安静），用于朋友式关心与话题选择。
+
+### 3.2 近期状态/场景（recent_context，用于「像朋友那样记得」）
+
+- **存放位置**：复用 `aris_proactive_state.json` 或单独 `memory/recent_context.json`。若复用 proactive_state，则增加字段：  
+  - `last_tired_or_quiet_at`：最近一次用户表达「累/想安静」的时间（ISO 或 timestamp），用于主动消息前判断「是否刚说累」。  
+  - `recent_mood_or_scene`：可选，枚举或短字符串，如 `playing` / `chatting` / `tired` / `wants_quiet` / `neutral`，由工具或对话中更新，供 prompt 与主动策略使用。  
+- **若单独文件**：则 `recent_context.json` 仅包含上述字段及 `updated_at`，由 store 模块读写，不扩大 proactive_state 的职责亦可。
+
+### 3.3 禁止用语（avoid_phrases，朋友口吻）
+
+- **新文件**：`memory/avoid_phrases.json`（可选）。  
+- **结构**：`{ "avoid_phrases": ["为您服务", "请问还有什么需要", "有什么可以帮您", ...] }`。  
+- **使用方式**：**不把整份列表灌进每轮 prompt**。在 persona/rules 里用**一句话 + 2～3 个示例**（如「禁止客服式用语，例如：为您服务、请问还有什么需要」）；长列表仅存于 avoid_phrases.json 供人工维护或后续校验，不注入。
+
+---
+
+## 四、Store 层新增与扩展
+
+### 4.1 preferences 模块（store/preferences.js）
+
+- **接口**：  
+  - `listByTopic(topic, limit)`：按 topic 取最近若干条（如 `game`、`rest`、`quiet`、`habit`）。  
+  - `add(payload)`：写入一条 preference（topic、summary、source、tags 等），可在此做同 topic 下的简单去重或合并（如 summary 完全一致则只更新 updated_at）。  
+  - `getSummaryForPrompt(options)`：供**工具 get_preferences 返回给模型**或**极少数需要注入时的短摘要**；行数上限由配置控制（默认 2～3 行），不默认注入每轮 prompt。  
+- **路径**：`config/paths.js` 增加 `getPreferencesPath()`，`memory_files.json` 增加 `"preferences": "preferences.json"`。  
+- **时间线**：写入时调用 `timeline.appendEntry({ type: 'preference', payload, actor: 'system' })`，与现有 L1/L2 一致。
+
+### 4.2 recent_context 状态（可选独立 store 或扩展现有 state）
+
+- **若扩展现有**：在 `store/state.js` 的 `readProactiveState` / `writeProactiveState` 中增加字段 `last_tired_or_quiet_at`、`recent_mood_or_scene`；读写时一并序列化。  
+- **若独立**：`store/recentContext.js`，读写 `memory/recent_context.json`，字段同上；在 handler / proactive 中在适当时机调用更新（见下）。
+
+### 4.3 时间线
+
+- 所有新增写路径（preferences.add、recent_context 更新）均调用 `timeline.appendEntry`，type 如 `preference`、`recent_context`。
+
+---
+
+## 五、以工具为主：工具设计（dialogue/tools）
+
+**原则**：喜好/习惯/场景等**不写入固定 system 占位符**，由模型在需要时调用工具获取；system 里仅保留「有哪些工具可用」的简短说明。
+
+### 5.1 新增工具（主要数据入口）
+
+- **record_preference**  
+  - 描述：记录用户的喜好或习惯（如喜欢的游戏、什么时候容易累、什么时候希望安静）。仅在用户明确提到时调用。  
+  - 参数：`topic`（string，如 `game` / `rest` / `quiet` / `habit` / `other`）、`summary`（string，一两句）、可选 `tags`（array）。  
+  - 实现：调用 `store.preferences.add(...)`；若 topic 为 `rest` 或 `quiet` 且 summary 与「累/安静」相关，可同时更新 `last_tired_or_quiet_at`（或由 record_friend_context 统一更新，见下）。
+
+- **get_preferences**  
+  - 描述：获取用户已记录的喜好与习惯（如游戏、休息/安静相关）。在需要聊游戏、关心对方累不累、或选话题时调用。  
+  - 参数：可选 `topic`（不传则返回所有 topic 的摘要）。  
+  - 实现：调用 `store.preferences.listByTopic` 或 getSummaryForPrompt，返回给模型一段简短文本。  
+  - **不在 buildPromptContext 里预取**：不在每轮 system 中注入整段 preferences，仅靠此工具按需取。
+
+- **record_friend_context**（可选）  
+  - 描述：记录当前用户状态或场景（如「刚说累」「想安静」「在玩游戏」），用于后续主动消息与语气调整。  
+  - 参数：`mood_or_scene`（string，如 `tired` / `wants_quiet` / `playing` / `chatting` / `neutral`）。  
+  - 实现：更新 `recent_context` 或 proactive_state 的 `recent_mood_or_scene`、`last_tired_or_quiet_at`（若为 tired/wants_quiet）。  
+  - 使用时机：由模型在对话中识别到用户说累/要安静/在玩游戏时调用，或由 handler 根据用户消息关键词自动写（与 quiet_phrases 配合），二选一或并存。
+
+### 5.2 工具注册
+
+- 在 `dialogue/tools/record.js`（或单独 `preference.js`）中定义上述工具，并入 `RECORD_TOOLS` 或新数组后在 `tools/index.js` 中挂载；`runTool` 中增加分支调用对应 store 与 recent_context。
+
+---
+
+## 六、固定提示词极简（不膨胀）
+
+### 6.1 仅做最少必要说明
+
+- **不新增**【用户喜好与习惯】【近期状态/场景】等占位符，不把 preferences / recent_context 的摘要写入 CONTEXT_TEMPLATE。  
+- **仅在 persona 或 rules 中增加一句**（或并入现有「可用的记录类工具」说明）：  
+  - 「用户有记录的喜好与习惯（如喜欢的游戏、什么时候容易累、希望安静等），需要时可调用 get_preferences 获取。」  
+- **朋友口吻与禁止用语**：在 persona.md / rules.md 或 DEFAULT_PERSONA 中写**一句话 + 2～3 个示例**，例如：「以朋友身份平等对话；禁止客服式用语（例如：为您服务、请问还有什么需要、有什么可以帮您）。」**不**把 avoid_phrases.json 的整份列表注入每轮 prompt；长列表仅存文件供人工维护或后续校验。
+
+### 6.2 若确有极少量注入的例外
+
+- 若后续验证发现「首条回复就必须带出游戏偏好」且模型几乎从不主动先调 get_preferences，可在 CONTEXT_TEMPLATE 中增加**至多 1 行**的占位符（如「【用户偏好摘要】{user_preferences_one_line}」），且该行由配置限制为一句话、否则留空；并在本文档「十二、何时不用工具」中注明理由。默认仍以工具为主。
+
+---
+
+## 七、主动消息（proactive）改造：代码侧逻辑为主
+
+### 7.1 发前检查「累/安静」（纯代码，不占 prompt）
+
+- **做法**：在 `maybeProactiveMessage` 中，在现有「低功耗」「安静词」判断之后、增加：读 `last_tired_or_quiet_at`（或 recent_context）；若存在且与当前时间差小于配置的分钟数（如 30 分钟），则本次**直接 return null**，不发主动消息，并可选写日志「用户近期表示过累/想安静，跳过主动」。  
+- **理由（为何不用工具/注入）**：这是**确定性子逻辑**（到时间就不发），由代码执行更可靠、无额外 token、无模型误判；不需要把「用户刚说累」写进 prompt 让模型「自己决定」发不发。符合「能代码就代码」的原则。
+
+### 7.2 偏好（游戏等）在主动中的使用
+
+- **优先**：在 proactive 的 system 或 context 里加**一句**「需要了解用户喜好（如游戏）时可参考 get_preferences」，由模型在「是否想说话」时按需调工具；**不**默认把整段游戏偏好注入 proactive prompt。  
+- **若效果不足**：若实测发现 proactive 几乎从不调 get_preferences 导致主动内容与偏好脱节，可再考虑在 proactive 的 context 中注入**至多 1～2 句**游戏类偏好摘要，并在文档「十二、何时不用工具」中写明理由（如「proactive 单轮无工具循环，模型不调则永远拿不到偏好」）。
+
+---
+
+## 八、关系多元性（玩耍/聊天/亲密）
+
+### 8.1 数据
+
+- 使用 `recent_mood_or_scene`（或 recent_context 中扩展）：取值如 `playing` / `chatting` / `tired` / `wants_quiet` / `intimate` / `neutral`。  
+- 由模型在对话中通过 `record_friend_context` 更新，或由关键词/意图简单推断后写入（不硬编码长列表，可配置少量关键词映射）。
+
+### 8.2 策略（可选）
+
+- **playing**：主动消息可更偏「游戏相关」或轻松；若同时有「喜欢某游戏」的 preference，可带出该游戏。  
+- **tired / wants_quiet**：已由「不发主动」与「安静词+低功耗」覆盖。  
+- **chatting / neutral**：维持现有主动逻辑。  
+- **intimate**：可后续在 rules 或 prompt 中加一句「当用户表达亲密或依赖时，语气可更贴近、仍保持朋友边界」，不在本阶段实现复杂逻辑亦可。  
+
+实现上可在 proactive 的 prompt 中注入**一句**「当前用户近期场景（若有）：{recent_mood_or_scene}」，由模型自行决定是否说话、说什么；若 recent_mood_or_scene 为空则省略该句，不占 token。后续再根据数据决定是否做更细的策略分支。
+
+---
+
+## 九、涉及文件与改动清单
+
+| 文件 | 改动 |
+|------|------|
+| `config/memory_files.json` | 增加 `preferences`、可选 `avoid_phrases`、`recent_context`。 |
+| `config/paths.js` | `getPreferencesPath()`、可选 `getAvoidPhrasesPath()`、`getRecentContextPath()`。 |
+| `store/schemas/preferences.schema.json` | 新建，定义 list_key、topic_field、summary_field、source_field、created_at、updated_at、tags。 |
+| `store/preferences.js` | 新建：listByTopic、add、getSummaryForPrompt；写 timeline。 |
+| `store/state.js` 或 `store/recentContext.js` | 扩展 proactive_state 或新建 recent_context：last_tired_or_quiet_at、recent_mood_or_scene；写 timeline（若独立文件）。 |
+| `store/index.js` | 导出 preferences、可选 recentContext。 |
+| `server/dialogue/tools/record.js`（或新 preference.js） | 新增 record_preference、get_preferences；可选 record_friend_context；runRecordTool 分支。 |
+| `server/dialogue/tools/index.js` | 若新工具在单独数组，则合并进 ALL_TOOLS 并增加 runTool 分支。 |
+| `server/dialogue/prompt.js` | **不**新增【用户喜好与习惯】【近期状态/场景】占位符；仅在 persona/rules 或「可用工具」说明中加一句「需要时可调用 get_preferences」。禁止用语用一句话+2～3 示例，不注入整份 avoid_phrases 列表。 |
+| `server/dialogue/handler.js` | **不**在 buildPromptContext 中预取 preferences 或 recent_context 注入 system；仅保证工具可用。 |
+| `server/dialogue/proactive.js` | 发前读 last_tired_or_quiet_at，若在 N 分钟内则 return null（纯代码）；context 中可加一句「需要用户喜好可调 get_preferences」，不默认注入偏好长文本。 |
+| `persona.md` / `rules.md` 或默认 persona | 朋友口吻、禁止客服式用语（一句话+2～3 示例）。 |
+| `memory/avoid_phrases.json` | 可选新建，默认若干条禁止用语。 |
+| `docs/README.md` 或 `docs/memory_coherence.md` | 可配置项中补充 preferences、avoid_phrases、recent_context 的说明。 |
+
+---
+
+## 十、配置项建议
+
+- **preferences**（store 或 retrieval_config）：  
+  - `max_preference_lines`：get_preferences 返回给模型时的摘要最多几行（如 3），控制工具返回长度。  
+  - `preference_topics`：listByTopic / 摘要可用的 topic 列表（如 `["game", "rest", "quiet", "habit"]`）。  
+- **recent_context / proactive_state**：  
+  - `recent_tired_quiet_minutes`：last_tired_or_quiet_at 在多少分钟内视为「刚说累/想安静」，主动不发（如 30）。  
+- **avoid_phrases.json**：列表制，可编辑；仅供人工维护或后续校验，不注入每轮 prompt。
+
+---
+
+## 十一、验收与迭代建议
+
+- **验收**：  
+  - 用户说「我喜欢炉石」后，get_preferences 或 prompt 中能看到游戏类偏好；用户说「我晚上容易累」后，preference 中有 rest/quiet 类且近期状态可更新；  
+  - 用户说「歇会」或记录「想安静」后，主动消息在配置时间内不再发；  
+  - persona/rules 与禁止用语注入后，模型不再输出「为您服务」等用语；  
+  - 时间线中有 preference、recent_context 的写入记录。  
+- **迭代**：先实现 preferences + 工具（get/record）+ proactive 的「累/安静」代码侧检查；再加 recent_mood_or_scene 与关系多元性策略；avoid_phrases 与朋友口吻强化可随时加。
+
+---
+
+## 十二、何时不用工具、有更合适方案（说明与记录）
+
+按 .cursor/rules 的 prompt-and-tools-design：若存在比「工具按需获取」更合适的做法，需在此写明理由。
+
+| 场景 | 采用方案 | 理由 |
+|------|----------|------|
+| 喜好/习惯（游戏、累、安静等） | **工具 get_preferences** | 数据会增长，注入会导致 prompt 膨胀；模型在聊到游戏/关心对方时再调即可，按需取更省 token、也更相关。 |
+| 「用户近期表示累/想安静」→ 不发主动 | **纯代码逻辑**（proactive 内读 last_tired_or_quiet_at，到时间 return null） | 行为是确定性子逻辑，代码执行无歧义、无额外 token、无模型漏调工具问题；不需要把这段信息塞进 prompt 让模型「决定」发不发。 |
+| 禁止用语 | **persona/rules 一句话 + 2～3 示例**，不注入整表 | 列表可能很长，每轮灌进 prompt 浪费 token；规则+示例足以约束，长列表留 avoid_phrases.json 供维护/校验。 |
+| 身份/要求（已有） | **当前为每轮注入摘要** | 已有设计；首条回复就需要称呼与基本要求，且摘要长度受控，暂保留；新增「偏好」不沿用注入，改为工具。 |
+| proactive 中「用户喜欢的游戏」 | **默认**：context 里一句「需要可调 get_preferences」；**若效果不足**：可考虑注入 1～2 句游戏偏好 | proactive 单轮通常无工具循环，若模型不调 get_preferences 则永远拿不到偏好；若实测主动内容与偏好脱节，再考虑极少量注入并在此注明。 |
+
+后续若有新增「更适合用代码或极少量注入」的 case，均在本节补表并写明理由。
+
+---
+
+**文档版本**：完整版，以工具为主、固定提示词极简；供 Aris 过目与实现参考。设计习惯见 .cursor/rules/prompt-and-tools-design.mdc。
