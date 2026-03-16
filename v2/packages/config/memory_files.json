@@ -7,5 +7,6 @@
   "associations": "associations.json",
   "quiet_phrases": "quiet_phrases.json",
   "retrieval_config": "retrieval_config.json",
-  "session_summaries": "session_summaries.json"
+  "session_summaries": "session_summaries.json",
+  "preferences": "preferences.json"
 }

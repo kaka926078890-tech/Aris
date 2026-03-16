@@ -21,6 +21,7 @@ function getMemoryFiles() {
       quiet_phrases: 'quiet_phrases.json',
       retrieval_config: 'retrieval_config.json',
       session_summaries: 'session_summaries.json',
+      preferences: 'preferences.json',
     };
   }
   return memoryFiles;
@@ -90,6 +91,11 @@ function getSessionSummariesPath() {
   return path.join(getMemoryDir(), name);
 }
 
+function getPreferencesPath() {
+  const name = getMemoryFiles().preferences || 'preferences.json';
+  return path.join(getMemoryDir(), name);
+}
+
 function getSqlitePath() {
   return path.join(getDataDir(), 'aris.db');
 }
@@ -100,6 +106,10 @@ function getLanceDbPath() {
 
 function getStatePath() {
   return path.join(getDataDir(), 'aris_state.json');
+}
+
+function getTimelinePath() {
+  return path.join(getDataDir(), 'timeline.json');
 }
 
 function getProactiveStatePath() {
@@ -120,8 +130,10 @@ module.exports = {
   getQuietPhrasesPath,
   getRetrievalConfigPath,
   getSessionSummariesPath,
+  getPreferencesPath,
   getSqlitePath,
   getLanceDbPath,
   getStatePath,
   getProactiveStatePath,
+  getTimelinePath,
 };
