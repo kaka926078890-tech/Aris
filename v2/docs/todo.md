@@ -103,8 +103,10 @@
 |------|------|------|
 | [ ] 中期 M1～M4 | 结构化存储 | knowledge_base.schema.json；knowledge_base.js（readEntity、writeEntity、addRelation、getRelations）；memory_files 配置；迁移脚本 migrate-to-knowledge-base.js |
 | [ ] 中期 M5～M6 | 智能合并 | merge_policy.schema；写新信息时按策略查相似、解冲突、更新或新增 |
-| [ ] 长期 L1～L2 | 时间轴 | timeline schema；所有 write 路径同时写历史，支持按时刻回溯 |
+| [x] 长期 L1～L2 | 时间轴 | 已实现：store/timeline.js（appendEntry、getEntries）；identity/requirements/associations/corrections/emotions/expressionDesires/state/summaries/conversations 等写路径均追加时间线；数据目录下 timeline.json，支持按 since/until/type 查询。 |
 | [ ] 长期 L3～L5 | 关联与自优化 | getSubgraph、getPaths；retrieval.schema 分层检索；使用统计与自适应策略 |
+
+**记忆连贯性（ARIS_IDEAS + 计划）**：关联驱动检索（MVP）、小结沉淀（阶段 B）、分层记忆（阶段 A）、时间线（阶段 C）均已实现；配置见 retrieval_config.json，架构见 docs/memory_coherence.md。
 
 ### 6. 分发与打包
 

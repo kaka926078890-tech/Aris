@@ -20,9 +20,13 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 | 文件 / 配置 | 说明 | 主要字段 / 格式 |
 |-------------|------|------------------|
 | **quiet_phrases.json** | 用户说哪些话时进入「安静」模式（不主动回复） | `quiet_phrases`: 字符串数组，如 `["歇会","安静待会","别说话"]`。命中则进入低功耗，未命中且非空消息可视为恢复对话。 |
-| **retrieval_config.json** | 记忆检索与小结行为 | `enable_association_inject`（boolean）：是否在 system 中注入关联 1～3 行；`max_association_lines`（number）：关联最多几行；`source_types`（array）：如 `["identity","requirement"]`；`requirement_id_max`（number）：用几条 requirement 拉关联；`enable_summary`（boolean）：是否每 N 轮生成会话小结；`summary_rounds_interval`（number）：每多少轮生成一次小结（2～50）。缺省时由代码默认值或首次写入默认文件。 |
+| **retrieval_config.json** | 记忆检索与小结行为 | `enable_association_inject`、`max_association_lines`、`source_types`、`requirement_id_max`；`enable_summary`、`summary_rounds_interval`（2～50）；**分层记忆**：`filter_experience_by_association`（boolean）：search_memories 是否只返回与当前身份/要求相关经历；`max_experience_results`（number）：该模式下最多返回条数（1～20）。缺省由代码默认或首次写入。 |
 | **session_summaries.json** | 各会话最新小结（自动生成，一般无需手改） | 按 session 存 `content`、`updated_at`、`round_index`。 |
 | **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`quiet_phrases`、`retrieval_config`、`session_summaries` 等，值为实际文件名（如 `identity.json`）。 |
+
+**时间线**：所有记忆/状态类写入会同时追加到 `data/timeline.json`，用于按时刻回溯或审计；详见 [记忆连贯性](docs/memory_coherence.md)。当前产品内暂无时间线展示页，数据可供排查或后续「修改历史」等能力使用。
+
+**静默/低功耗**：存在。触发方式两种：（1）用户发送安静词（如「歇会」「安静待会」，见 quiet_phrases.json）→ 立即进入低功耗，不再主动发话；（2）用户长时间不回复 → 主动消息逻辑多次触发仍无用户消息时（约 3～4 次）自动进入低功耗，不再主动发话。任一发用户消息且非安静词即视为恢复对话，退出低功耗。
 
 ### 数据目录与 memory 文件在哪里（想改数据时怎么找）
 
@@ -92,5 +96,6 @@ npm run build:linux # 产出 AppImage（Linux）
 - [提示词策略（方案 A）](docs/prompt_strategy.md)
 - [Store 层](docs/store.md)
 - [向量设计](docs/vector_design.md)
+- [记忆连贯性（关联/小结/分层/时间线）](docs/memory_coherence.md)
 - [工具](docs/tools.md)
 - [分阶段执行清单](docs/todo.md)
