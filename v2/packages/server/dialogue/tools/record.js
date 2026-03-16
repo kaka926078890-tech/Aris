@@ -21,6 +21,17 @@ const RECORD_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'get_user_identity',
+      description: '获取用户身份信息（姓名和备注）。在需要了解用户身份时调用。',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'record_user_requirement',
       description: '记录用户提出的偏好或要求（如「不要比喻句」「记住我喜欢简洁」）。仅在用户明确表达偏好/要求时调用。',
       parameters: {
@@ -86,6 +97,10 @@ async function runRecordTool(name, args) {
     if (name === 'record_user_identity') {
       store.identity.writeIdentity({ name: a.name, notes: a.notes });
       return { ok: true, message: '已记录' };
+    }
+    if (name === 'get_user_identity') {
+      const identity = store.identity.readIdentity();
+      return { ok: true, identity };
     }
     if (name === 'record_user_requirement') {
       if (a.text) store.requirements.appendRequirement(a.text);
