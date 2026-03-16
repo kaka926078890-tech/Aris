@@ -1,39 +1,6 @@
-# Aris (Alpha)
+# Aris
 
-Desktop AI companion: HUD-style visual (outer ring, square frame, Plexus core), INFP personality, local vector memory (LanceDB), and proactive dialogue.
+桌面端人格化 AI 对话应用。
 
-## Requirements
-
-- Node.js 18+
-- **DeepSeek API key** for dialogue (set `DEEPSEEK_API_KEY`)
-- **Ollama** with `nomic-embed-text` for local embeddings (optional; memory works better with it)
-
-## Setup
-
-```bash
-npm install
-cp .env.example .env
-# Edit .env: set DEEPSEEK_API_KEY
-```
-
-## Run
-
-```bash
-npm start
-```
-
-- Click the **center** of the 3D view to open the dialogue panel and type a message.
-- Aris may **proactively** send a message every few minutes (state-driven, no fixed rules).
-
-## Build (packaged app)
-
-```bash
-npm run build
-```
-
-## Data
-
-- **SQLite**: `userData/aris/aris.db` (conversations, settings)
-- **LanceDB**: `userData/aris/lancedb/` (vector memory)
-
-API keys are read from the environment only (main process); they are not embedded in the frontend.
+- **当前主版本**：请使用 **v2**。进入 `v2` 目录后执行 `npm install` 与 `npm start`，详见 [v2/README.md](v2/README.md)。
+- **v1 已归档**：旧版代码已收拢至 `v1/` 目录，仅作备份与参考，后续统一使用 v2。
