@@ -1,0 +1,10 @@
+{
+  "list_key": "preferences",
+  "id_field": "id",
+  "topic_field": "topic",
+  "summary_field": "summary",
+  "source_field": "source",
+  "created_at_field": "created_at",
+  "updated_at_field": "updated_at",
+  "tags_field": "tags"
+}
