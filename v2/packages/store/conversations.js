@@ -93,6 +93,35 @@ async function getRecentFromOtherSessions(currentSessionId, limit = 40) {
   return rows.reverse().map(([role, content, created_at]) => ({ role, content, created_at }));
 }
 
+/**
+ * 按时间窗口取某会话在该时刻附近的对话（用于表达欲望等按时间查上下文，不重复存备份）。
+ * @param {string} sessionId
+ * @param {string} aroundTimeIso - 如欲望的 created_at (ISO)
+ * @param {number} [windowSeconds=300] - 前后各多少秒，默认 5 分钟
+ * @returns {Promise<Array<{ role, content, created_at }>>}
+ */
+async function getConversationAroundTime(sessionId, aroundTimeIso, windowSeconds = 300) {
+  if (!sessionId) return [];
+  let t;
+  try {
+    t = Math.floor(new Date(aroundTimeIso).getTime() / 1000);
+  } catch (_) {
+    return [];
+  }
+  if (Number.isNaN(t)) return [];
+  const lo = Math.max(0, t - windowSeconds);
+  const hi = t + windowSeconds;
+  const db = await getDb();
+  const stmt = db.prepare(
+    'SELECT role, content, created_at FROM conversations WHERE session_id = ? AND created_at >= ? AND created_at <= ? ORDER BY created_at ASC'
+  );
+  stmt.bind([sessionId, lo, hi]);
+  const rows = [];
+  while (stmt.step()) rows.push(stmt.get());
+  stmt.free();
+  return rows.map(([role, content, created_at]) => ({ role, content, created_at }));
+}
+
 module.exports = {
   getCurrentSessionId,
   append,
@@ -100,5 +129,6 @@ module.exports = {
   getAllForSession,
   getAllSessions,
   getRecentFromOtherSessions,
+  getConversationAroundTime,
   clearAllConversations,
 };

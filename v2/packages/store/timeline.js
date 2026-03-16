@@ -1,6 +1,9 @@
 /**
  * 时间线：所有 write 路径在写入时追加一条历史记录，支持按时刻回溯（L1/L2）。
  * 结构：entries[]，每条约定 timestamp、type、payload、actor。
+ *
+ * 重要：timestamp 与各 store 的 created_at 均为 UTC（ISO 8601 带 Z）。
+ * 例如 08:27 UTC = 北京 16:27。展示给用户或模型时请用 formatTimestampForDisplay 标明 UTC，或转为本地时间，避免误读为「早上 8:27」。
  */
 const fs = require('fs');
 const { getTimelinePath, getDataDir } = require('../config/paths.js');
@@ -48,6 +51,27 @@ function appendEntry(entry) {
 }
 
 /**
+ * 将 ISO 时间格式化为带时区标注的展示用字符串，避免 UTC 被误读为本地时间。
+ * @param {string} isoString - 如 "2026-03-16T08:27:10.926Z"
+ * @returns {string} 如 "2026-03-16 08:27 (UTC)"
+ */
+function formatTimestampForDisplay(isoString) {
+  if (!isoString) return '';
+  try {
+    const d = new Date(isoString);
+    if (Number.isNaN(d.getTime())) return String(isoString);
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    const h = String(d.getUTCHours()).padStart(2, '0');
+    const min = String(d.getUTCMinutes()).padStart(2, '0');
+    return `${y}-${m}-${day} ${h}:${min} (UTC)`;
+  } catch (_) {
+    return String(isoString);
+  }
+}
+
+/**
  * 按时间、类型查询时间线（用于某时刻状态回溯或审计）。
  * @param {{ since?: string, until?: string, type?: string, limit?: number }} options - ISO 时间、类型过滤、条数上限
  * @returns {Array<{ timestamp: string, type: string, payload: object, actor: string }>}
@@ -71,4 +95,4 @@ function getEntries(options = {}) {
   return list.slice(0, limit);
 }
 
-module.exports = { appendEntry, getEntries };
+module.exports = { appendEntry, getEntries, formatTimestampForDisplay };

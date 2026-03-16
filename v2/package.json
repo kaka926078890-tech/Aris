@@ -11,7 +11,7 @@
     "build:renderer": "node scripts/run-in-renderer.js build",
     "build": "npm run build:renderer && electron-builder",
     "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win",
+    "build:win": "electron-builder --win --publish never",
     "build:linux": "electron-builder --linux"
   },
   "keywords": [

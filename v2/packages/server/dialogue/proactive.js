@@ -7,6 +7,11 @@ const { chat } = require('../llm/client.js');
 const { shouldBeQuiet, isResumingDialogue } = require('./quietResume.js');
 
 const EXPRESSION_THRESHOLD = 0.5;
+/** 表达欲望超过此小时数不再采用，避免旧话题尾巴发到新对话 */
+const EXPRESSION_DESIRE_MAX_AGE_HOURS = 2;
+/** 已发送的表达欲望在 state 中保留条数；同内容 24 小时内不再发送 */
+const LAST_SENT_DESIRES_MAX = 5;
+const LAST_SENT_DESIRES_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 /** 连续多少次「主动尝试」且用户未回复后进入静默（当前 3 = 最多 2 条主动消息后静默） */
 const PROACTIVE_SILENT_AFTER = 3;
 /** 用户表示累/想安静后多少分钟内不发主动消息（纯代码判断） */
@@ -39,17 +44,55 @@ function calculateDesirePriority(desire, currentTime) {
   return intensityScore * 0.6 + recencyScore * 0.4;
 }
 
-function selectExpressionDesire(desires) {
-  if (!desires || desires.length === 0) return null;
-  const now = Date.now();
-  const withPriority = desires.map((d) => ({ desire: d, priority: calculateDesirePriority(d, now) }));
-  withPriority.sort((a, b) => b.priority - a.priority);
-  const top = withPriority.find((d) => d.priority > EXPRESSION_THRESHOLD);
-  return top ? top.desire : null;
+/** 欲望文案若含「指向某具体事物」的用词，需在最近用户消息中有相关词才视为合理，否则易跑题 */
+function isDesireReasonableForContext(desireText, recentUserMessages) {
+  const t = (desireText || '').trim();
+  const pointerTerms = ['那个', '这份', '文档', 'cursor', '技术方案', '这个方案', '那篇', '刚才说的', '你发的', '回复了', '已经看过', '看过了'];
+  const hasPointer = pointerTerms.some((term) => t.includes(term));
+  if (!hasPointer) return true;
+  const recentText = (recentUserMessages || [])
+    .map((m) => (m.content || '').trim())
+    .join(' ');
+  return pointerTerms.some((term) => t.includes(term) && recentText.includes(term));
 }
 
 function normalize(s) {
   return (s || '').replace(/[，。？、\s]/g, '').trim();
+}
+
+/** 最近已发送的表达欲望（条数/24h 内）：用于避免同内容重复发送 */
+function getRecentSentDesires(state) {
+  const list = (state && state.last_sent_expression_desires) || [];
+  const now = Date.now();
+  return list.filter((e) => e && e.at && now - new Date(e.at).getTime() <= LAST_SENT_DESIRES_MAX_AGE_MS);
+}
+
+function wasDesireSentRecently(desireText, recentSentDesires) {
+  const norm = normalize(desireText || '');
+  if (!norm) return false;
+  return recentSentDesires.some((e) => {
+    const sentNorm = normalize(e.text || '');
+    return sentNorm.length >= 8 && (norm === sentNorm || norm.includes(sentNorm) || sentNorm.includes(norm));
+  });
+}
+
+function selectExpressionDesire(desires, recentConversation, recentSentDesires) {
+  if (!desires || desires.length === 0) return null;
+  const now = Date.now();
+  const maxAgeMs = EXPRESSION_DESIRE_MAX_AGE_HOURS * 60 * 60 * 1000;
+  const recentUserMessages = (recentConversation || []).filter((r) => r.role === 'user').slice(-3);
+  const withPriority = desires
+    .filter((d) => {
+      const ts = d.created_at ? new Date(d.created_at).getTime() : 0;
+      return !Number.isNaN(ts) && now - ts <= maxAgeMs;
+    })
+    .filter((d) => !wasDesireSentRecently(d.text, recentSentDesires || []))
+    .map((d) => ({ desire: d, priority: calculateDesirePriority(d, now) }));
+  withPriority.sort((a, b) => b.priority - a.priority);
+  const top = withPriority.find(
+    (d) => d.priority > EXPRESSION_THRESHOLD && isDesireReasonableForContext(d.desire.text, recentUserMessages)
+  );
+  return top ? top.desire : null;
 }
 
 async function maybeProactiveMessage() {
@@ -120,12 +163,13 @@ async function maybeProactiveMessage() {
     const contextLines = recent.map((r) => `${r.role === 'user' ? '用户' : 'Aris'}: ${r.content}`).join('\n');
 
     const desires = store.expressionDesires.getRecent(10);
-    const selectedDesire = selectExpressionDesire(desires);
+    const recentSentDesires = getRecentSentDesires(store.state.readProactiveState());
+    const selectedDesire = selectExpressionDesire(desires, recent, recentSentDesires);
 
     if (selectedDesire && selectedDesire.text) {
       const expressionText = selectedDesire.text.trim();
       if (expressionText.length > 5 && expressionText.length < 200) {
-        const recentAssistant = recent.filter((r) => r.role === 'assistant').slice(-5);
+        const recentAssistant = recent.filter((r) => r.role === 'assistant').slice(-10);
         const lineNorm = normalize(expressionText);
         let isDuplicate = false;
         for (const msg of recentAssistant) {
@@ -146,7 +190,10 @@ async function maybeProactiveMessage() {
             last_active_time: new Date().toISOString(),
             last_mental_state: expressionText.slice(0, 300),
           });
-          console.info('[Aris v2][proactive] 使用积累表达欲望');
+          const nowIso = new Date().toISOString();
+          const sentList = [...getRecentSentDesires(store.state.readProactiveState()), { text: expressionText, at: nowIso }].slice(-LAST_SENT_DESIRES_MAX);
+          store.state.writeProactiveState({ last_sent_expression_desires: sentList });
+          console.info('[Aris v2][proactive] 使用积累表达欲望:', expressionText.slice(0, 80) + (expressionText.length > 80 ? '...' : ''));
           return expressionText;
         }
       }
@@ -206,7 +253,7 @@ async function maybeProactiveMessage() {
       last_active_time: new Date().toISOString(),
       last_mental_state: line.slice(0, 300),
     });
-    console.info('[Aris v2][proactive] 已发送');
+    console.info('[Aris v2][proactive] 已发送:', line.slice(0, 80) + (line.length > 80 ? '...' : ''));
     return line;
   } catch (e) {
     console.warn('[Aris v2][proactive] 检查失败', e?.message);

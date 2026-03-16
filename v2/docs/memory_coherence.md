@@ -33,3 +33,11 @@
 读取时可用 `getEntries({ type: 'identity', limit: 20 })` 等按类型过滤，或按 since/until 做时间范围查询。
 
 **当前使用场景**：时间线仅写入、未在对话/管理页中直接展示；可用于排查问题（查看 data/timeline.json 或调用 getEntries）、或为后续「修改历史」「某时刻状态回溯」等功能提供数据基础。侧栏若有「时间线/历史」入口，可指向本能力或会话历史，由前端按需对接 getEntries 或会话列表。
+
+**时间戳均为 UTC**：timeline 的 `timestamp` 与各 store 的 `created_at` 均使用 `toISOString()`（如 `2026-03-16T08:27:10.926Z`）。08:27 UTC = 北京 16:27，展示时请用 `timeline.formatTimestampForDisplay(iso)` 标明「(UTC)」或转为本地时间，避免误读为「早上 8:27」。
+
+## 为什么「相关时间记忆记录」查不到？
+
+- **记忆检索**（search_memories）只查**向量库**。记录表达欲望时**没有**写向量，也没有存「当时在聊什么」的备份。  
+- **设计原则**：不重复存备份——能按时间查到的就用时间查。表达欲望在 timeline 的 payload 里只多存一个 **session_id**（指向当时会话），需要「当时附近的对话」时用 **get_expression_desire_context(created_at)** 按该时间查会话表即可。  
+- **实现**：`conversations.getConversationAroundTime(sessionId, aroundTimeIso, windowSeconds)` 按时间窗口取对话；工具 `get_expression_desire_context(created_at)` 根据欲望的 created_at 找到对应 timeline 条目的 session_id，再查该时间附近的对话并返回。

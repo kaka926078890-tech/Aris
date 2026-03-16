@@ -8,6 +8,7 @@ const { handleUserMessage, getPromptPreview, maybeProactiveMessage } = require('
 const { exportToFile, importFromFile } = require('./backup.js');
 const store = require('../../packages/store');
 const { RENDERER_INDEX, PRELOAD_SCRIPT } = require('./config.js');
+const { ensureOllamaStarted, getOllamaStatus } = require('./ollama.js');
 
 const PROACTIVE_INTERVAL_MS = 3 * 60 * 1000;
 const PROACTIVE_IDLE_MS = 2 * 60 * 1000;
@@ -203,7 +204,11 @@ ipcMain.handle('content:getRequirements', () => (store.requirements ? store.requ
 ipcMain.handle('content:getState', () => (store.state ? store.state.readState() : null));
 ipcMain.handle('content:getProactiveState', () => (store.state ? store.state.readProactiveState() : null));
 ipcMain.handle('content:getEmotionsRecent', (_, limit) => (store.emotions ? store.emotions.getRecent(Number(limit) || 20) : []));
-ipcMain.handle('content:getExpressionDesiresRecent', (_, limit) => (store.expressionDesires ? store.expressionDesires.getRecent(Number(limit) || 20) : []));
+ipcMain.handle('content:getExpressionDesiresRecent', (_, limit) => {
+  const list = store.expressionDesires ? store.expressionDesires.getRecent(Number(limit) || 20) : [];
+  const formatUtc = store.timeline && typeof store.timeline.formatTimestampForDisplay === 'function' ? store.timeline.formatTimestampForDisplay : () => '';
+  return list.map((e) => ({ ...e, created_at_display_utc: formatUtc(e.created_at) || '' }));
+});
 ipcMain.handle('content:getCorrectionsRecent', (_, limit) => (store.corrections ? store.corrections.getRecent(Number(limit) || 20) : []));
 
 ipcMain.handle('config:get', () => readConfig());
@@ -211,6 +216,9 @@ ipcMain.handle('config:set', (_, data) => {
   writeConfig(data || {});
   return { ok: true };
 });
+
+ipcMain.handle('ollama:status', () => getOllamaStatus());
+ipcMain.handle('ollama:ensure', () => ensureOllamaStarted());
 
 function runProactiveCheck() {
   if (dialogueBusy || !mainWindow || mainWindow.isDestroyed()) return;
@@ -232,6 +240,14 @@ function startProactiveInterval() {
 app.whenReady().then(() => {
   createWindow();
   startProactiveInterval();
+  // 后台检测 Ollama：若已安装但未运行则尝试启动，不阻塞界面
+  ensureOllamaStarted()
+    .then((r) => {
+      if (r.started) console.log('[Aris v2][electron] Ollama 已自动启动');
+      else if (r.error === 'not_installed') { /* 未安装为正常，不打印 */ }
+      else if (r.error) console.warn('[Aris v2][electron] Ollama 自动启动未就绪:', r.error);
+    })
+    .catch((e) => console.warn('[Aris v2][electron] Ollama 检测/启动异常', e?.message));
 });
 
 app.on('window-all-closed', () => {

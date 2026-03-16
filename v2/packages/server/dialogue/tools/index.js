@@ -21,10 +21,10 @@ function parseToolArgs(args) {
   }
 }
 
-async function runTool(name, args) {
+async function runTool(name, args, context) {
   const a = parseToolArgs(args);
   if (RECORD_TOOLS.some((t) => t.function.name === name)) {
-    return runRecordTool(name, a);
+    return runRecordTool(name, a, context);
   }
   if (FILE_TOOLS.some((t) => t.function.name === name)) {
     return runFileTool(name, a);

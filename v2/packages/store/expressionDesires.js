@@ -1,5 +1,6 @@
 /**
  * 表达欲望：仅被 record_expression_desire 工具或管理 API 调用。
+ * created_at 为 UTC（toISOString）。展示给用户或模型时请标明 UTC 或转为本地时间（如 08:27 UTC = 北京 16:27），避免误读。
  */
 const fs = require('fs');
 const { getExpressionDesiresPath, getMemoryDir } = require('../config/paths.js');
@@ -20,7 +21,7 @@ function _readList() {
   return [];
 }
 
-function appendDesire({ text, intensity }) {
+function appendDesire({ text, intensity, session_id }) {
   const line = String(text ?? '').trim();
   if (!line) return;
   const list = _readList();
@@ -34,7 +35,8 @@ function appendDesire({ text, intensity }) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(getExpressionDesiresPath(), JSON.stringify(list, null, 2), 'utf8');
   const timeline = require('./timeline.js');
-  timeline.appendEntry({ type: 'expression_desire', payload: item, actor: 'system' });
+  const payload = session_id != null ? { ...item, session_id } : item;
+  timeline.appendEntry({ type: 'expression_desire', payload, actor: 'system' });
   console.info('[Aris v2][store/expressionDesires] appended');
 }
 

@@ -51,6 +51,7 @@ function readProactiveState() {
     low_power_mode: false,
     last_tired_or_quiet_at: null,
     recent_mood_or_scene: '',
+    last_sent_expression_desires: [],
   };
   try {
     const p = getProactiveStatePath();
@@ -65,6 +66,7 @@ function readProactiveState() {
       low_power_mode: Boolean(data.low_power_mode),
       last_tired_or_quiet_at: data.last_tired_or_quiet_at || null,
       recent_mood_or_scene: typeof data.recent_mood_or_scene === 'string' ? data.recent_mood_or_scene : '',
+      last_sent_expression_desires: Array.isArray(data.last_sent_expression_desires) ? data.last_sent_expression_desires : [],
     };
     if (state.state_date !== today) {
       state.state_date = today;

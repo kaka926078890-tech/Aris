@@ -167,9 +167,24 @@ const RECORD_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'get_expression_desire_context',
+      description: '根据某条表达欲望的创建时间，查询当时附近的对话内容（不存备份，按时间查会话）。用于了解「当时在聊什么」触发了这条欲望。',
+      parameters: {
+        type: 'object',
+        properties: {
+          created_at: { type: 'string', description: '表达欲望的 created_at（ISO 时间，如 2026-03-16T08:27:10.926Z）' },
+          window_seconds: { type: 'number', description: '时间窗口前后秒数，默认 300（5 分钟）' },
+        },
+        required: ['created_at'],
+      },
+    },
+  },
 ];
 
-async function runRecordTool(name, args) {
+async function runRecordTool(name, args, context) {
   const a = args || {};
   try {
     if (name === 'record_user_identity') {
@@ -196,7 +211,10 @@ async function runRecordTool(name, args) {
       return { ok: true, message: '已记录' };
     }
     if (name === 'record_expression_desire') {
-      if (a.text) store.expressionDesires.appendDesire({ text: a.text, intensity: a.intensity });
+      if (a.text) {
+        const sessionId = context?.sessionId ?? null;
+        store.expressionDesires.appendDesire({ text: a.text, intensity: a.intensity, session_id: sessionId });
+      }
       return { ok: true, message: '已记录' };
     }
     if (name === 'record_association') {
@@ -244,6 +262,36 @@ async function runRecordTool(name, args) {
         }
       }
       return { ok: true, message: '已记录' };
+    }
+    if (name === 'get_expression_desire_context') {
+      const iso = a.created_at;
+      const windowSec = Math.min(3600, Math.max(60, Number(a.window_seconds) || 300));
+      const entries = store.timeline.getEntries({ type: 'expression_desire', limit: 50 });
+      const target = new Date(iso).getTime();
+      if (Number.isNaN(target)) return { ok: false, error: '无效的 created_at' };
+      let best = null;
+      let bestDiff = Infinity;
+      for (const e of entries) {
+        const t = e.payload?.created_at ? new Date(e.payload.created_at).getTime() : NaN;
+        if (Number.isNaN(t)) continue;
+        const diff = Math.abs(t - target);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          best = e;
+        }
+      }
+      if (!best?.payload?.session_id) {
+        return { ok: true, messages: [], text: '（未找到该时间对应的表达欲望或缺少 session，无法按时间查对话）' };
+      }
+      const messages = await store.conversations.getConversationAroundTime(
+        best.payload.session_id,
+        best.payload.created_at,
+        windowSec
+      );
+      const text = messages.length
+        ? messages.map((m) => `${m.role === 'user' ? '用户' : 'Aris'}: ${(m.content || '').slice(0, 500)}`).join('\n')
+        : '（该时间窗口内无对话记录）';
+      return { ok: true, messages, text };
     }
   } catch (e) {
     console.warn('[Aris v2] record tool error', name, e?.message);

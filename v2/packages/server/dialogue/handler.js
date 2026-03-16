@@ -160,13 +160,14 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
       content: assistantContent || null,
       tool_calls: res.tool_calls,
     };
+    const toolContext = { sessionId, recent };
     const toolResults = await Promise.all(
       res.tool_calls.map(async (tc) => {
         const name = tc.function?.name;
         const args = tc.function?.arguments;
         let result;
         try {
-          result = await runTool(name, args);
+          result = await runTool(name, args, toolContext);
         } catch (e) {
           console.warn('[Aris v2] runTool error', name, e?.message);
           result = { ok: false, error: String(e?.message || '执行异常') };
