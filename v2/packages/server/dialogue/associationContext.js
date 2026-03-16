@@ -12,6 +12,8 @@ const DEFAULT_CONFIG = {
   requirement_id_max: 5,
   enable_summary: true,
   summary_rounds_interval: 10,
+  filter_experience_by_association: true,
+  max_experience_results: 10,
 };
 
 function getRetrievalConfigPath() {
@@ -34,6 +36,34 @@ function readRetrievalConfig() {
     fs.writeFileSync(p, JSON.stringify(DEFAULT_CONFIG, null, 2), 'utf8');
   } catch (_) {}
   return DEFAULT_CONFIG;
+}
+
+/**
+ * 当前上下文相关实体列表，用于向量写入 metadata 与检索过滤（分层记忆）。
+ * @returns {{ type: string, id: string }[]}
+ */
+function getCurrentRelatedEntityIds() {
+  const config = readRetrievalConfig();
+  const sourceTypes = Array.isArray(config.source_types) ? config.source_types : DEFAULT_CONFIG.source_types;
+  const reqIdMax = Math.max(0, Math.min(Number(config.requirement_id_max) || 5, 20));
+  const list = [];
+  if (sourceTypes.includes('identity')) list.push({ type: 'identity', id: 'name' });
+  if (sourceTypes.includes('requirement') && reqIdMax > 0) {
+    let store;
+    try {
+      store = require('../../store');
+    } catch (_) {
+      return list;
+    }
+    if (store.requirements && typeof store.requirements.listRecent === 'function') {
+      const reqList = store.requirements.listRecent(reqIdMax);
+      const idField = (store.requirements.getSchema && store.requirements.getSchema())?.id_field || 'id';
+      (reqList || []).forEach((r) => {
+        if (r[idField] != null) list.push({ type: 'requirement', id: String(r[idField]) });
+      });
+    }
+  }
+  return list;
 }
 
 /**
@@ -130,4 +160,4 @@ async function getRelatedAssociationsLines(sessionId, recent, options = {}) {
   return lines.join('\n');
 }
 
-module.exports = { getRelatedAssociationsLines, readRetrievalConfig };
+module.exports = { getRelatedAssociationsLines, readRetrievalConfig, getCurrentRelatedEntityIds };

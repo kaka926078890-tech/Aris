@@ -4,7 +4,7 @@
 const store = require('../../store');
 const config = require('../../config');
 const { buildSystemPrompt } = require('./prompt.js');
-const { getRelatedAssociationsLines } = require('./associationContext.js');
+const { getRelatedAssociationsLines, getCurrentRelatedEntityIds } = require('./associationContext.js');
 const { maybeGenerateSummary } = require('./summaryGeneration.js');
 const { ALL_TOOLS, runTool } = require('./tools/index.js');
 const { chatWithTools } = require('../llm/client.js');
@@ -102,7 +102,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   
   // 检查用户是否要求安静
   if (shouldBeQuiet(userContent)) {
-    store.state.writeProactiveState({ low_power_mode: true, proactive_no_reply_count: 0 });
+    store.state.writeProactiveState({ low_power_mode: true, proactive_no_reply_count: 0, last_tired_or_quiet_at: new Date().toISOString() });
     console.info('[Aris v2] 用户要求安静，立即进入低功耗模式');
   } else {
     // 检查当前是否在低功耗模式
@@ -207,40 +207,52 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     return { content: reply || '', error: false, sessionId, aborted: true };
   }
 
+  // 有工具调用时：若本轮已有可用正文，直接用它并流式输出；仅当无正文或为 DSML/工具标记时才再调 chatStream 要一句总结
   if (hadToolCalls && currentMessages.length > 0) {
-    try {
-      console.info('[Aris v2] 工具调用结束，流式生成最终回复…');
-      // 追加一条明确要求：只输出自然语言总结，避免模型返回 DSML/工具调用导致无法展示
-      const messagesForSummary = [
-        ...currentMessages,
-        {
-          role: 'user',
-          content: '请用一两句自然语言总结你刚才做了什么或接下来打算做什么，不要输出任何 DSML、XML 或工具调用，只回复纯文本。',
-        },
-      ];
-      const streamRes = await chatStream(messagesForSummary, () => {}, signal);
-      const fullContent = streamRes.content || '';
-      reply = fullContent;
-      if (streamRes.usage) {
-        totalInputTokens += Number(streamRes.usage.prompt_tokens) || 0;
-        totalOutputTokens += Number(streamRes.usage.completion_tokens) || 0;
-        hasOfficialUsage = true;
-      }
-      if (isDsmlOrToolMarkup(fullContent)) {
-        if (sendChunk) sendChunk('（上轮为工具调用，未生成自然语言回复，可继续发消息）');
-        reply = '';
-      } else if (sendChunk && fullContent) {
-        for (let i = 0; i < fullContent.length; i += 2) {
+    const hasUsableReply = reply && String(reply).trim() && !isDsmlOrToolMarkup(reply);
+    if (hasUsableReply) {
+      if (sendChunk) {
+        const contentForStream = filterReplyForDisplay(reply);
+        for (let i = 0; i < contentForStream.length; i += 2) {
           if (signal && signal.aborted) break;
-          sendChunk(fullContent.slice(i, i + 2));
+          sendChunk(contentForStream.slice(i, i + 2));
           await new Promise((r) => setTimeout(r, 16));
         }
       }
-    } catch (e) {
-      console.error('[Aris v2] chatStream error', e?.message);
-      const fallback = '（工具调用后的回复生成失败，请重试或换一种说法）';
-      if (sendChunk) sendChunk(fallback);
-      reply = fallback;
+    } else {
+      try {
+        console.info('[Aris v2] 工具调用结束且无正文，流式生成一句总结…');
+        const messagesForSummary = [
+          ...currentMessages,
+          {
+            role: 'user',
+            content: '请用一两句自然语言总结你刚才做了什么或接下来打算做什么，不要输出任何 DSML、XML 或工具调用，只回复纯文本。',
+          },
+        ];
+        const streamRes = await chatStream(messagesForSummary, () => {}, signal);
+        const fullContent = streamRes.content || '';
+        reply = fullContent;
+        if (streamRes.usage) {
+          totalInputTokens += Number(streamRes.usage.prompt_tokens) || 0;
+          totalOutputTokens += Number(streamRes.usage.completion_tokens) || 0;
+          hasOfficialUsage = true;
+        }
+        if (isDsmlOrToolMarkup(fullContent)) {
+          if (sendChunk) sendChunk('（上轮为工具调用，未生成自然语言回复，可继续发消息）');
+          reply = '';
+        } else if (sendChunk && fullContent) {
+          for (let i = 0; i < fullContent.length; i += 2) {
+            if (signal && signal.aborted) break;
+            sendChunk(fullContent.slice(i, i + 2));
+            await new Promise((r) => setTimeout(r, 16));
+          }
+        }
+      } catch (e) {
+        console.error('[Aris v2] chatStream error', e?.message);
+        const fallback = '（工具调用后的回复生成失败，请重试或换一种说法）';
+        if (sendChunk) sendChunk(fallback);
+        reply = fallback;
+      }
     }
   }
   if (reply && isDsmlOrToolMarkup(reply)) reply = '';
@@ -264,11 +276,12 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   if (blockText && store.vector) {
     const vec = await store.vector.embed(blockText, { prefix: 'document' });
     if (vec) {
+      const relatedEntities = getCurrentRelatedEntityIds();
       await store.vector.add({
         text: blockText,
         vector: vec,
         type: 'dialogue_turn',
-        metadata: { session_id: sessionId },
+        metadata: { session_id: sessionId, related_entities: relatedEntities },
       });
     }
   }

@@ -7,6 +7,12 @@ const { chat } = require('../llm/client.js');
 const { shouldBeQuiet, isResumingDialogue } = require('./quietResume.js');
 
 const EXPRESSION_THRESHOLD = 0.5;
+/** 连续多少次「主动尝试」且用户未回复后进入静默（当前 3 = 最多 2 条主动消息后静默） */
+const PROACTIVE_SILENT_AFTER = 3;
+/** 用户表示累/想安静后多少分钟内不发主动消息（纯代码判断） */
+const RECENT_TIRED_QUIET_MINUTES = 30;
+/** 防止定时器重叠导致多次读到同一 count 的锁 */
+let proactiveInProgress = false;
 
 function getSubjectiveTimeDescription(lastActiveTimeIso) {
   const now = new Date();
@@ -47,6 +53,8 @@ function normalize(s) {
 }
 
 async function maybeProactiveMessage() {
+  if (proactiveInProgress) return null;
+  proactiveInProgress = true;
   try {
     const proactiveState = store.state.readProactiveState();
     
@@ -73,6 +81,17 @@ async function maybeProactiveMessage() {
     const stateNow = store.state.readProactiveState();
     if (stateNow.low_power_mode) return null;
 
+    // 用户近期表示累/想安静：在 N 分钟内不发主动（由代码决定，不交给 prompt）
+    const lastTired = stateNow.last_tired_or_quiet_at;
+    if (lastTired) {
+      try {
+        const t = new Date(lastTired).getTime();
+        if (!Number.isNaN(t) && (Date.now() - t) / 60000 < RECENT_TIRED_QUIET_MINUTES) {
+          return null;
+        }
+      } catch (_) {}
+    }
+
     const sessionId = await store.conversations.getCurrentSessionId();
     const recent = await store.conversations.getRecent(sessionId, 10);
     
@@ -82,18 +101,20 @@ async function maybeProactiveMessage() {
       const latestUserMessage = recentUserMessages[recentUserMessages.length - 1].content;
       if (shouldBeQuiet(latestUserMessage)) {
         if (!proactiveState.low_power_mode) {
-          store.state.writeProactiveState({ low_power_mode: true, proactive_no_reply_count: 0 });
+          store.state.writeProactiveState({ low_power_mode: true, proactive_no_reply_count: 0, last_tired_or_quiet_at: new Date().toISOString() });
           console.info('[Aris v2][proactive] 用户要求安静，进入低功耗模式');
         }
         return null;
       }
     }
 
-    const nextCount = proactiveState.proactive_no_reply_count + 1;
-    if (nextCount >= 4) {
+    const nextCount = (proactiveState.proactive_no_reply_count || 0) + 1;
+    if (nextCount >= PROACTIVE_SILENT_AFTER) {
       store.state.writeProactiveState({ low_power_mode: true, proactive_no_reply_count: 0 });
+      console.info('[Aris v2][proactive] 未回复次数达上限，进入静默');
       return null;
     }
+    // 先落盘再跑异步逻辑，避免下次定时器触发时仍读到旧 count
     store.state.writeProactiveState({ proactive_no_reply_count: nextCount });
 
     const contextLines = recent.map((r) => `${r.role === 'user' ? '用户' : 'Aris'}: ${r.content}`).join('\n');
@@ -150,6 +171,8 @@ async function maybeProactiveMessage() {
       '',
       '【情感记录】',
       emotionContext,
+      '',
+      '（需要用户喜好如游戏、休息偏好时可调用 get_preferences。）',
     ].filter(Boolean).join('\n');
 
     const messages = [
@@ -188,6 +211,8 @@ async function maybeProactiveMessage() {
   } catch (e) {
     console.warn('[Aris v2][proactive] 检查失败', e?.message);
     return null;
+  } finally {
+    proactiveInProgress = false;
   }
 }
 

@@ -1,7 +1,8 @@
 /**
- * 记忆检索：search_memories、get_corrections。
+ * 记忆检索：search_memories、get_corrections。支持按关联实体过滤（分层记忆）。
  */
 const store = require('../../../store');
+const { readRetrievalConfig, getCurrentRelatedEntityIds } = require('../associationContext.js');
 
 const MEMORY_TOOLS = [
   {
@@ -42,10 +43,15 @@ async function runMemoryTool(name, args) {
         console.info('[Aris v2] 召回: 向量库未就绪');
         return { ok: true, memories: [], text: '（向量库未就绪）' };
       }
+      const config = readRetrievalConfig();
       const limit = Math.min(Math.max(Number(a.limit) || 5, 1), 15);
-      const rows = await store.vector.search(a.query || '', limit);
+      const maxExp = Math.min(Math.max(Number(config.max_experience_results) || 10, 1), 20);
+      const useLimit = config.filter_experience_by_association ? maxExp : limit;
+      const filterByEntities = config.filter_experience_by_association ? getCurrentRelatedEntityIds() : undefined;
+      const searchOptions = filterByEntities && filterByEntities.length > 0 ? { filterByEntities } : undefined;
+      const rows = await store.vector.search(a.query || '', useLimit, searchOptions);
       const texts = rows.map((r) => r.text).filter(Boolean);
-      console.info('[Aris v2] 召回:', texts.length, '条, query=', (a.query || '').slice(0, 40));
+      console.info('[Aris v2] 召回:', texts.length, '条, query=', (a.query || '').slice(0, 40), filterByEntities ? ', filterByEntity' : '');
       return { ok: true, memories: texts, text: texts.length ? texts.join('\n---\n') : '（无相关记忆）' };
     }
     if (name === 'get_corrections') {

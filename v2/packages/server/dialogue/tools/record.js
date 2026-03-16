@@ -123,6 +123,50 @@ const RECORD_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'record_preference',
+      description: '记录用户喜好或习惯（如喜欢的游戏、何时容易累、希望安静等）。仅在用户明确说出时调用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          topic: { type: 'string', description: '类别：如 game / rest / quiet / food' },
+          summary: { type: 'string', description: '简短描述' },
+          source: { type: 'string', description: '来源（可选）' },
+          tags: { type: 'array', items: { type: 'string' }, description: '标签（可选）' },
+        },
+        required: ['topic', 'summary'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_preferences',
+      description: '获取用户已记录的喜好与习惯（如游戏、休息/安静偏好等）。需要了解用户偏好时调用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          topic: { type: 'string', description: '可选，按类别筛选如 game / rest / quiet' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'record_friend_context',
+      description: '记录当前对话中的心情或场景（如「今天加班很累」「想静静」），用于后续主动消息时参考。',
+      parameters: {
+        type: 'object',
+        properties: {
+          mood_or_scene: { type: 'string', description: '简短心情或场景描述' },
+        },
+        required: ['mood_or_scene'],
+      },
+    },
+  },
 ];
 
 async function runRecordTool(name, args) {
@@ -169,6 +213,37 @@ async function runRecordTool(name, args) {
     if (name === 'get_associations') {
       const list = store.associations.getAssociationsFor(a.source_type, a.source_id);
       return { ok: true, associations: list };
+    }
+    if (name === 'record_preference') {
+      const res = store.preferences.add({
+        topic: a.topic,
+        summary: a.summary,
+        source: a.source,
+        tags: a.tags,
+      });
+      if (res.success && a.topic) {
+        const t = String(a.topic).toLowerCase();
+        if (t === 'rest' || t === 'quiet') {
+          store.state.writeProactiveState({ last_tired_or_quiet_at: new Date().toISOString() });
+        }
+      }
+      return res.success ? { ok: true, message: '已记录', id: res.id } : { ok: false, error: res.message };
+    }
+    if (name === 'get_preferences') {
+      const list = store.preferences.listByTopic(a.topic, 20);
+      const summary = store.preferences.getSummaryForPrompt({ topic: a.topic, maxLines: 15 });
+      return { ok: true, preferences: list, summary_for_prompt: summary };
+    }
+    if (name === 'record_friend_context') {
+      if (a.mood_or_scene != null && String(a.mood_or_scene).trim()) {
+        const text = String(a.mood_or_scene).trim();
+        store.state.writeProactiveState({ recent_mood_or_scene: text });
+        const lower = text.toLowerCase();
+        if (/累|困|想静静|安静|别打扰|休息/.test(lower)) {
+          store.state.writeProactiveState({ last_tired_or_quiet_at: new Date().toISOString() });
+        }
+      }
+      return { ok: true, message: '已记录' };
     }
   } catch (e) {
     console.warn('[Aris v2] record tool error', name, e?.message);
