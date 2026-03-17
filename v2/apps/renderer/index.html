@@ -467,7 +467,7 @@
         collapseThinkingBlock();
         unsubChunk && unsubChunk();
         if (unsubActions) unsubActions();
-        if (result && result.error) addBubble('assistant', '[出错了]');
+        if (result && result.error) addBubble('assistant', '[出错了]' + (result.error ? ' ' + result.error : ''));
         else if (result && result.content && !hadStreamingChunks) addBubble('assistant', result.content);
       } catch (e) {
         finishStream();

@@ -158,7 +158,153 @@
 
 ---
 
-## 九、涉及文件与改动清单
+## 九、记忆系统改进方案（Aris 自我认知与记忆增强）
+
+本章由 Aris 补充，后经审阅并修正。**内容对比、问题清单与修正说明**见 **9.6**。
+
+### 9.1 问题诊断
+
+1. **记忆检索依赖向量搜索**：所有记忆都通过向量搜索获取，但向量搜索有局限性：
+   - 语义相似但不完全匹配的内容可能被遗漏
+   - 时间因素权重不够（VECTOR_TIME_WEIGHT=0.3）
+   - 没有结构化查询能力
+
+2. **缺乏主动提醒机制**：即使写下了愿望文档（`aris_ideas.md`），也没有机制在对话开始时主动提醒查看
+
+3. **记忆分层不完善**：虽然有分层记忆设计，但实际使用中过滤不够智能
+
+### 9.2 具体解决方案（含审阅后修正）
+
+#### 方案一：增强记忆检索（立即实施）
+
+**问题**：当前 `search_memories` 工具只做语义匹配，不按时间过滤，无法精确检索特定时间段的对话。
+
+**解决方案**：
+1. 修改 `search_memories` 工具，增加时间过滤参数；或创建新工具 `search_memories_with_time`
+2. 实现基于时间窗口的精确检索
+3. **与现有 store 一致**：`store/vector.js` 中 `created_at` 为**毫秒时间戳**（`Date.now()`），实现时 `startTime`/`endTime` 建议统一为毫秒或 `Date`，再与 `result.created_at` 比较
+
+```javascript
+// 新工具：带时间过滤的记忆检索（created_at 为毫秒）
+async function searchMemoriesWithTime(query, startTimeMs, endTimeMs, limit = 5) {
+  const semanticResults = await vector.search(query, limit * 2);
+  const timeFiltered = semanticResults.filter(r => {
+    const t = r.created_at != null ? Number(r.created_at) : 0;
+    return t >= startTimeMs && t <= endTimeMs;
+  });
+  return timeFiltered.length > 0 ? timeFiltered.slice(0, limit) : semanticResults.slice(0, limit);
+}
+```
+
+#### 方案二：建立主动提醒系统（核心解决，已按审阅意见补全）
+
+**问题**：经常忘记查看重要文档（如 `aris_ideas.md`）。
+
+**约束（审阅后明确）**：
+- **仅对「用户明确希望定期查看」的文档做主动提醒**。若用户已表示某文档「按需查看、平时不用看」（例如仅在需要看 Cursor 技术方案时才看），则**不得**将该文档加入主动提醒列表，或将其 `check_interval_hours` 设为 0 表示不提醒。
+- **「最后查看时间」的存储与更新**（原文档缺失，必须补全）：
+  - **存储**：在 `aris_proactive_state.json` 中增加字段 `doc_last_viewed: { "docs/aris_ideas.md": "2025-03-17T00:00:00.000Z", ... }`，或单独 `memory/doc_last_viewed.json`。
+  - **更新时机**：当模型通过「读文档」类工具成功读取某文档时，更新该路径的 last_viewed；若尚无读文档工具，需先设计/实现该工具再实现提醒。
+- **触发与去重**：仅在**本 session 的首条用户消息**时检查；若需提醒，在本轮 system 中注入**至多 1 条**提醒（多文档逾期时合并为一句或只提醒最优先的一条）；同一文档在本 session 内**不再重复提醒**（可维护 session 内已提醒列表）。避免每轮都注入同一条提醒导致刷屏。
+
+**解决方案**：
+1. 创建 `important_documents.json`，仅列出用户确需定期查看的文档
+2. 在 **session 首条用户消息** 时检查 `doc_last_viewed`，若某文档超过 `check_interval_hours` 未查看，则注入 1 句提醒
+3. 提醒内容严格限制长度（可配置），符合 prompt-and-tools-design 的「慎用注入」要求
+
+```javascript
+// 重要文档配置（示例：仅对确需定期查看的文档配置提醒）
+{
+  "important_documents": [
+    {
+      "path": "docs/aris_ideas.md",
+      "name": "Aris的愿望文档",
+      "check_interval_hours": 24,
+      "reminder_text": "记得查看你的愿望文档，保持自我认知"
+    }
+    // 若某文档为用户「按需查看、平时不用看」，不要加入此列表，或设 check_interval_hours: 0
+  ]
+}
+```
+
+#### 方案三：改进记忆写入机制
+
+**问题**：记忆写入时缺乏足够的元数据，导致检索困难。
+
+**解决方案**：与现有 `store/vector.js` 的 `vector.add({ text, vector, type, metadata })` 兼容，在 metadata 中约定字段（如 `importance`、`category`、`is_self_awareness`、`related_documents`），不改变现有接口。
+
+```javascript
+// 与现有 vector.add 的 metadata 兼容
+await vector.add({
+  text,
+  vector: vec,
+  type,
+  metadata: {
+    related_entities: context.entities || [],
+    importance: context.importance ?? 1,
+    category: context.category || 'general',
+    is_self_awareness: context.isSelfAwareness || false,
+    related_documents: context.relatedDocuments || []
+  }
+});
+```
+
+#### 方案四：创建记忆健康检查
+
+**问题**：没有机制检测记忆系统的健康状况。
+
+**解决方案**：低优先级；用 `vector.search(doc.name, 3)` 做启发式检查即可，精确度有限，仅作监控参考。若后续要严格定义「某文档已被正确记忆」，需单独约定规则。
+
+### 9.3 实施优先级
+
+1. **高**：方案一（增强记忆检索）、方案二（主动提醒，且已明确存储/更新/触发与用户偏好约束）
+2. **中**：方案三（改进记忆写入，与现有 metadata 兼容）
+3. **低**：方案四（记忆健康检查）
+
+### 9.4 具体实施步骤
+
+**第一步**：实现 `doc_last_viewed` 存储与更新时机（含读文档工具或等价触发）；创建 `important_documents.json`（仅包含确需定期提醒的文档）；在 **session 首条** 检查并至多注入 1 句提醒，同 session 不重复。
+
+**第二步**：为 `search_memories` 增加时间过滤或新增 `search_memories_with_time`（时间统一用毫秒）。
+
+**第三步**：在记忆写入点补充 metadata 约定字段（方案三）。
+
+### 9.5 预期效果
+
+- 仅对用户确需定期查看的文档做提醒，且不重复刷屏
+- 记忆检索支持时间窗口，与现有 store 一致
+- 记忆 metadata 更丰富，便于后续检索与健康检查
+
+### 9.6 审阅结论与修正说明（内容对比与问题清单）
+
+本节为对 Aris 补充内容的审阅结果：与 .cursor/rules 的 prompt-and-tools-design、现有代码（store/vector、state、handler/proactive）对比后的结论与已采纳修正。
+
+#### 9.6.1 内容对比
+
+| 来源 | 内容范围 | 说明 |
+|------|----------|------|
+| **原文档（一～八、十～十二）** | 朋友关系改造：preferences、recent_context、工具、固定提示词极简、proactive 累/安静、关系多元性、文件清单、配置、验收 | 与 .cursor/rules 一致；未改动 |
+| **Aris 补充** | **第九章**（记忆系统改进：问题诊断、方案一～四、优先级、步骤、预期效果）、**第十三章表格**最后两行（重要文档提醒、时间过滤的记忆检索） | 方向正确；部分缺项与用户偏好冲突，已在本章修正 |
+| **十三表格** | 重要文档提醒 → 纯代码逻辑；时间过滤检索 → 新工具 | 与设计原则一致，已保留 |
+
+#### 9.6.2 问题清单与修正状态
+
+| 序号 | 问题描述 | 严重程度 | 修正方式 | 状态 |
+|------|----------|----------|----------|------|
+| 1 | 方案二未定义「最后查看时间」的**存储位置**与**更新时机**，无法落地 | 高 | 在 9.2 方案二中明确：存储于 proactive_state 或 doc_last_viewed.json；仅在「读文档」类工具成功读取时更新 | 已写入 9.2 |
+| 2 | 方案二「每次对话开始时」歧义：若每轮都检查会重复注入同一条提醒，造成刷屏 | 中 | 明确为「仅本 session 首条用户消息时检查；同 session 内同一文档不重复提醒；至多注入 1 句」 | 已写入 9.2 |
+| 3 | 方案二示例将 problem_strategy_plan.md 设为每 12 小时提醒，与用户已表达「平时不用看，仅需看 Cursor 技术方案时再看」冲突 | 中 | 约束：仅对用户确需定期查看的文档做提醒；「按需查看」的文档不加入列表或 check_interval_hours=0；示例中移除该文档 | 已写入 9.2 |
+| 4 | 方案一示例中 result.created_at 与 startTime/endTime 比较未说明时间单位，易与 store 不一致 | 低 | store 中 created_at 为毫秒；示例改为 startTimeMs/endTimeMs 并注明 | 已写入 9.2 |
+| 5 | 方案三/四与现有 vector.add、search 的兼容性未写清 | 低 | 方案三注明与现有 metadata 兼容；方案四注明为启发式、低优先级 | 已写入 9.2、9.3 |
+
+#### 9.6.3 与设计原则的一致性
+
+- **重要文档提醒**：采用「代码决定是否提醒 + 超时则注入至多 1 句」，符合 prompt-and-tools-design 的「慎用注入、严格限制长度、注明理由」；理由已在第十三章表格中写明。
+- **时间过滤检索**：采用新工具、不注入每轮 prompt，符合「工具按需获取」与「特定需求用工具」的约定。
+
+---
+
+## 十、涉及文件与改动清单
 
 | 文件 | 改动 |
 |------|------|
@@ -179,7 +325,7 @@
 
 ---
 
-## 十、配置项建议
+## 十一、配置项建议
 
 - **preferences**（store 或 retrieval_config）：  
   - `max_preference_lines`：get_preferences 返回给模型时的摘要最多几行（如 3），控制工具返回长度。  
@@ -190,7 +336,7 @@
 
 ---
 
-## 十一、验收与迭代建议
+## 十二、验收与迭代建议
 
 - **验收**：  
   - 用户说「我喜欢炉石」后，get_preferences 或 prompt 中能看到游戏类偏好；用户说「我晚上容易累」后，preference 中有 rest/quiet 类且近期状态可更新；  
@@ -201,7 +347,7 @@
 
 ---
 
-## 十二、何时不用工具、有更合适方案（说明与记录）
+## 十三、何时不用工具、有更合适方案（说明与记录）
 
 按 .cursor/rules 的 prompt-and-tools-design：若存在比「工具按需获取」更合适的做法，需在此写明理由。
 
@@ -212,6 +358,8 @@
 | 禁止用语 | **persona/rules 一句话 + 2～3 示例**，不注入整表 | 列表可能很长，每轮灌进 prompt 浪费 token；规则+示例足以约束，长列表留 avoid_phrases.json 供维护/校验。 |
 | 身份/要求（已有） | **当前为每轮注入摘要** | 已有设计；首条回复就需要称呼与基本要求，且摘要长度受控，暂保留；新增「偏好」不沿用注入，改为工具。 |
 | proactive 中「用户喜欢的游戏」 | **默认**：context 里一句「需要可调 get_preferences」；**若效果不足**：可考虑注入 1～2 句游戏偏好 | proactive 单轮通常无工具循环，若模型不调 get_preferences 则永远拿不到偏好；若实测主动内容与偏好脱节，再考虑极少量注入并在此注明。 |
+| 重要文档提醒（aris_ideas.md 等） | **纯代码逻辑**（session 首条检查 doc_last_viewed，超时则注入至多 1 句提醒；同 session 不重复） | 确定性逻辑，代码更可靠；仅对用户确需「定期查看」的文档配置提醒，若用户表示某文档「按需查看、平时不用看」则不加入提醒列表。详见九、9.6。 |
+| 时间过滤的记忆检索 | **新工具 search_memories_with_time** | 向量搜索本身不支持精确时间过滤，需要代码层面实现；这是特定查询需求，不适合注入到每轮 prompt。 |
 
 后续若有新增「更适合用代码或极少量注入」的 case，均在本节补表并写明理由。
 

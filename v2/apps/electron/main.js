@@ -132,6 +132,9 @@ ipcMain.handle('dialogue:send', async (event, userContent) => {
     const result = await handleUserMessage(userContent, sendChunk, sendAgentActions, dialogueAbortController.signal);
     lastDialogueAt = Date.now();
     return result;
+  } catch (e) {
+    console.error('[Aris v2] dialogue:send 异常', e?.message || e);
+    return { error: String(e?.message || e) };
   } finally {
     dialogueAbortController = null;
     dialogueBusy = false;

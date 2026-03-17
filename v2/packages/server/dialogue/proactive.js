@@ -16,6 +16,8 @@ const LAST_SENT_DESIRES_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PROACTIVE_SILENT_AFTER = 3;
 /** 用户表示累/想安静后多少分钟内不发主动消息（纯代码判断） */
 const RECENT_TIRED_QUIET_MINUTES = 30;
+/** 上一条若是 Aris 发的，至少隔多少毫秒才允许再发主动，避免「自己接自己话」（如刚说完「你先忙」又发「欢迎回来」） */
+const PROACTIVE_MIN_INTERVAL_AFTER_OWN_MS = 2 * 60 * 1000;
 /** 防止定时器重叠导致多次读到同一 count 的锁 */
 let proactiveInProgress = false;
 
@@ -101,23 +103,21 @@ async function maybeProactiveMessage() {
   try {
     const proactiveState = store.state.readProactiveState();
     
-    // 如果已经在低功耗模式，检查是否可以恢复
+    // 如果已经在低功耗模式，检查是否可以恢复（仅当用户在「进入静默之后」发过新消息才算恢复）
     if (proactiveState.low_power_mode) {
+      const enteredAt = proactiveState.low_power_entered_at;
+      if (!enteredAt) return null; // 无进入时间则不在此处解除（仅由 handler 在用户发消息时解除）
       const sessionId = await store.conversations.getCurrentSessionId();
       const recent = await store.conversations.getRecent(sessionId, 5);
-      
-      // 检查最近是否有用户消息
       const recentUserMessages = recent.filter(r => r.role === 'user');
-      if (recentUserMessages.length > 0) {
-        const latestUserMessage = recentUserMessages[recentUserMessages.length - 1].content;
-        // 如果用户是在恢复对话，就退出低功耗模式
-        if (isResumingDialogue(latestUserMessage)) {
-          store.state.writeProactiveState({ low_power_mode: false, proactive_no_reply_count: 0 });
-          console.info('[Aris v2][proactive] 用户恢复对话，退出低功耗模式');
-        }
-      } else {
-        return null;
-      }
+      if (recentUserMessages.length === 0) return null;
+      const latest = recentUserMessages[recentUserMessages.length - 1];
+      const enteredMs = new Date(enteredAt).getTime();
+      const msgMs = latest.created_at != null ? (typeof latest.created_at === 'number' ? latest.created_at : parseInt(latest.created_at, 10)) * 1000 : 0;
+      if (msgMs <= enteredMs) return null; // 该条用户消息不晚于进入静默时间，不算恢复
+      if (!isResumingDialogue(latest.content)) return null;
+      store.state.writeProactiveState({ low_power_mode: false, proactive_no_reply_count: 0, low_power_entered_at: null });
+      console.info('[Aris v2][proactive] 用户恢复对话，退出低功耗模式');
     }
 
     // 若仍在低功耗（用户未恢复对话），不发任何主动消息
@@ -137,14 +137,22 @@ async function maybeProactiveMessage() {
 
     const sessionId = await store.conversations.getCurrentSessionId();
     const recent = await store.conversations.getRecent(sessionId, 10);
-    
+    if (recent.length > 0 && recent[recent.length - 1].role === 'assistant') {
+      const lastMsg = recent[recent.length - 1];
+      const lastTime = (lastMsg.created_at != null ? Number(lastMsg.created_at) * 1000 : 0) || 0;
+      if (lastTime > 0 && Date.now() - lastTime < PROACTIVE_MIN_INTERVAL_AFTER_OWN_MS) {
+        return null;
+      }
+    }
+
     // 检查最近用户消息是否要求安静
     const recentUserMessages = recent.filter(r => r.role === 'user');
     if (recentUserMessages.length > 0) {
       const latestUserMessage = recentUserMessages[recentUserMessages.length - 1].content;
       if (shouldBeQuiet(latestUserMessage)) {
         if (!proactiveState.low_power_mode) {
-          store.state.writeProactiveState({ low_power_mode: true, proactive_no_reply_count: 0, last_tired_or_quiet_at: new Date().toISOString() });
+          const nowIso = new Date().toISOString();
+          store.state.writeProactiveState({ low_power_mode: true, proactive_no_reply_count: 0, low_power_entered_at: nowIso, last_tired_or_quiet_at: nowIso });
           console.info('[Aris v2][proactive] 用户要求安静，进入低功耗模式');
         }
         return null;
@@ -153,7 +161,7 @@ async function maybeProactiveMessage() {
 
     const nextCount = (proactiveState.proactive_no_reply_count || 0) + 1;
     if (nextCount >= PROACTIVE_SILENT_AFTER) {
-      store.state.writeProactiveState({ low_power_mode: true, proactive_no_reply_count: 0 });
+      store.state.writeProactiveState({ low_power_mode: true, proactive_no_reply_count: 0, low_power_entered_at: new Date().toISOString() });
       console.info('[Aris v2][proactive] 未回复次数达上限，进入静默');
       return null;
     }

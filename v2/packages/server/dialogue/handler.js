@@ -11,6 +11,7 @@ const { chatWithTools } = require('../llm/client.js');
 const { chatStream } = require('../llm/stream.js');
 const { DIALOGUE_CHUNK_PREV_ROUNDS } = require('../../config/constants.js');
 const { shouldBeQuiet, isResumingDialogue } = require('./quietResume.js');
+const { getImportantDocReminder } = require('./importantDocsReminder.js');
 
 const RECENT_ROUNDS = 3;
 
@@ -54,7 +55,7 @@ async function buildPromptContext(sessionId, recent) {
   const relatedAssociations = await getRelatedAssociationsLines(sessionId, recent);
   const recentSummaryEntry = store.summaries?.readSummary(sessionId);
   const recentSummary = recentSummaryEntry?.content?.trim() || '（无）';
-  const systemPrompt = buildSystemPrompt({
+  let systemPrompt = buildSystemPrompt({
     userIdentity,
     userRequirements,
     contextWindow,
@@ -62,6 +63,9 @@ async function buildPromptContext(sessionId, recent) {
     relatedAssociations,
     recentSummary,
   });
+  const isSessionFirstMessage = recent.length === 1 && recent[0].role === 'user';
+  const reminderLine = getImportantDocReminder(isSessionFirstMessage);
+  if (reminderLine) systemPrompt = systemPrompt + '\n\n' + reminderLine;
   const recentMessages = recent.slice(-(RECENT_ROUNDS * 2));
   return {
     systemPrompt,
@@ -110,12 +114,12 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     if (proactiveState.low_power_mode) {
       // 如果在低功耗模式，检查用户是否在恢复对话
       if (isResumingDialogue(userContent)) {
-        store.state.writeProactiveState({ low_power_mode: false, proactive_no_reply_count: 0 });
+        store.state.writeProactiveState({ low_power_mode: false, proactive_no_reply_count: 0, low_power_entered_at: null });
         console.info('[Aris v2] 用户恢复对话，退出低功耗模式');
       }
     } else {
       // 正常模式，重置计数器
-      store.state.writeProactiveState({ proactive_no_reply_count: 0, low_power_mode: false });
+      store.state.writeProactiveState({ proactive_no_reply_count: 0, low_power_mode: false, low_power_entered_at: null });
     }
   }
 
@@ -268,38 +272,42 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
 
   await store.conversations.append(sessionId, 'assistant', reply);
 
-  const state = store.state.readState();
-  const prevRecent = await store.conversations.getRecent(sessionId, (DIALOGUE_CHUNK_PREV_ROUNDS + 1) * 2 + 2);
-  const prevSlice = prevRecent.slice(-(DIALOGUE_CHUNK_PREV_ROUNDS * 2));
-  const blockText = prevSlice
-    .map((r) => `${r.role === 'user' ? 'User' : 'Assistant'}: ${r.content}`)
-    .join(' | ');
-  if (blockText && store.vector) {
-    const vec = await store.vector.embed(blockText, { prefix: 'document' });
-    if (vec) {
-      const relatedEntities = getCurrentRelatedEntityIds();
-      await store.vector.add({
-        text: blockText,
-        vector: vec,
-        type: 'dialogue_turn',
-        metadata: { session_id: sessionId, related_entities: relatedEntities },
-      });
+  try {
+    const state = store.state.readState();
+    const prevRecent = await store.conversations.getRecent(sessionId, (DIALOGUE_CHUNK_PREV_ROUNDS + 1) * 2 + 2);
+    const prevSlice = prevRecent.slice(-(DIALOGUE_CHUNK_PREV_ROUNDS * 2));
+    const blockText = prevSlice
+      .map((r) => `${r.role === 'user' ? 'User' : 'Assistant'}: ${r.content}`)
+      .join(' | ');
+    if (blockText && store.vector) {
+      const vec = await store.vector.embed(blockText, { prefix: 'document' });
+      if (vec) {
+        const relatedEntities = getCurrentRelatedEntityIds();
+        await store.vector.add({
+          text: blockText,
+          vector: vec,
+          type: 'dialogue_turn',
+          metadata: { session_id: sessionId, related_entities: relatedEntities },
+        });
+      }
     }
-  }
 
-  store.state.writeState({
-    last_active_time: new Date().toISOString(),
-    last_mental_state: reply ? reply.slice(0, 300) : null,
-  });
+    store.state.writeState({
+      last_active_time: new Date().toISOString(),
+      last_mental_state: reply ? reply.slice(0, 300) : null,
+    });
 
-  if (store.monitor && store.monitor.recordTokenUsage) {
-    if (hasOfficialUsage && (totalInputTokens > 0 || totalOutputTokens > 0)) {
-      store.monitor.recordTokenUsage(sessionId, new Date().toISOString(), totalInputTokens, totalOutputTokens, false);
-    } else {
-      const inputChars = currentMessages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
-      const outputChars = (reply || '').length;
-      store.monitor.recordTokenUsage(sessionId, new Date().toISOString(), Math.ceil(inputChars / 4), Math.ceil(outputChars / 4), true);
+    if (store.monitor && store.monitor.recordTokenUsage) {
+      if (hasOfficialUsage && (totalInputTokens > 0 || totalOutputTokens > 0)) {
+        store.monitor.recordTokenUsage(sessionId, new Date().toISOString(), totalInputTokens, totalOutputTokens, false);
+      } else {
+        const inputChars = currentMessages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
+        const outputChars = (reply || '').length;
+        store.monitor.recordTokenUsage(sessionId, new Date().toISOString(), Math.ceil(inputChars / 4), Math.ceil(outputChars / 4), true);
+      }
     }
+  } catch (e) {
+    console.warn('[Aris v2] 对话后处理异常（向量/状态/监控），不影响本次回复', e?.message || e);
   }
 
   const finalPreview = (contentForFrontend && contentForFrontend.length > 0)

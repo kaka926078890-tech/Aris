@@ -116,6 +116,10 @@ function getProactiveStatePath() {
   return path.join(getDataDir(), 'aris_proactive_state.json');
 }
 
+function getImportantDocumentsPath() {
+  return path.join(getDataDir(), 'important_documents.json');
+}
+
 module.exports = {
   getV2Root,
   getDataDir,
@@ -136,4 +140,5 @@ module.exports = {
   getStatePath,
   getProactiveStatePath,
   getTimelinePath,
+  getImportantDocumentsPath,
 };

@@ -48,6 +48,23 @@ const MEMORY_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'search_memories_with_time',
+      description: '按语义检索记忆，并只保留在指定时间窗口内的结果（created_at 在该区间内）。用于需要「某段时间内的记忆」时。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '检索关键词或问题' },
+          start_time: { type: 'string', description: '时间窗口起点，ISO 如 2026-03-16T00:00:00Z 或 毫秒时间戳' },
+          end_time: { type: 'string', description: '时间窗口终点，ISO 或毫秒' },
+          limit: { type: 'number', description: '最多返回条数', default: 5 },
+        },
+        required: ['query', 'start_time', 'end_time'],
+      },
+    },
+  },
 ];
 
 async function runMemoryTool(name, args) {
@@ -73,6 +90,33 @@ async function runMemoryTool(name, args) {
       const limit = Math.min(Math.max(Number(a.limit) || 5, 1), 10);
       const list = store.corrections.getRecent(limit);
       return { ok: true, corrections: list, text: list.length ? list.join('\n---\n') : '（暂无纠错记录）' };
+    }
+    if (name === 'search_memories_with_time') {
+      if (!store.vector) {
+        return { ok: true, memories: [], text: '（向量库未就绪）' };
+      }
+      const limit = Math.min(Math.max(Number(a.limit) || 5, 1), 15);
+      const parseMs = (v) => {
+        if (v == null) return NaN;
+        if (typeof v === 'number' && !Number.isNaN(v)) return v < 1e13 ? v * 1000 : v;
+        const d = new Date(v);
+        return Number.isNaN(d.getTime()) ? NaN : d.getTime();
+      };
+      const startMs = parseMs(a.start_time);
+      const endMs = parseMs(a.end_time);
+      if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+        return { ok: false, error: 'start_time 或 end_time 无法解析，请用 ISO 或毫秒时间戳' };
+      }
+      const fetchLimit = limit * 2;
+      const rows = await store.vector.search(a.query || '', fetchLimit);
+      const timeFiltered = rows.filter((r) => {
+        const t = r.created_at != null ? Number(r.created_at) : 0;
+        return t >= startMs && t <= endMs;
+      });
+      const result = timeFiltered.length > 0 ? timeFiltered.slice(0, limit) : rows.slice(0, limit);
+      const texts = result.map((r) => r.text).filter(Boolean);
+      console.info('[Aris v2] 召回(带时间):', texts.length, '条, query=', (a.query || '').slice(0, 40));
+      return { ok: true, memories: texts, text: texts.length ? texts.join('\n---\n') : '（无该时间范围内的相关记忆）' };
     }
     if (name === 'get_conversation_near_time') {
       const timeStr = (a.time_str || '').trim();

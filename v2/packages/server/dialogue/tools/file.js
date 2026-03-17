@@ -4,6 +4,7 @@
 const path = require('path');
 const fs = require('fs');
 const { getV2Root } = require('../../../config/paths.js');
+const { markDocumentViewed } = require('../importantDocsReminder.js');
 
 function resolvePath(relativePath) {
   const root = getV2Root();
@@ -82,9 +83,12 @@ async function runFileTool(name, args) {
       return { ok: true, list };
     }
     if (name === 'read_file') {
-      const p = resolvePath(a.relative_path || '');
+      const rel = (a.relative_path || '').trim();
+      const p = resolvePath(rel);
       if (!fs.existsSync(p) || !fs.statSync(p).isFile()) return { ok: false, error: '文件不存在' };
       const content = fs.readFileSync(p, 'utf8');
+      const normalizedRel = path.normalize(rel).replace(/\\/g, '/');
+      markDocumentViewed(normalizedRel);
       return { ok: true, content };
     }
     if (name === 'write_file') {

@@ -10,9 +10,9 @@
     "dev:renderer": "node scripts/run-in-renderer.js dev",
     "build:renderer": "node scripts/run-in-renderer.js build",
     "build": "npm run build:renderer && electron-builder",
-    "build:mac": "electron-builder --mac",
+    "build:mac": "electron-builder --mac --publish never",
     "build:win": "electron-builder --win --publish never",
-    "build:linux": "electron-builder --linux"
+    "build:linux": "electron-builder --linux --publish never"
   },
   "keywords": [
     "aris",
@@ -34,6 +34,7 @@
   "build": {
     "appId": "com.aris.v2",
     "productName": "Aris v2",
+    "publish": null,
     "directories": { "output": "dist" },
     "files": [
       "apps/**/*",

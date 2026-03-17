@@ -49,6 +49,10 @@ function readProactiveState() {
     self_upgrade_done_today: false,
     proactive_no_reply_count: 0,
     low_power_mode: false,
+    /** 进入低功耗/静默的时间（ISO），用于判断「用户恢复」须为静默之后的新消息 */
+    low_power_entered_at: null,
+    /** 重要文档最后查看时间 { "docs/aris_ideas.md": "2025-03-17T00:00:00.000Z" }，用于 session 首条提醒 */
+    doc_last_viewed: {},
     last_tired_or_quiet_at: null,
     recent_mood_or_scene: '',
     last_sent_expression_desires: [],
@@ -64,6 +68,8 @@ function readProactiveState() {
       self_upgrade_done_today: Boolean(data.self_upgrade_done_today),
       proactive_no_reply_count: Math.min(3, Math.max(0, Number(data.proactive_no_reply_count) || 0)),
       low_power_mode: Boolean(data.low_power_mode),
+      low_power_entered_at: data.low_power_entered_at || null,
+      doc_last_viewed: data.doc_last_viewed && typeof data.doc_last_viewed === 'object' ? data.doc_last_viewed : {},
       last_tired_or_quiet_at: data.last_tired_or_quiet_at || null,
       recent_mood_or_scene: typeof data.recent_mood_or_scene === 'string' ? data.recent_mood_or_scene : '',
       last_sent_expression_desires: Array.isArray(data.last_sent_expression_desires) ? data.last_sent_expression_desires : [],
