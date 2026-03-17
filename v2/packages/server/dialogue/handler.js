@@ -6,7 +6,7 @@ const config = require('../../config');
 const { buildSystemPrompt } = require('./prompt.js');
 const { getRelatedAssociationsLines, getCurrentRelatedEntityIds } = require('./associationContext.js');
 const { maybeGenerateSummary } = require('./summaryGeneration.js');
-const { ALL_TOOLS, runTool } = require('./tools/index.js');
+const { getTools, runTool } = require('./tools/index.js');
 const { chatWithTools } = require('../llm/client.js');
 const { chatStream } = require('../llm/stream.js');
 const { DIALOGUE_CHUNK_PREV_ROUNDS } = require('../../config/constants.js');
@@ -146,7 +146,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (signal && signal.aborted) break;
-    const res = await chatWithTools(currentMessages, ALL_TOOLS, signal);
+    const res = await chatWithTools(currentMessages, getTools(), signal);
     if (res.aborted) break;
     reply = res.content || '';
     err = res.error;

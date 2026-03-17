@@ -22,6 +22,7 @@ function getMemoryFiles() {
       retrieval_config: 'retrieval_config.json',
       session_summaries: 'session_summaries.json',
       preferences: 'preferences.json',
+      network_config: 'network_config.json',
     };
   }
   return memoryFiles;
@@ -96,6 +97,11 @@ function getPreferencesPath() {
   return path.join(getMemoryDir(), name);
 }
 
+function getNetworkConfigPath() {
+  const name = getMemoryFiles().network_config || 'network_config.json';
+  return path.join(getMemoryDir(), name);
+}
+
 function getSqlitePath() {
   return path.join(getDataDir(), 'aris.db');
 }
@@ -135,6 +141,7 @@ module.exports = {
   getRetrievalConfigPath,
   getSessionSummariesPath,
   getPreferencesPath,
+  getNetworkConfigPath,
   getSqlitePath,
   getLanceDbPath,
   getStatePath,

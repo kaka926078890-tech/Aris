@@ -9,8 +9,9 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 
 ## 配置
 
-- **开发/本地**：可复制 `.env.example` 为 `.env`，配置 `DEEPSEEK_API_KEY`、`DEEPSEEK_API_URL`、`OLLAMA_HOST` 等。
-- **打包分发**：无需 .env。安装后打开应用，在侧栏进入 **设置** 页填写 DeepSeek API Key 与 API 地址（可选），保存即可。设置会写入 Electron userData 目录，下次启动自动生效。
+- **用户可见配置**：打开应用后进入侧栏 **设置** 页，可查看**当前数据目录**及在此保存的所有配置（对话 API、网络访问等）。配置保存在数据目录下的 `config.json`，无需编辑 .env 或环境变量。
+- **开发/本地**：可复制 `.env.example` 为 `.env`，配置 `DEEPSEEK_API_KEY`、`OLLAMA_HOST` 等；若未设置，应用会使用设置页保存的 `config.json`（与打包版一致）。
+- **打包分发**：无需 .env。安装后打开应用，在 **设置** 页填写 DeepSeek API Key、API 地址、网络访问开关等，点击「保存全部配置」即可；下次对话立即生效。
 - **Ollama**：对话不依赖 Ollama；仅需「语义记忆/向量检索」时可选安装 [Ollama](https://ollama.com) 并执行 `ollama pull nomic-embed-text`，设置页有说明。
 
 ### 可配置项一览（memory 与 JSON）
@@ -22,7 +23,8 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 | **quiet_phrases.json** | 用户说哪些话时进入「安静」模式（不主动回复） | `quiet_phrases`: 字符串数组，如 `["歇会","安静待会","别说话"]`。命中则进入低功耗，未命中且非空消息可视为恢复对话。 |
 | **retrieval_config.json** | 记忆检索与小结行为 | `enable_association_inject`、`max_association_lines`、`source_types`、`requirement_id_max`；`enable_summary`、`summary_rounds_interval`（2～50）；**分层记忆**：`filter_experience_by_association`（boolean）：search_memories 是否只返回与当前身份/要求相关经历；`max_experience_results`（number）：该模式下最多返回条数（1～20）。缺省由代码默认或首次写入。 |
 | **session_summaries.json** | 各会话最新小结（自动生成，一般无需手改） | 按 session 存 `content`、`updated_at`、`round_index`。 |
-| **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`quiet_phrases`、`retrieval_config`、`session_summaries` 等，值为实际文件名（如 `identity.json`）。 |
+| **network_config.json** | 网络访问工具（fetch_url）开关与安全策略 | `enable_web_fetch`、`allowed_hosts`、`blocked_hosts`、`timeout_ms`、`max_calls_per_minute`、`max_length`、`reject_unauthorized`（HTTPS 证书校验，false 可解决「unable to get local issuer certificate」）。详见 [网络工具配置](docs/network_tool_config.md)。 |
+| **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`quiet_phrases`、`retrieval_config`、`session_summaries`、`network_config` 等，值为实际文件名（如 `identity.json`）。 |
 
 **数据目录根下**（与 `memory/` 平级）：
 
@@ -104,4 +106,5 @@ npm run build:linux # 产出 AppImage（Linux）
 - [向量设计](docs/vector_design.md)
 - [记忆连贯性（关联/小结/分层/时间线）](docs/memory_coherence.md)
 - [工具](docs/tools.md)
+- [网络访问工具配置（fetch_url）](docs/network_tool_config.md)
 - [分阶段执行清单](docs/todo.md)

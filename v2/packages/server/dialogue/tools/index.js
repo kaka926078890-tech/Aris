@@ -4,7 +4,29 @@ const { MEMORY_TOOLS, runMemoryTool } = require('./memory.js');
 const { TIME_TOOLS, runTimeTool } = require('./time.js');
 const { GIT_TOOLS, runGitTool } = require('./git.js');
 
-const ALL_TOOLS = [...RECORD_TOOLS, ...FILE_TOOLS, ...MEMORY_TOOLS, ...TIME_TOOLS, ...GIT_TOOLS];
+const BASE_TOOLS = [
+  ...RECORD_TOOLS,
+  ...FILE_TOOLS,
+  ...MEMORY_TOOLS,
+  ...TIME_TOOLS,
+  ...GIT_TOOLS,
+];
+
+/** 延迟加载 network 模块，避免启动时加载导致 SIGBUS 等崩溃 */
+function getNetworkToolsIfEnabled() {
+  try {
+    const net = require('./network.js');
+    if (net.isNetworkFetchEnabled && net.isNetworkFetchEnabled()) return net.NETWORK_TOOLS || [];
+  } catch (_) {}
+  return [];
+}
+
+/** 每次请求时按当前配置生成工具列表，便于设置页修改「网络访问」后无需重启即生效 */
+function getTools() {
+  return [...BASE_TOOLS, ...getNetworkToolsIfEnabled()];
+}
+
+const ALL_TOOLS = BASE_TOOLS;
 
 function parseToolArgs(args) {
   if (args == null) return {};
@@ -38,7 +60,15 @@ async function runTool(name, args, context) {
   if (GIT_TOOLS.some((t) => t.function.name === name)) {
     return runGitTool(name, a);
   }
+  if (name === 'fetch_url') {
+    try {
+      const { runNetworkTool } = require('./network.js');
+      return runNetworkTool(name, a, context);
+    } catch (e) {
+      return { ok: false, error: (e && e.message) || '网络模块加载失败' };
+    }
+  }
   return { ok: false, error: 'Unknown tool: ' + name };
 }
 
-module.exports = { ALL_TOOLS, runTool, parseToolArgs };
+module.exports = { ALL_TOOLS, getTools, runTool, parseToolArgs };

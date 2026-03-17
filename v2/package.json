@@ -23,6 +23,7 @@
   "license": "MIT",
   "dependencies": {
     "@lancedb/lancedb": "^0.26.0",
+    "cheerio": "^1.0.0",
     "dotenv": "^16.4.5",
     "jsonrepair": "^3.13.2",
     "sql.js": "^1.10.0"

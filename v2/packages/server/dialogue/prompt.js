@@ -60,7 +60,7 @@ function buildSystemPrompt({
   recentSummary = '（无）',
   behavioralRules = RULES,
 }) {
-  const system = PERSONA + '\n\n' + CONTEXT_TEMPLATE
+  let system = PERSONA + '\n\n' + CONTEXT_TEMPLATE
     .replace('{user_identity}', userIdentity)
     .replace('{user_requirements}', userRequirements)
     .replace('{last_state_and_subjective_time}', lastStateAndSubjectiveTime)
@@ -68,6 +68,12 @@ function buildSystemPrompt({
     .replace('{recent_summary}', recentSummary)
     .replace('{context_window}', contextWindow)
     .replace('{behavioral_rules}', behavioralRules);
+  try {
+    const { isNetworkFetchEnabled } = require('./tools/network.js');
+    if (isNetworkFetchEnabled()) {
+      system += '\n需要了解外界信息时可调用 fetch_url。';
+    }
+  } catch (_) {}
   return system;
 }
 
