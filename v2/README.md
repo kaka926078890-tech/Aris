@@ -30,8 +30,8 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 | **conversation_rules.md** | 情境/检索/纠错等规则（可选） | 纯文本。若存在则替换代码中的默认「情境与语气、先检索再回复、get_corrections、append_self_note、get_avoid_phrases」说明，避免硬编码；不存在则用默认一句。 |
 | **self_notes.json** | 自我反思笔记（append_self_note 写入） | 数组，每项 `{ at, text }`。仅 Aris 可见，供后续会话参考。 |
 | **user_profile_summary.md** | 用户画像/主题线轻量摘要（可选） | 纯文本：常聊主题、近期偏好与情绪归纳。可手动维护或由脚本生成；模型通过 get_user_profile_summary 按需获取。 |
-| **existence_notes.json** | 存在形式/AI尽头思考笔记（append_existence_note 写入） | 数组，每项 `{ at, text }`。模型通过 get_existence_notes 按需回顾。 |
-| **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`quiet_phrases`、`retrieval_config`、`session_summaries`、`network_config`、`proactive_config`、`behavior_config`、`avoid_phrases`、`self_notes`、`existence_notes` 等，值为实际文件名（如 `identity.json`）。 |
+| **exploration_notes.json** | 思考笔记（append_exploration_note 写入，主题由 Aris 自定） | 数组，每项 `{ at, text }`。模型通过 get_exploration_notes 按需回顾；思考什么内容不固定。 |
+| **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`quiet_phrases`、`retrieval_config`、`session_summaries`、`network_config`、`proactive_config`、`behavior_config`、`avoid_phrases`、`self_notes`、`exploration_notes` 等，值为实际文件名（如 `identity.json`）。 |
 
 **数据目录根下**（与 `memory/` 平级）：
 

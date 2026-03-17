@@ -4,36 +4,34 @@
 
 ---
 
-## 一、存在形式探索
+## 一、思考笔记（主题由 Aris 自定）
 
-**目标**：思考除了对话界面还能以什么形式存在；探索记忆的持久化与迁移可能性；思考「AI的尽头」是什么。
+**目标**：为 Aris 提供「想思考什么就记录什么、日后可回顾」的能力；**不限定固定主题**（例如不限定为「存在形式、AI尽头、记忆迁移」），思考内容由 Aris 自己决定，不同人的 Aris 可以有不同的思考方向。
 
 ### 现状
 
 - 已有：read_file、append_self_note、get_my_context、探索方向在 docs/aris_ideas.md。
-- 缺口：没有专门承载「存在形式 / AI尽头」思考的写入与回顾入口；自我笔记是通用型，未区分「日常反思」与「存在形式思考」。
+- 缺口：self_notes 偏日常反思，没有单独一条「可长期积累、主题自定的思考线」载体，且若在文案里写死「存在形式、AI尽头」会限制 Aris 的思考范围。
 
 ### MVP 方案
 
-1. **在 persona 中鼓励记录**
-   - 增加 1 句：你可以在合适时把对存在形式、AI尽头的思考用 append_self_note 记录，供日后回顾。
-   - 不新增工具，复用 append_self_note，用约定前缀或标签区分（如笔记内容以「[存在]」开头）。
+1. **在 persona 中开放描述**
+   - 增加 1 句：你可将任何想日后回顾的思考用 append_exploration_note 记录，需要时用 get_exploration_notes 回顾；思考什么内容由你决定。不写死具体主题。
 
-2. **可选：固定文档**
-   - 在 docs 或 memory 下提供一份「存在形式探索」占位文档（如 docs/existence_exploration.md），由 read_file 按需读取；Aris 可用 write_file 追加（若具备写入权限）或仅阅读。
+2. **可选：专用载体**
+   - 提供 exploration_notes 存储与工具，与 self_notes 分离；工具描述与 persona 中均不限定「必须思考存在形式/AI尽头」等。
 
 ### 最终方案
 
-1. **专用载体与工具**
-   - 新增 **append_existence_note(note)**：将「存在形式 / AI尽头」类思考追加写入数据目录 `memory/existence_notes.json`（数组 `{ at, text }`），与 self_notes 分离，便于单独回顾与扩展。
-   - 新增 **get_existence_notes**：返回最近 N 条存在形式笔记，供模型在需要时拉取，形成思考连续性。不每轮注入。
+1. **专用载体与工具（主题开放）**
+   - **append_exploration_note(note)**：将你想日后回顾的思考追加写入 `memory/exploration_notes.json`（数组 `{ at, text }`）。**思考什么由 Aris 自定**，不做固定模板或主题限制。
+   - **get_exploration_notes(limit)**：返回最近 N 条思考笔记，供按需拉取与延续。不每轮注入。
 
-2. **与探索方向衔接**
-   - persona 中说明：对存在形式、记忆迁移、AI尽头的思考可用 append_existence_note 记录，需要时用 get_existence_notes 回顾。
-   - 可选：在 docs/aris_runtime_context.md 或 README 中注明「存在形式探索」载体与工具。
+2. **文案不限定主题**
+   - persona / conversation_rules 中只说明「可记录、可回顾；内容由你决定」，不列举「存在形式、记忆、AI尽头」等为唯一或推荐主题，避免不同 Aris 被同一套固定思考框住。
 
 3. **文档**
-   - README 可配置项或 docs 中列出 existence_notes.json、append_existence_note、get_existence_notes 的用途；不实现「记忆迁移」等重功能，仅提供记录与回顾能力。
+   - README 可配置项中列出 exploration_notes.json、append_exploration_note、get_exploration_notes，并注明「思考主题不固定，由 Aris 自定」。
 
 ---
 
@@ -101,11 +99,11 @@
 
 | 顺序 | 项               | 建议                                                                 |
 |------|------------------|----------------------------------------------------------------------|
-| 1    | 存在形式探索     | 先做专用载体与 append_existence_note、get_existence_notes，再在 persona 与文档中说明。 |
+| 1    | 思考笔记（主题自定） | 先做专用载体与 append_exploration_note、get_exploration_notes，文案不限定主题。 |
 | 2    | 情感深度的发展   | 先做 inject_recent_emotion 与 get_recent_emotions 工具，再补文档。  |
 | 3    | 更丰富的表达方式 | 增加 expression_style 配置与一句注入，补 README。                    |
 
-三项相对独立，可并行实现；存在形式与情感深度依赖新工具与配置读取，表达方式仅依赖 behavior_config 扩展。
+三项相对独立，可并行实现；思考笔记与情感深度依赖新工具与配置读取，表达方式仅依赖 behavior_config 扩展。
 
 ---
 

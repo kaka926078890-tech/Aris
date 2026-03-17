@@ -3,7 +3,7 @@
  */
 const fs = require('fs');
 const store = require('../../../store');
-const { getSelfNotesPath, getExistenceNotesPath, getMemoryDir } = require('../../../config/paths.js');
+const { getSelfNotesPath, getExplorationNotesPath, getMemoryDir } = require('../../../config/paths.js');
 
 const RECORD_TOOLS = [
   {
@@ -201,8 +201,8 @@ const RECORD_TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'append_existence_note',
-      description: '追加一条关于存在形式、AI尽头、记忆迁移等思考的笔记。供日后 get_existence_notes 回顾，形成思考连续性。',
+      name: 'append_exploration_note',
+      description: '追加一条你想日后回顾的思考笔记。思考什么内容由你决定（不限定主题），供 get_exploration_notes 回顾，形成思考连续性。',
       parameters: {
         type: 'object',
         properties: {
@@ -215,8 +215,8 @@ const RECORD_TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'get_existence_notes',
-      description: '获取最近的存在形式/AI尽头类思考笔记，供回顾与延续思考。',
+      name: 'get_exploration_notes',
+      description: '获取你曾记录的思考笔记（最近 N 条）。内容与主题由你决定，供回顾与延续思考。',
       parameters: {
         type: 'object',
         properties: {
@@ -367,10 +367,10 @@ async function runRecordTool(name, args, context) {
       fs.writeFileSync(p, JSON.stringify(list, null, 2), 'utf8');
       return { ok: true, message: '已记录' };
     }
-    if (name === 'append_existence_note') {
+    if (name === 'append_exploration_note') {
       const note = (a.note && String(a.note).trim()) || '';
       if (!note) return { ok: false, error: '笔记内容为空' };
-      const p = getExistenceNotesPath();
+      const p = getExplorationNotesPath();
       const dir = getMemoryDir();
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       let list = [];
@@ -385,9 +385,9 @@ async function runRecordTool(name, args, context) {
       fs.writeFileSync(p, JSON.stringify(list, null, 2), 'utf8');
       return { ok: true, message: '已记录' };
     }
-    if (name === 'get_existence_notes') {
+    if (name === 'get_exploration_notes') {
       const limit = Math.min(Math.max(Number(a.limit) || 5, 1), 20);
-      const p = getExistenceNotesPath();
+      const p = getExplorationNotesPath();
       let list = [];
       if (fs.existsSync(p)) {
         try {
@@ -397,7 +397,7 @@ async function runRecordTool(name, args, context) {
         if (!Array.isArray(list)) list = [];
       }
       const slice = list.slice(-limit).reverse();
-      const text = slice.length ? slice.map((e) => `[${e.at}] ${(e.text || '').slice(0, 200)}`).join('\n') : '（暂无存在形式相关笔记）';
+      const text = slice.length ? slice.map((e) => `[${e.at}] ${(e.text || '').slice(0, 200)}`).join('\n') : '（暂无思考笔记）';
       return { ok: true, notes: slice, text };
     }
     if (name === 'get_recent_emotions') {
