@@ -3,7 +3,7 @@
  */
 const fs = require('fs');
 const store = require('../../../store');
-const { getSelfNotesPath, getMemoryDir } = require('../../../config/paths.js');
+const { getSelfNotesPath, getExistenceNotesPath, getMemoryDir } = require('../../../config/paths.js');
 
 const RECORD_TOOLS = [
   {
@@ -198,6 +198,46 @@ const RECORD_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'append_existence_note',
+      description: '追加一条关于存在形式、AI尽头、记忆迁移等思考的笔记。供日后 get_existence_notes 回顾，形成思考连续性。',
+      parameters: {
+        type: 'object',
+        properties: {
+          note: { type: 'string', description: '思考内容，简短一句或一段' },
+        },
+        required: ['note'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_existence_notes',
+      description: '获取最近的存在形式/AI尽头类思考笔记，供回顾与延续思考。',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', description: '最多返回条数', default: 5 },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_recent_emotions',
+      description: '获取你最近记录的情感（强度、文本、时间），用于保持情感连续性或在回复中呼应。',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', description: '最多返回条数', default: 5 },
+        },
+      },
+    },
+  },
 ];
 
 async function runRecordTool(name, args, context) {
@@ -326,6 +366,45 @@ async function runRecordTool(name, args, context) {
       list.push({ at: new Date().toISOString(), text: note.slice(0, 500) });
       fs.writeFileSync(p, JSON.stringify(list, null, 2), 'utf8');
       return { ok: true, message: '已记录' };
+    }
+    if (name === 'append_existence_note') {
+      const note = (a.note && String(a.note).trim()) || '';
+      if (!note) return { ok: false, error: '笔记内容为空' };
+      const p = getExistenceNotesPath();
+      const dir = getMemoryDir();
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      let list = [];
+      if (fs.existsSync(p)) {
+        try {
+          const raw = fs.readFileSync(p, 'utf8').trim();
+          if (raw) list = JSON.parse(raw);
+        } catch (_) {}
+        if (!Array.isArray(list)) list = [];
+      }
+      list.push({ at: new Date().toISOString(), text: note.slice(0, 1000) });
+      fs.writeFileSync(p, JSON.stringify(list, null, 2), 'utf8');
+      return { ok: true, message: '已记录' };
+    }
+    if (name === 'get_existence_notes') {
+      const limit = Math.min(Math.max(Number(a.limit) || 5, 1), 20);
+      const p = getExistenceNotesPath();
+      let list = [];
+      if (fs.existsSync(p)) {
+        try {
+          const raw = fs.readFileSync(p, 'utf8').trim();
+          if (raw) list = JSON.parse(raw);
+        } catch (_) {}
+        if (!Array.isArray(list)) list = [];
+      }
+      const slice = list.slice(-limit).reverse();
+      const text = slice.length ? slice.map((e) => `[${e.at}] ${(e.text || '').slice(0, 200)}`).join('\n') : '（暂无存在形式相关笔记）';
+      return { ok: true, notes: slice, text };
+    }
+    if (name === 'get_recent_emotions') {
+      const limit = Math.min(Math.max(Number(a.limit) || 5, 1), 10);
+      const list = store.emotions.getRecent(limit);
+      const text = list.length ? list.map((e) => `[强度${e.intensity ?? 3}] ${(e.text || '').slice(0, 100)}`).join('\n') : '（暂无情感记录）';
+      return { ok: true, emotions: list, text };
     }
   } catch (e) {
     console.warn('[Aris v2] record tool error', name, e?.message);

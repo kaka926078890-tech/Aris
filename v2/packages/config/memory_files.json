@@ -13,5 +13,6 @@
   "proactive_config": "proactive_config.json",
   "behavior_config": "behavior_config.json",
   "avoid_phrases": "avoid_phrases.json",
-  "self_notes": "self_notes.json"
+  "self_notes": "self_notes.json",
+  "existence_notes": "existence_notes.json"
 }

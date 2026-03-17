@@ -150,6 +150,11 @@ function getUserProfileSummaryPath() {
   return path.join(getMemoryDir(), 'user_profile_summary.md');
 }
 
+function getExistenceNotesPath() {
+  const name = getMemoryFiles().existence_notes || 'existence_notes.json';
+  return path.join(getMemoryDir(), name);
+}
+
 module.exports = {
   getV2Root,
   getDataDir,
@@ -177,4 +182,5 @@ module.exports = {
   getAvoidPhrasesPath,
   getSelfNotesPath,
   getUserProfileSummaryPath,
+  getExistenceNotesPath,
 };

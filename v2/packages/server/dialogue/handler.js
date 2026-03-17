@@ -48,6 +48,16 @@ function getContextTagLine(recent, proactiveState) {
   return '';
 }
 
+/** 最近一条情感记录，一句内（约 40 字） */
+function getRecentEmotionLine() {
+  const list = store.emotions.getRecent(1);
+  if (!list.length) return '';
+  const e = list[0];
+  const text = (e.text || '').trim().slice(0, 25);
+  const intensity = e.intensity != null ? e.intensity : 3;
+  return text ? `你最近记录的情感（强度${intensity}）：${text}。` : '';
+}
+
 /** 最近用户纠错摘要，一句内（约 50 字） */
 function getCorrectionsSummaryLine() {
   const list = store.corrections.getRecent(3);
@@ -99,6 +109,15 @@ async function buildPromptContext(sessionId, recent) {
   if (behavior.inject_corrections_summary) {
     const correctionsLine = getCorrectionsSummaryLine();
     if (correctionsLine) systemPrompt = systemPrompt + '\n' + correctionsLine;
+  }
+  if (behavior.inject_recent_emotion) {
+    const emotionLine = getRecentEmotionLine();
+    if (emotionLine) systemPrompt = systemPrompt + '\n' + emotionLine;
+  }
+  if (behavior.expression_style) {
+    const styleMap = { warm: '温暖', casual: '随意自然', concise: '简洁' };
+    const label = styleMap[behavior.expression_style] || behavior.expression_style;
+    systemPrompt = systemPrompt + '\n当前表达风格倾向：' + label + '。';
   }
   const recentMessages = recent.slice(-(RECENT_ROUNDS * 2));
   return {
