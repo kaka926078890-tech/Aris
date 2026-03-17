@@ -10,7 +10,7 @@
 
 ### 现状
 
-- 已有：read_file、append_self_note、get_my_context、探索方向在 docs/aris_ideas.md。
+- 已有：read_file、append_self_note、get_my_context、探索方向在 memory/aris_ideas.md（各实例 data/memory/，不随代码提交）。
 - 缺口：self_notes 偏日常反思，没有单独一条「可长期积累、主题自定的思考线」载体，且若在文案里写死「存在形式、AI尽头」会限制 Aris 的思考范围。
 
 ### MVP 方案

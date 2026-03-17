@@ -31,13 +31,14 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 | **self_notes.json** | 自我反思笔记（append_self_note 写入） | 数组，每项 `{ at, text }`。仅 Aris 可见，供后续会话参考。 |
 | **user_profile_summary.md** | 用户画像/主题线轻量摘要（可选） | 纯文本：常聊主题、近期偏好与情绪归纳。可手动维护或由脚本生成；模型通过 get_user_profile_summary 按需获取。 |
 | **exploration_notes.json** | 思考笔记（append_exploration_note 写入，主题由 Aris 自定） | 数组，每项 `{ at, text }`。模型通过 get_exploration_notes 按需回顾；思考什么内容不固定。 |
-| **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`quiet_phrases`、`retrieval_config`、`session_summaries`、`network_config`、`proactive_config`、`behavior_config`、`avoid_phrases`、`self_notes`、`exploration_notes` 等，值为实际文件名（如 `identity.json`）。 |
+| **aris_ideas.md** | 愿望/探索文档（各实例独立，不随代码提交） | 纯文本 Markdown。存于 data/memory/，read_file / write_file 使用相对路径 `memory/aris_ideas.md` 读写；与代码库隔离，避免提交影响所有实例。 |
+| **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`quiet_phrases`、`retrieval_config`、`session_summaries`、`network_config`、`proactive_config`、`behavior_config`、`avoid_phrases`、`self_notes`、`exploration_notes`、`aris_ideas` 等，值为实际文件名（如 `identity.json`、`aris_ideas.md`）。 |
 
 **数据目录根下**（与 `memory/` 平级）：
 
 | 文件 / 配置 | 说明 | 主要字段 / 格式 |
 |-------------|------|------------------|
-| **important_documents.json** | 重要文档提醒：仅对用户确需「定期查看」的文档配置；本 session 首条用户消息时若某文档超过间隔未查看则注入至多 1 句提醒。模型通过 read_file 读取到配置中的文档时会更新「最后查看时间」。若某文档为用户「按需查看、平时不用看」则不要加入或设 `check_interval_hours: 0`。 | `important_documents`: 数组，每项 `path`（相对路径，如 `docs/aris_ideas.md`）、`name`、`check_interval_hours`（0=不提醒）、`reminder_text`。缺省由代码首次使用时写入。 |
+| **important_documents.json** | 重要文档提醒：仅对用户确需「定期查看」的文档配置；本 session 首条用户消息时若某文档超过间隔未查看则注入至多 1 句提醒。模型通过 read_file 读取到配置中的文档时会更新「最后查看时间」。若某文档为用户「按需查看、平时不用看」则不要加入或设 `check_interval_hours: 0`。 | `important_documents`: 数组，每项 `path`（相对路径，如 `memory/aris_ideas.md` 表示各实例愿望/探索文档，存于 data/memory/）、`name`、`check_interval_hours`（0=不提醒）、`reminder_text`。缺省由代码首次使用时写入。 |
 
 **时间线**：所有记忆/状态类写入会同时追加到 `data/timeline.json`，用于按时刻回溯或审计；详见 [记忆连贯性](docs/memory_coherence.md)。当前产品内暂无时间线展示页，数据可供排查或后续「修改历史」等能力使用。
 

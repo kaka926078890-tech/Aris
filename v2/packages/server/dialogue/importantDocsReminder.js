@@ -10,7 +10,7 @@ const store = require('../../store');
 const DEFAULT_CONFIG = {
   important_documents: [
     {
-      path: 'docs/aris_ideas.md',
+      path: 'memory/aris_ideas.md',
       name: 'Aris的愿望文档',
       check_interval_hours: 24,
       reminder_text: '记得查看你的愿望文档，保持自我认知。',
@@ -30,7 +30,20 @@ function readImportantDocumentsConfig() {
     const raw = fs.readFileSync(p, 'utf8').trim();
     if (!raw) return DEFAULT_CONFIG;
     const data = JSON.parse(raw);
-    const list = Array.isArray(data.important_documents) ? data.important_documents : DEFAULT_CONFIG.important_documents;
+    let list = Array.isArray(data.important_documents) ? data.important_documents : DEFAULT_CONFIG.important_documents;
+    // 一次性迁移：旧路径 docs/aris_ideas.md → memory/aris_ideas.md（愿望文档现存于各实例 memory）
+    const migrated = list.map((d) => {
+      if ((d.path || '').trim() === 'docs/aris_ideas.md') {
+        return { ...d, path: 'memory/aris_ideas.md' };
+      }
+      return d;
+    });
+    if (migrated.some((d, i) => d.path !== list[i].path)) {
+      list = migrated;
+      try {
+        fs.writeFileSync(p, JSON.stringify({ important_documents: list }, null, 2), 'utf8');
+      } catch (_) {}
+    }
     return { important_documents: list };
   } catch (_) {
     return DEFAULT_CONFIG;
@@ -90,7 +103,7 @@ function getImportantDocumentPaths() {
 
 /**
  * 将某文档标记为「已查看」，更新 doc_last_viewed。在 read_file 成功读取到配置中的文档时调用。
- * @param {string} relativePath - 相对路径（如 docs/aris_ideas.md 或 v2/docs/aris_ideas.md），会与配置中的 path 匹配
+ * @param {string} relativePath - 相对路径（如 memory/aris_ideas.md 或 docs/xxx.md），会与配置中的 path 匹配
  */
 function markDocumentViewed(relativePath) {
   const normalized = (relativePath || '').trim().replace(/\\/g, '/');

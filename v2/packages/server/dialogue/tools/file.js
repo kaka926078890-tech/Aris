@@ -3,13 +3,37 @@
  */
 const path = require('path');
 const fs = require('fs');
-const { getV2Root, getDataDir, getMemoryFiles } = require('../../../config/paths.js');
+const { getV2Root, getDataDir, getMemoryFiles, getArisIdeasPath } = require('../../../config/paths.js');
 const { markDocumentViewed } = require('../importantDocsReminder.js');
 
+const MEMORY_ARIS_IDEAS_KEY = 'memory/aris_ideas.md';
+
 function resolvePath(relativePath) {
+  const normalized = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, '').replace(/\\/g, '/');
+  if (normalized === MEMORY_ARIS_IDEAS_KEY || normalized === 'aris_ideas.md') {
+    return getArisIdeasPath();
+  }
   const root = getV2Root();
-  const normalized = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, '');
   return path.join(root, normalized);
+}
+
+/** 若 memory 下 aris_ideas.md 不存在，尝试从 repo 内旧位置复制一份（一次性迁移） */
+function ensureArisIdeasInMemory() {
+  const memPath = getArisIdeasPath();
+  if (fs.existsSync(memPath) && fs.statSync(memPath).isFile()) return;
+  const root = getV2Root();
+  const candidates = [
+    path.join(root, 'aris_ideas.md'),
+    path.join(root, 'docs', 'aris_ideas.md'),
+  ];
+  for (const src of candidates) {
+    if (fs.existsSync(src) && fs.statSync(src).isFile()) {
+      const dir = path.dirname(memPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.copyFileSync(src, memPath);
+      return;
+    }
+  }
 }
 
 const FILE_TOOLS = [
@@ -30,11 +54,11 @@ const FILE_TOOLS = [
     type: 'function',
     function: {
       name: 'read_file',
-      description: '读取 v2 项目下某个文件的文本内容（UTF-8）。',
+      description: '读取 v2 项目下某个文件的文本内容（UTF-8）。相对路径 memory/aris_ideas.md 表示当前实例的愿望/探索文档（存于 data/memory/），与代码库隔离。',
       parameters: {
         type: 'object',
         properties: {
-          relative_path: { type: 'string', description: '相对路径' },
+          relative_path: { type: 'string', description: '相对路径（如 docs/xxx.md 或 memory/aris_ideas.md）' },
         },
         required: ['relative_path'],
       },
@@ -44,7 +68,7 @@ const FILE_TOOLS = [
     type: 'function',
     function: {
       name: 'write_file',
-      description: '在 v2 项目下写入或覆盖文件。可设 append: true 追加。',
+      description: '在 v2 项目下写入或覆盖文件。可设 append: true 追加。相对路径 memory/aris_ideas.md 表示写入当前实例的愿望/探索文档（存于 data/memory/）。',
       parameters: {
         type: 'object',
         properties: {
@@ -92,10 +116,13 @@ async function runFileTool(name, args) {
     }
     if (name === 'read_file') {
       const rel = (a.relative_path || '').trim();
+      const normalizedRel = path.normalize(rel).replace(/\\/g, '/');
+      if (normalizedRel === MEMORY_ARIS_IDEAS_KEY || normalizedRel === 'aris_ideas.md') {
+        ensureArisIdeasInMemory();
+      }
       const p = resolvePath(rel);
       if (!fs.existsSync(p) || !fs.statSync(p).isFile()) return { ok: false, error: '文件不存在' };
       const content = fs.readFileSync(p, 'utf8');
-      const normalizedRel = path.normalize(rel).replace(/\\/g, '/');
       markDocumentViewed(normalizedRel);
       return { ok: true, content };
     }

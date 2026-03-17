@@ -155,6 +155,11 @@ function getExplorationNotesPath() {
   return path.join(getMemoryDir(), name);
 }
 
+function getArisIdeasPath() {
+  const name = getMemoryFiles().aris_ideas || 'aris_ideas.md';
+  return path.join(getMemoryDir(), name);
+}
+
 module.exports = {
   getV2Root,
   getDataDir,
@@ -183,4 +188,5 @@ module.exports = {
   getSelfNotesPath,
   getUserProfileSummaryPath,
   getExplorationNotesPath,
+  getArisIdeasPath,
 };
