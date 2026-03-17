@@ -11,5 +11,7 @@
   "preferences": "preferences.json",
   "network_config": "network_config.json",
   "proactive_config": "proactive_config.json",
-  "behavior_config": "behavior_config.json"
+  "behavior_config": "behavior_config.json",
+  "avoid_phrases": "avoid_phrases.json",
+  "self_notes": "self_notes.json"
 }

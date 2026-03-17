@@ -3,7 +3,7 @@
  */
 const store = require('../../store');
 const config = require('../../config');
-const { buildSystemPrompt } = require('./prompt.js');
+const { buildSystemPrompt, readBehaviorConfig } = require('./prompt.js');
 const { getRelatedAssociationsLines, getCurrentRelatedEntityIds } = require('./associationContext.js');
 const { maybeGenerateSummary } = require('./summaryGeneration.js');
 const { getTools, runTool } = require('./tools/index.js');
@@ -37,6 +37,30 @@ function getSubjectiveTimeDescription(lastActiveTimeIso) {
   return `现在是 ${nowStr}。距离上次活跃已过去 ${deltaMin} 分钟。`;
 }
 
+/** 轻量情境标签：根据最近用户消息与 recent_mood_or_scene 生成一句 10 字内提示，供 context_aware_tone 注入 */
+function getContextTagLine(recent, proactiveState) {
+  const lastUser = recent.filter((r) => r.role === 'user').pop();
+  const text = ((lastUser && lastUser.content) || '').trim() + ' ' + ((proactiveState && proactiveState.recent_mood_or_scene) || '');
+  const lower = text.toLowerCase();
+  if (/累|困|想静静|安静|别打扰|休息|歇会/.test(lower)) return '当前情境：用户可能想休息或安静。';
+  if (/游戏|炉石|lol|杀戮尖塔|打一把|开黑/.test(lower)) return '当前话题偏游戏，可更轻松。';
+  if (/谢谢|感谢|开心|不错/.test(lower)) return '当前情境：日常/轻松。';
+  return '';
+}
+
+/** 最近用户纠错摘要，一句内（约 50 字） */
+function getCorrectionsSummaryLine() {
+  const list = store.corrections.getRecent(3);
+  if (!list.length) return '';
+  const parts = list.slice(-2).map((t) => {
+    const m = (t || '').match(/用户纠正[：:]\s*([^\n]+)/);
+    return m ? m[1].trim().slice(0, 18) : '';
+  });
+  const raw = parts.filter(Boolean).join('、');
+  const line = raw.slice(0, 50);
+  return line ? `用户曾纠正：${line}。` : '';
+}
+
 async function buildPromptContext(sessionId, recent) {
   const id = store.identity.readIdentity();
   const userIdentity = id.name ? `用户名字：${id.name}` + (id.notes ? '\n' + id.notes : '') : '（无）';
@@ -66,6 +90,16 @@ async function buildPromptContext(sessionId, recent) {
   const isSessionFirstMessage = recent.length === 1 && recent[0].role === 'user';
   const reminderLine = getImportantDocReminder(isSessionFirstMessage);
   if (reminderLine) systemPrompt = systemPrompt + '\n\n' + reminderLine;
+  const behavior = readBehaviorConfig();
+  if (behavior.context_aware_tone) {
+    const proactiveState = store.state.readProactiveState();
+    const contextLine = getContextTagLine(recent, proactiveState);
+    if (contextLine) systemPrompt = systemPrompt + '\n' + contextLine;
+  }
+  if (behavior.inject_corrections_summary) {
+    const correctionsLine = getCorrectionsSummaryLine();
+    if (correctionsLine) systemPrompt = systemPrompt + '\n' + correctionsLine;
+  }
   const recentMessages = recent.slice(-(RECENT_ROUNDS * 2));
   return {
     systemPrompt,

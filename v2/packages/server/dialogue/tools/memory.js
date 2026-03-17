@@ -1,7 +1,9 @@
 /**
  * 记忆检索：search_memories、get_corrections。支持按关联实体过滤（分层记忆）。
  */
+const fs = require('fs');
 const store = require('../../../store');
+const { getUserProfileSummaryPath, getAvoidPhrasesPath } = require('../../../config/paths.js');
 const { readRetrievalConfig, getCurrentRelatedEntityIds } = require('../associationContext.js');
 
 const MEMORY_TOOLS = [
@@ -51,6 +53,22 @@ const MEMORY_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'get_avoid_phrases',
+      description: '获取禁止用语列表（避免文绉绉、机械套路等）。数据来自数据目录 memory/avoid_phrases.json。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_user_profile_summary',
+      description: '获取用户画像/主题线轻量摘要（常聊主题、近期偏好与情绪归纳）。数据来自 memory/user_profile_summary.md，可手动维护或由脚本生成。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'search_memories_with_time',
       description: '按语义检索记忆，并只保留在指定时间窗口内的结果（created_at 在该区间内）。用于需要「某段时间内的记忆」时。',
       parameters: {
@@ -83,8 +101,16 @@ async function runMemoryTool(name, args) {
       const searchOptions = filterByEntities && filterByEntities.length > 0 ? { filterByEntities } : undefined;
       const rows = await store.vector.search(a.query || '', useLimit, searchOptions);
       const texts = rows.map((r) => r.text).filter(Boolean);
+      const summaryLine = texts.length
+        ? '根据检索，与当前话题相关的有：' + texts.slice(0, 2).map((t) => (t || '').trim().slice(0, 40)).filter(Boolean).join('；') + (texts.length > 2 ? '…' : '')
+        : '';
       console.info('[Aris v2] 召回:', texts.length, '条, query=', (a.query || '').slice(0, 40), filterByEntities ? ', filterByEntity' : '');
-      return { ok: true, memories: texts, text: texts.length ? texts.join('\n---\n') : '（无相关记忆）' };
+      return {
+        ok: true,
+        memories: texts,
+        text: texts.length ? texts.join('\n---\n') : '（无相关记忆）',
+        summary_line: summaryLine,
+      };
     }
     if (name === 'get_corrections') {
       const limit = Math.min(Math.max(Number(a.limit) || 5, 1), 10);
@@ -117,6 +143,34 @@ async function runMemoryTool(name, args) {
       const texts = result.map((r) => r.text).filter(Boolean);
       console.info('[Aris v2] 召回(带时间):', texts.length, '条, query=', (a.query || '').slice(0, 40));
       return { ok: true, memories: texts, text: texts.length ? texts.join('\n---\n') : '（无该时间范围内的相关记忆）' };
+    }
+    if (name === 'get_avoid_phrases') {
+      const p = getAvoidPhrasesPath();
+      if (fs.existsSync(p)) {
+        try {
+          const raw = fs.readFileSync(p, 'utf8').trim();
+          const data = raw ? JSON.parse(raw) : {};
+          const list = Array.isArray(data.avoid_phrases) ? data.avoid_phrases : (Array.isArray(data) ? data : []);
+          const phrases = list.map((x) => (typeof x === 'string' ? x : '')).filter(Boolean);
+          const text = phrases.length ? phrases.join('、') : '（未配置禁止用语列表）';
+          return { ok: true, phrases, text };
+        } catch (e) {
+          return { ok: false, error: e?.message };
+        }
+      }
+      return { ok: true, phrases: [], text: '（未配置禁止用语列表，可在数据目录 memory/ 下创建 avoid_phrases.json，格式：{ "avoid_phrases": ["示例1", "示例2"] }）' };
+    }
+    if (name === 'get_user_profile_summary') {
+      const p = getUserProfileSummaryPath();
+      if (fs.existsSync(p)) {
+        try {
+          const content = fs.readFileSync(p, 'utf8').trim();
+          return { ok: true, content, text: content };
+        } catch (e) {
+          return { ok: false, error: e?.message };
+        }
+      }
+      return { ok: true, content: '（暂无用户画像摘要，可手动在数据目录 memory/ 下创建 user_profile_summary.md）', text: '（暂无）' };
     }
     if (name === 'get_conversation_near_time') {
       const timeStr = (a.time_str || '').trim();

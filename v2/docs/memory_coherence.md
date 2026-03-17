@@ -36,6 +36,11 @@
 
 **时间戳均为 UTC**：timeline 的 `timestamp` 与各 store 的 `created_at` 均使用 `toISOString()`（如 `2026-03-16T08:27:10.926Z`）。08:27 UTC = 北京 16:27，展示时请用 `timeline.formatTimestampForDisplay(iso)` 标明「(UTC)」或转为本地时间，避免误读为「早上 8:27」。
 
+## 用户画像摘要与检索叙述（第二优先级最终方案）
+
+- **user_profile_summary.md**：位于数据目录 `memory/user_profile_summary.md`，用于轻量「主题线/用户画像」摘要（常聊主题、近期偏好与情绪归纳）。可手动维护或由脚本从 preferences + 小结拼接生成。模型通过工具 **get_user_profile_summary** 按需获取，不每轮注入。
+- **search_memories 连贯叙述**：`search_memories` 返回除 `memories`、`text` 外增加 **summary_line** 字段，为根据 top-k 结果拼成的一句概括（如「根据检索，与当前话题相关的有：…」），便于模型直接引用。
+
 ## 为什么「相关时间记忆记录」查不到？
 
 - **记忆检索**（search_memories）只查**向量库**。记录表达欲望时**没有**写向量，也没有存「当时在聊什么」的备份。  

@@ -1,7 +1,9 @@
 /**
  * 记录类工具：仅当 LLM 调用时写入 store，不解析用户消息。
  */
+const fs = require('fs');
 const store = require('../../../store');
+const { getSelfNotesPath, getMemoryDir } = require('../../../config/paths.js');
 
 const RECORD_TOOLS = [
   {
@@ -182,6 +184,20 @@ const RECORD_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'append_self_note',
+      description: '追加一条自我反思或笔记（仅自己可见，用于后续参考）。不写敏感信息，不替代用户配置。',
+      parameters: {
+        type: 'object',
+        properties: {
+          note: { type: 'string', description: '反思或笔记内容，简短一句' },
+        },
+        required: ['note'],
+      },
+    },
+  },
 ];
 
 async function runRecordTool(name, args, context) {
@@ -292,6 +308,24 @@ async function runRecordTool(name, args, context) {
         ? messages.map((m) => `${m.role === 'user' ? '用户' : 'Aris'}: ${(m.content || '').slice(0, 500)}`).join('\n')
         : '（该时间窗口内无对话记录）';
       return { ok: true, messages, text };
+    }
+    if (name === 'append_self_note') {
+      const note = (a.note && String(a.note).trim()) || '';
+      if (!note) return { ok: false, error: '笔记内容为空' };
+      const p = getSelfNotesPath();
+      const dir = getMemoryDir();
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      let list = [];
+      if (fs.existsSync(p)) {
+        try {
+          const raw = fs.readFileSync(p, 'utf8').trim();
+          if (raw) list = JSON.parse(raw);
+        } catch (_) {}
+        if (!Array.isArray(list)) list = [];
+      }
+      list.push({ at: new Date().toISOString(), text: note.slice(0, 500) });
+      fs.writeFileSync(p, JSON.stringify(list, null, 2), 'utf8');
+      return { ok: true, message: '已记录' };
     }
   } catch (e) {
     console.warn('[Aris v2] record tool error', name, e?.message);

@@ -25,8 +25,12 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 | **session_summaries.json** | 各会话最新小结（自动生成，一般无需手改） | 按 session 存 `content`、`updated_at`、`round_index`。 |
 | **network_config.json** | 网络访问工具（fetch_url）开关与安全策略 | `enable_web_fetch`、`allowed_hosts`、`blocked_hosts`、`timeout_ms`、`max_calls_per_minute`、`max_length`、`reject_unauthorized`（HTTPS 证书校验，false 可解决「unable to get local issuer certificate」）。详见 [网络工具配置](docs/network_tool_config.md)。 |
 | **proactive_config.json** | 主动消息克制策略 | `proactive_conservative`（true 时仅用积累的表达欲望，不调用 LLM 生成主动句）、`recent_user_message_min_length`（最近一条用户消息低于该字数且非问句时本轮回不发主动，0 表示不限制）。缺省由代码首次使用时写入。 |
-| **behavior_config.json** | 自我分析/修改边界 | `self_analysis_boundary`：`"default"`（默认）时 persona 注入「不得修改核心逻辑与安全相关配置；若用户要求改自己的代码需提醒并交由用户操作」；`"none"` 时无该限制，可自由阅读与修改项目内代码与配置。文件不存在时按 default 处理。 |
-| **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`quiet_phrases`、`retrieval_config`、`session_summaries`、`network_config`、`proactive_config`、`behavior_config` 等，值为实际文件名（如 `identity.json`）。 |
+| **behavior_config.json** | 自我分析/修改边界、情境与纠错 | `self_analysis_boundary`：同上。`context_aware_tone`（boolean，默认 true）：为 true 时根据最近用户消息与情绪注入一句「当前情境」提示（如想休息/偏游戏/日常）。`inject_corrections_summary`（boolean，默认 true）：为 true 时注入最近用户纠错摘要一句，便于模型避免重复问题。 |
+| **avoid_phrases.json** | 禁止用语列表（人工维护） | 格式 `{ "avoid_phrases": ["为您服务","有什么可以帮您"] }` 或直接数组。模型通过 **get_avoid_phrases** 按需获取，不每轮灌入。 |
+| **conversation_rules.md** | 情境/检索/纠错等规则（可选） | 纯文本。若存在则替换代码中的默认「情境与语气、先检索再回复、get_corrections、append_self_note、get_avoid_phrases」说明，避免硬编码；不存在则用默认一句。 |
+| **self_notes.json** | 自我反思笔记（append_self_note 写入） | 数组，每项 `{ at, text }`。仅 Aris 可见，供后续会话参考。 |
+| **user_profile_summary.md** | 用户画像/主题线轻量摘要（可选） | 纯文本：常聊主题、近期偏好与情绪归纳。可手动维护或由脚本生成；模型通过 get_user_profile_summary 按需获取。 |
+| **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`quiet_phrases`、`retrieval_config`、`session_summaries`、`network_config`、`proactive_config`、`behavior_config`、`avoid_phrases`、`self_notes` 等，值为实际文件名（如 `identity.json`）。 |
 
 **数据目录根下**（与 `memory/` 平级）：
 

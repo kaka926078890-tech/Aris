@@ -136,6 +136,20 @@ function getBehaviorConfigPath() {
   return path.join(getMemoryDir(), name);
 }
 
+function getAvoidPhrasesPath() {
+  const name = getMemoryFiles().avoid_phrases || 'avoid_phrases.json';
+  return path.join(getMemoryDir(), name);
+}
+
+function getSelfNotesPath() {
+  const name = getMemoryFiles().self_notes || 'self_notes.json';
+  return path.join(getMemoryDir(), name);
+}
+
+function getUserProfileSummaryPath() {
+  return path.join(getMemoryDir(), 'user_profile_summary.md');
+}
+
 module.exports = {
   getV2Root,
   getDataDir,
@@ -160,4 +174,7 @@ module.exports = {
   getImportantDocumentsPath,
   getProactiveConfigPath,
   getBehaviorConfigPath,
+  getAvoidPhrasesPath,
+  getSelfNotesPath,
+  getUserProfileSummaryPath,
 };
