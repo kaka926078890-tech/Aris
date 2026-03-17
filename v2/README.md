@@ -107,4 +107,6 @@ npm run build:linux # 产出 AppImage（Linux）
 - [记忆连贯性（关联/小结/分层/时间线）](docs/memory_coherence.md)
 - [工具](docs/tools.md)
 - [网络访问工具配置（fetch_url）](docs/network_tool_config.md)
+- [第一优先级解决方案（ARIS_IDEAS）](docs/first_priority_solutions.md)
+- [第二优先级解决方案（ARIS_IDEAS）](docs/second_priority_solutions.md)
 - [分阶段执行清单](docs/todo.md)
