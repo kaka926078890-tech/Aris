@@ -56,6 +56,8 @@ function readProactiveState() {
     last_tired_or_quiet_at: null,
     recent_mood_or_scene: '',
     last_sent_expression_desires: [],
+    /** 用户最近一次参与对话的时间（ISO），用于主动消息克制 */
+    last_user_engaged_at: null,
   };
   try {
     const p = getProactiveStatePath();
@@ -73,6 +75,7 @@ function readProactiveState() {
       last_tired_or_quiet_at: data.last_tired_or_quiet_at || null,
       recent_mood_or_scene: typeof data.recent_mood_or_scene === 'string' ? data.recent_mood_or_scene : '',
       last_sent_expression_desires: Array.isArray(data.last_sent_expression_desires) ? data.last_sent_expression_desires : [],
+      last_user_engaged_at: data.last_user_engaged_at || null,
     };
     if (state.state_date !== today) {
       state.state_date = today;

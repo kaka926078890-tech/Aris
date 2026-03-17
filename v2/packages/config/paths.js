@@ -126,6 +126,16 @@ function getImportantDocumentsPath() {
   return path.join(getDataDir(), 'important_documents.json');
 }
 
+function getProactiveConfigPath() {
+  const name = getMemoryFiles().proactive_config || 'proactive_config.json';
+  return path.join(getMemoryDir(), name);
+}
+
+function getBehaviorConfigPath() {
+  const name = getMemoryFiles().behavior_config || 'behavior_config.json';
+  return path.join(getMemoryDir(), name);
+}
+
 module.exports = {
   getV2Root,
   getDataDir,
@@ -148,4 +158,6 @@ module.exports = {
   getProactiveStatePath,
   getTimelinePath,
   getImportantDocumentsPath,
+  getProactiveConfigPath,
+  getBehaviorConfigPath,
 };

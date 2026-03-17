@@ -124,6 +124,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   }
 
   await store.conversations.append(sessionId, 'user', userContent);
+  store.state.writeProactiveState({ last_user_engaged_at: new Date().toISOString() });
   const userPreview = (typeof userContent === 'string' && userContent.length > 0)
     ? (userContent.length <= 120 ? userContent.trim() : userContent.trim().slice(0, 120) + '…')
     : '(空)';

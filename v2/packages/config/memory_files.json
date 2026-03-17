@@ -9,5 +9,7 @@
   "retrieval_config": "retrieval_config.json",
   "session_summaries": "session_summaries.json",
   "preferences": "preferences.json",
-  "network_config": "network_config.json"
+  "network_config": "network_config.json",
+  "proactive_config": "proactive_config.json",
+  "behavior_config": "behavior_config.json"
 }

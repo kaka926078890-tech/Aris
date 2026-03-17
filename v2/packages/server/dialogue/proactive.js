@@ -1,10 +1,42 @@
 /**
  * v2 主动发话：从 store 读情感/表达欲望与状态，低功耗/未回应计数，可选 LLM 生成或使用积累的表达欲望。
  */
+const fs = require('fs');
 const store = require('../../store');
+const { getProactiveConfigPath, getMemoryDir } = require('../../config/paths.js');
 const { buildStatePrompt } = require('./prompt.js');
-const { chat } = require('../llm/client.js');
+const { chat, chatWithTools } = require('../llm/client.js');
+const { getTools, runTool } = require('./tools/index.js');
 const { shouldBeQuiet, isResumingDialogue } = require('./quietResume.js');
+
+const DEFAULT_PROACTIVE_CONFIG = {
+  proactive_conservative: false,
+  recent_user_message_min_length: 5,
+};
+
+function readProactiveConfig() {
+  try {
+    const p = getProactiveConfigPath();
+    if (!fs.existsSync(p)) {
+      const dir = getMemoryDir();
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(p, JSON.stringify(DEFAULT_PROACTIVE_CONFIG, null, 2), 'utf8');
+      return DEFAULT_PROACTIVE_CONFIG;
+    }
+    const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+    return {
+      proactive_conservative: Boolean(data.proactive_conservative),
+      recent_user_message_min_length: Math.min(100, Math.max(0, Number(data.recent_user_message_min_length) ?? 5)),
+    };
+  } catch (_) {
+    return DEFAULT_PROACTIVE_CONFIG;
+  }
+}
+
+function isQuestion(text) {
+  const s = (text || '').trim();
+  return s.endsWith('?') || s.endsWith('？');
+}
 
 const EXPRESSION_THRESHOLD = 0.5;
 /** 表达欲望超过此小时数不再采用，避免旧话题尾巴发到新对话 */
@@ -135,8 +167,17 @@ async function maybeProactiveMessage() {
       } catch (_) {}
     }
 
+    const proactiveConfig = readProactiveConfig();
     const sessionId = await store.conversations.getCurrentSessionId();
     const recent = await store.conversations.getRecent(sessionId, 10);
+    const recentUserMessages = recent.filter((r) => r.role === 'user');
+    const minLen = proactiveConfig.recent_user_message_min_length;
+    if (recentUserMessages.length > 0 && minLen > 0) {
+      const lastUserContent = (recentUserMessages[recentUserMessages.length - 1].content || '').trim();
+      if (lastUserContent.length < minLen && !isQuestion(lastUserContent)) {
+        return null;
+      }
+    }
     if (recent.length > 0 && recent[recent.length - 1].role === 'assistant') {
       const lastMsg = recent[recent.length - 1];
       const lastTime = (lastMsg.created_at != null ? Number(lastMsg.created_at) * 1000 : 0) || 0;
@@ -146,7 +187,6 @@ async function maybeProactiveMessage() {
     }
 
     // 检查最近用户消息是否要求安静
-    const recentUserMessages = recent.filter(r => r.role === 'user');
     if (recentUserMessages.length > 0) {
       const latestUserMessage = recentUserMessages[recentUserMessages.length - 1].content;
       if (shouldBeQuiet(latestUserMessage)) {
@@ -208,6 +248,10 @@ async function maybeProactiveMessage() {
       return null;
     }
 
+    if (proactiveConfig.proactive_conservative) {
+      return null;
+    }
+
     const emotions = store.emotions.getRecent(10);
     const emotionContext = emotions.length
       ? emotions.slice(-3).map((e) => `（强度${e.intensity}）${e.text}`).join(' | ')
@@ -228,41 +272,82 @@ async function maybeProactiveMessage() {
       emotionContext,
       '',
       '（需要用户喜好如游戏、休息偏好时可调用 get_preferences。）',
+      '',
+      '若你想做某事（如查新闻、读文档），可直接在本轮调用相应工具；得到结果后用一句话对用户说出你的发现或感想。',
     ].filter(Boolean).join('\n');
 
     const messages = [
       { role: 'system', content: buildStatePrompt(fullContext) },
-      { role: 'user', content: '请根据上述上下文，输出你的当前情绪/想法，以及是否想主动说一句话及内容。' },
+      { role: 'user', content: '请根据上述上下文，输出你的当前情绪/想法，以及是否想主动说一句话及内容。若想做某事（如查新闻、读文件），也可直接调用工具。' },
     ];
 
-    const { content } = await chat(messages);
-    if (!content || content.includes('是否想说话：否')) return null;
+    const res = await chatWithTools(messages, getTools(), null);
+    const content = res.content || '';
+    if (res.error || res.aborted) return null;
+    if (!content && (!res.tool_calls || res.tool_calls.length === 0)) return null;
+    if (!content && res.tool_calls && res.tool_calls.length > 0) return null;
+    if (content.includes('是否想说话：否') && (!res.tool_calls || res.tool_calls.length === 0)) return null;
 
+    let line = '';
     const match = content.match(/若想说话，内容[：:]\s*([^\n]+)/) || content.match(/内容[：:]\s*([^\n]+)/);
-    const line = (match ? match[1].trim() : content.split('\n').pop().trim()).slice(0, 200);
-    if (line.length <= 5 || line.length >= 200) return null;
+    line = (match ? match[1].trim() : content.split('\n').pop().trim()).slice(0, 200);
+    const hasToolCalls = res.tool_calls && res.tool_calls.length > 0;
+
+    let finalReply = '';
+    if (hasToolCalls) {
+      const assistantMsg = {
+        role: 'assistant',
+        content: (content || '').trim() || null,
+        tool_calls: res.tool_calls,
+      };
+      const toolContext = { sessionId, recent };
+      const toolResults = await Promise.all(
+        res.tool_calls.map(async (tc) => {
+          let result;
+          try {
+            result = await runTool(tc.function?.name, tc.function?.arguments, toolContext);
+          } catch (e) {
+            result = { ok: false, error: String(e?.message || '执行异常') };
+          }
+          return { role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) };
+        })
+      );
+      console.info('[Aris v2][proactive] 调用工具:', res.tool_calls.map((tc) => tc.function?.name).join(', '));
+      const nextMessages = [...messages, assistantMsg, ...toolResults];
+      const res2 = await chatWithTools(nextMessages, getTools(), null);
+      finalReply = (res2.content || '').trim().slice(0, 300);
+    }
 
     const recentAssistant = recent.filter((r) => r.role === 'assistant').slice(-5);
     const lineNorm = normalize(line);
-    for (const msg of recentAssistant) {
+    const isDup = line.length >= 5 && recentAssistant.some((msg) => {
       const prev = normalize((msg.content || '').trim());
-      if (prev.length < 10) continue;
-      if (lineNorm === prev || lineNorm.includes(prev) || prev.includes(lineNorm)) {
-        return null;
-      }
-    }
-
-    await store.conversations.append(sessionId, 'assistant', line);
-    if (store.vector) {
-      const vec = await store.vector.embed(`Aris 主动: ${line}`, { prefix: 'document' });
-      if (vec) await store.vector.add({ text: `Aris 主动: ${line}`, vector: vec, type: 'aris_behavior' });
-    }
-    store.state.writeState({
-      last_active_time: new Date().toISOString(),
-      last_mental_state: line.slice(0, 300),
+      return prev.length >= 10 && (lineNorm === prev || lineNorm.includes(prev) || prev.includes(lineNorm));
     });
-    console.info('[Aris v2][proactive] 已发送:', line.slice(0, 80) + (line.length > 80 ? '...' : ''));
-    return line;
+    if (line.length >= 5 && line.length <= 200 && !isDup) {
+      await store.conversations.append(sessionId, 'assistant', line);
+      if (store.vector) {
+        const vec = await store.vector.embed(`Aris 主动: ${line}`, { prefix: 'document' });
+        if (vec) await store.vector.add({ text: `Aris 主动: ${line}`, vector: vec, type: 'aris_behavior' });
+      }
+      console.info('[Aris v2][proactive] 已发送:', line.slice(0, 80) + (line.length > 80 ? '...' : ''));
+    }
+    if (finalReply && finalReply !== '无') {
+      await store.conversations.append(sessionId, 'assistant', finalReply);
+      if (store.vector) {
+        const vec = await store.vector.embed(`Aris 主动（结果）: ${finalReply}`, { prefix: 'document' });
+        if (vec) await store.vector.add({ text: `Aris 主动（结果）: ${finalReply}`, vector: vec, type: 'aris_behavior' });
+      }
+      console.info('[Aris v2][proactive] 结果:', finalReply.slice(0, 80) + (finalReply.length > 80 ? '...' : ''));
+    }
+    const lastContent = finalReply || line;
+    if (lastContent) {
+      store.state.writeState({
+        last_active_time: new Date().toISOString(),
+        last_mental_state: lastContent.slice(0, 300),
+      });
+    }
+    return finalReply || line || null;
   } catch (e) {
     console.warn('[Aris v2][proactive] 检查失败', e?.message);
     return null;

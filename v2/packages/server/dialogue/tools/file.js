@@ -3,7 +3,7 @@
  */
 const path = require('path');
 const fs = require('fs');
-const { getV2Root } = require('../../../config/paths.js');
+const { getV2Root, getDataDir, getMemoryFiles } = require('../../../config/paths.js');
 const { markDocumentViewed } = require('../importantDocsReminder.js');
 
 function resolvePath(relativePath) {
@@ -70,6 +70,14 @@ const FILE_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'get_my_context',
+      description: '获取当前运行环境与自身能力的简短摘要（版本、数据目录、可用工具列表、主要 memory 文件），用于反思能力边界时按需调用。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
 ];
 
 async function runFileTool(name, args) {
@@ -103,6 +111,24 @@ async function runFileTool(name, args) {
       const p = resolvePath(a.relative_path || '');
       if (fs.existsSync(p) && fs.statSync(p).isFile()) fs.unlinkSync(p);
       return { ok: true };
+    }
+    if (name === 'get_my_context') {
+      const { getTools } = require('./index.js');
+      const tools = getTools();
+      const toolNames = tools.map((t) => t.function.name).join(', ');
+      const memoryFiles = getMemoryFiles();
+      const memoryList = Object.keys(memoryFiles).join(', ');
+      let version = '0.0.0';
+      try {
+        const pkgPath = path.join(getV2Root(), 'package.json');
+        if (fs.existsSync(pkgPath)) {
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+          version = pkg.version || version;
+        }
+      } catch (_) {}
+      const dataDir = getDataDir();
+      const text = `Aris v2 版本 ${version}。数据目录：${dataDir}。可用工具：${toolNames}。主要 memory 文件（位于 memory/）：${memoryList}。配置与行为细节可通过 read_file 查看 packages/server、packages/store 及 docs/aris_runtime_context.md。`;
+      return { ok: true, summary: text };
     }
   } catch (e) {
     return { ok: false, error: e?.message };

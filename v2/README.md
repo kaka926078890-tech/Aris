@@ -24,7 +24,9 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 | **retrieval_config.json** | 记忆检索与小结行为 | `enable_association_inject`、`max_association_lines`、`source_types`、`requirement_id_max`；`enable_summary`、`summary_rounds_interval`（2～50）；**分层记忆**：`filter_experience_by_association`（boolean）：search_memories 是否只返回与当前身份/要求相关经历；`max_experience_results`（number）：该模式下最多返回条数（1～20）。缺省由代码默认或首次写入。 |
 | **session_summaries.json** | 各会话最新小结（自动生成，一般无需手改） | 按 session 存 `content`、`updated_at`、`round_index`。 |
 | **network_config.json** | 网络访问工具（fetch_url）开关与安全策略 | `enable_web_fetch`、`allowed_hosts`、`blocked_hosts`、`timeout_ms`、`max_calls_per_minute`、`max_length`、`reject_unauthorized`（HTTPS 证书校验，false 可解决「unable to get local issuer certificate」）。详见 [网络工具配置](docs/network_tool_config.md)。 |
-| **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`quiet_phrases`、`retrieval_config`、`session_summaries`、`network_config` 等，值为实际文件名（如 `identity.json`）。 |
+| **proactive_config.json** | 主动消息克制策略 | `proactive_conservative`（true 时仅用积累的表达欲望，不调用 LLM 生成主动句）、`recent_user_message_min_length`（最近一条用户消息低于该字数且非问句时本轮回不发主动，0 表示不限制）。缺省由代码首次使用时写入。 |
+| **behavior_config.json** | 自我分析/修改边界 | `self_analysis_boundary`：`"default"`（默认）时 persona 注入「不得修改核心逻辑与安全相关配置；若用户要求改自己的代码需提醒并交由用户操作」；`"none"` 时无该限制，可自由阅读与修改项目内代码与配置。文件不存在时按 default 处理。 |
+| **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`quiet_phrases`、`retrieval_config`、`session_summaries`、`network_config`、`proactive_config`、`behavior_config` 等，值为实际文件名（如 `identity.json`）。 |
 
 **数据目录根下**（与 `memory/` 平级）：
 
@@ -98,6 +100,10 @@ npm run build:linux # 产出 AppImage（Linux）
       npm start
       ```
 
+### Aris 如何了解自己
+
+Aris 可通过 **get_my_context** 工具获取当前运行环境与能力边界的简短摘要（版本、数据目录、可用工具列表、主要 memory 文件）；通过 **read_file** 阅读项目内代码与配置以理解行为与局限（不得修改核心逻辑与安全相关配置）。详见 [运行环境与自我认知](docs/aris_runtime_context.md)。
+
 ## 文档
 
 - [架构](docs/architecture.md)
@@ -107,6 +113,7 @@ npm run build:linux # 产出 AppImage（Linux）
 - [记忆连贯性（关联/小结/分层/时间线）](docs/memory_coherence.md)
 - [工具](docs/tools.md)
 - [网络访问工具配置（fetch_url）](docs/network_tool_config.md)
+- [运行环境与自我认知（get_my_context）](docs/aris_runtime_context.md)
 - [第一优先级解决方案（ARIS_IDEAS）](docs/first_priority_solutions.md)
 - [第二优先级解决方案（ARIS_IDEAS）](docs/second_priority_solutions.md)
 - [分阶段执行清单](docs/todo.md)
