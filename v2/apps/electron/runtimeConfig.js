@@ -15,6 +15,7 @@ const CONFIG_KEYS = [
   'WEB_FETCH_ALLOWED_HOSTS',
   'WEB_FETCH_BLOCKED_HOSTS',
   'REJECT_UNAUTHORIZED',
+  'SHOW_THINKING',
 ];
 
 const DEFAULTS = {
@@ -27,6 +28,7 @@ const DEFAULTS = {
   WEB_FETCH_ALLOWED_HOSTS: '',
   WEB_FETCH_BLOCKED_HOSTS: 'localhost,127.0.0.1',
   REJECT_UNAUTHORIZED: 'true',
+  SHOW_THINKING: 'false',
 };
 
 function getConfigPath() {

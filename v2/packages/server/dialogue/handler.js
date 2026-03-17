@@ -195,7 +195,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let hasOfficialUsage = false;
-  const MAX_TOOL_ROUNDS = 20;
+  const MAX_TOOL_ROUNDS = 100;
   const allAgentActions = [];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {

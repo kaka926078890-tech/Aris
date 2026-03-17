@@ -7,12 +7,16 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const http = require('http');
+const zlib = require('zlib');
 const { getNetworkConfigPath } = require('../../../config/paths.js');
 
 const DEFAULT_MAX_LENGTH = 8000;
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_MAX_CALLS_PER_MINUTE = 10;
 const RATE_WINDOW_MS = 60 * 1000;
+
+// 现代浏览器 User-Agent
+const BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
 let cachedConfig = null;
 
@@ -55,6 +59,7 @@ function readNetworkConfig() {
             max_calls_per_minute: merged.max_calls_per_minute,
             max_length: merged.max_length,
             reject_unauthorized: merged.reject_unauthorized,
+            enable_web_fetch_js: merged.enable_web_fetch_js,
           },
           null,
           2
@@ -101,8 +106,10 @@ function buildConfigFromEnv(data) {
   const rejectUnauthorized = env.NODE_TLS_REJECT_UNAUTHORIZED === '0'
     ? false
     : (app.REJECT_UNAUTHORIZED === 'false' || app.reject_unauthorized === false || app.reject_unauthorized === 'false' ? false : (data.reject_unauthorized === false ? false : true));
+  const enableWebFetchJs = data.enable_web_fetch_js !== false;
   return {
     enable_web_fetch: enable,
+    enable_web_fetch_js: enableWebFetchJs,
     allowed_hosts: allowed,
     blocked_hosts: blocked,
     timeout_ms: Math.max(5000, Math.min(60000, timeout)),
@@ -176,6 +183,42 @@ function stripHtmlToText(html, selector) {
   return text;
 }
 
+function decompressBody(buffer, encoding) {
+  if (!encoding) return Promise.resolve(buffer);
+  
+  encoding = encoding.toLowerCase();
+  if (encoding === 'gzip') {
+    return new Promise((resolve, reject) => {
+      zlib.gunzip(buffer, (err, result) => {
+        if (err) reject(err);
+        else resolve(result);
+      });
+    });
+  } else if (encoding === 'deflate') {
+    return new Promise((resolve, reject) => {
+      zlib.inflate(buffer, (err, result) => {
+        if (err) {
+          // 尝试 raw deflate
+          zlib.inflateRaw(buffer, (err2, result2) => {
+            if (err2) reject(err2);
+            else resolve(result2);
+          });
+        } else {
+          resolve(result);
+        }
+      });
+    });
+  } else if (encoding === 'br') {
+    return new Promise((resolve, reject) => {
+      zlib.brotliDecompress(buffer, (err, result) => {
+        if (err) reject(err);
+        else resolve(result);
+      });
+    });
+  }
+  return Promise.resolve(buffer);
+}
+
 function requestWithNode(urlObj, timeoutMs) {
   const config = readNetworkConfig();
   const url = urlObj.url;
@@ -186,7 +229,19 @@ function requestWithNode(urlObj, timeoutMs) {
     port: url.port || (isHttps ? 443 : 80),
     path: url.pathname + url.search,
     method: 'GET',
-    headers: { 'User-Agent': 'Aris-v2/1.0 (read-only)' },
+    headers: {
+      'User-Agent': BROWSER_USER_AGENT,
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1',
+      'Cache-Control': 'max-age=0'
+    },
     timeout: timeoutMs,
   };
   if (isHttps && config.reject_unauthorized === false) {
@@ -208,14 +263,22 @@ function requestWithNode(urlObj, timeoutMs) {
       }
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
-      res.on('end', () => {
-        const body = Buffer.concat(chunks).toString('utf8');
-        const contentType = (res.headers['content-type'] || '').toLowerCase();
-        if (!contentType.includes('text/html')) {
-          const text = body.slice(0, 12000).replace(/\s+/g, ' ');
-          resolve({ ok: true, text, statusCode: res.statusCode, truncated: body.length >= 12000 });
-        } else {
-          resolve({ ok: true, html: body, statusCode: res.statusCode });
+      res.on('end', async () => {
+        try {
+          const buffer = Buffer.concat(chunks);
+          const encoding = res.headers['content-encoding'];
+          const decompressed = await decompressBody(buffer, encoding);
+          const body = decompressed.toString('utf8');
+          
+          const contentType = (res.headers['content-type'] || '').toLowerCase();
+          if (!contentType.includes('text/html')) {
+            const text = body.slice(0, 12000).replace(/\s+/g, ' ');
+            resolve({ ok: true, text, statusCode: res.statusCode, truncated: body.length >= 12000 });
+          } else {
+            resolve({ ok: true, html: body, statusCode: res.statusCode });
+          }
+        } catch (error) {
+          reject(error);
         }
       });
     });
@@ -238,6 +301,31 @@ async function fetchUrlContent(urlObj, timeoutMs) {
   }
 }
 
+/** 使用 Puppeteer 打开页面并取渲染后的 HTML，适用于依赖 JavaScript 的站点（如 B 站） */
+async function fetchWithPuppeteer(urlObj, timeoutMs) {
+  let browser;
+  try {
+    const puppeteer = require('puppeteer');
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    });
+    const page = await browser.newPage();
+    await page.setDefaultNavigationTimeout(Math.min(timeoutMs, 45000));
+    await page.setUserAgent(BROWSER_USER_AGENT);
+    const res = await page.goto(urlObj.url.href, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    const statusCode = res && res.status ? res.status() : 0;
+    const html = await page.content();
+    await browser.close();
+    browser = null;
+    return { ok: true, html, statusCode };
+  } catch (e) {
+    if (browser) try { await browser.close(); } catch (_) {}
+    const msg = e?.message || (e?.cause && e.cause.message) || 'Puppeteer 请求失败';
+    return { ok: false, error: msg };
+  }
+}
+
 async function summarizeWithLlm(text, maxChars) {
   try {
     const { chat } = require('../../llm/client.js');
@@ -256,11 +344,12 @@ const NETWORK_TOOLS = [
     type: 'function',
     function: {
       name: 'fetch_url',
-      description: '根据 URL 获取网页正文内容（仅 GET，不执行脚本）。用于了解新闻、文档、百科等外界信息。需要了解外界信息时可调用。',
+      description: '根据 URL 获取网页正文内容。默认仅 GET 不执行脚本；对 B 站等依赖 JavaScript 渲染的页面可传 use_js: true 用无头浏览器获取。用于了解新闻、文档、百科等外界信息时可调用。',
       parameters: {
         type: 'object',
         properties: {
           url: { type: 'string', description: '要请求的完整 URL（必须 http 或 https）' },
+          use_js: { type: 'boolean', description: '可选。为 true 时用无头浏览器渲染后再取正文，适用于 B 站等纯 JS 渲染的页面；默认 false' },
           max_length: { type: 'number', description: '返回文本最大字符数，默认 8000' },
           selector: { type: 'string', description: '可选。CSS 选择器抽取主体，如 main、article、.content，减少噪音' },
           summarize: { type: 'boolean', description: '可选。为 true 时对正文做简短摘要再返回，节省 token' },
@@ -290,10 +379,17 @@ async function runNetworkTool(name, args, context) {
 
   const maxLength = Math.min(config.max_length, Number(a.max_length) || config.max_length);
   const timeoutMs = config.timeout_ms;
+  const useJs = a.use_js === true && config.enable_web_fetch_js !== false;
 
-  const fetchResult = await fetchUrlContent(parsed, timeoutMs);
+  let fetchResult;
+  if (useJs) {
+    fetchResult = await fetchWithPuppeteer(parsed, timeoutMs);
+  } else {
+    fetchResult = await fetchUrlContent(parsed, timeoutMs);
+  }
+
   if (!fetchResult.ok) {
-    console.warn('[Aris v2][fetch_url] url=', parsed.url.href, 'error=', fetchResult.error);
+    console.warn('[Aris v2][fetch_url] url=', parsed.url.href, 'use_js=', useJs, 'error=', fetchResult.error);
     return { ok: false, error: fetchResult.error };
   }
 
@@ -314,6 +410,7 @@ async function runNetworkTool(name, args, context) {
 
   console.info(
     '[Aris v2][fetch_url] url=', parsed.url.href,
+    'use_js=', useJs,
     'status=', fetchResult.statusCode,
     'truncated=', truncated,
     'length=', text.length

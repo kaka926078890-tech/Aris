@@ -16,18 +16,69 @@
     .bubble-wrap.user { justify-content: flex-end; }
     .bubble-wrap.assistant { justify-content: flex-start; }
     .bubble-wrap .bubble-inner { max-width: 85%; display: inline-block; min-width: 0; overflow-wrap: break-word; word-break: break-word; overflow-x: hidden; -webkit-user-select: text; user-select: text; }
-    #messages { overflow-x: hidden; overflow-y: auto; -webkit-user-select: text; user-select: text; }
+    #messages { overflow-x: hidden; overflow-y: auto; -webkit-user-select: text; user-select: text; max-width: 48rem; margin-left: auto; margin-right: auto; width: 100%; }
     #input { -webkit-user-select: text; user-select: text; }
+    .input-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 56px;
+      padding: 10px 14px;
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+      background: #fff;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .input-bar:focus-within { border-color: #0ea5e9; box-shadow: 0 0 0 1px #0ea5e9; }
+    .input-bar .input-textarea {
+      flex: 1;
+      min-height: 36px;
+      max-height: 120px;
+      padding: 8px 12px;
+      margin: 0;
+      border: none;
+      outline: none;
+      box-shadow: none;
+      background: transparent;
+      font-size: 0.875rem;
+      line-height: 1.5;
+      color: #1e293b;
+      resize: none;
+      overflow-y: auto;
+      vertical-align: middle;
+    }
+    .input-bar .input-textarea::placeholder { color: #94a3b8; }
+    .input-bar .btn-send-wrap {
+      flex-shrink: 0;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .input-bar .btn-send-wrap button {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .title-bar-drag { -webkit-app-region: drag; app-region: drag; }
+    .title-bar-no-drag { -webkit-app-region: no-drag; app-region: no-drag; }
     .sidebar-btn { width: 100%; text-align: center; border-left: 3px solid transparent; border-radius: 0; display: flex; align-items: center; justify-content: center; padding: 0.75rem; }
     .sidebar-btn.active { border-left-color: #0ea5e9; background: #f0f9ff; color: #0284c7; }
     .icon-btn { display: inline-flex; align-items: center; justify-content: center; }
     .btn-stop-hidden { display: none !important; }
     .btn-send-hidden { display: none !important; }
-    .bubble-loading-dots { display: inline-flex; gap: 4px; align-items: center; }
-    .bubble-loading-dots span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.6; animation: bubble-dot 0.6s ease-in-out infinite both; }
+    .bubble-loading-dots { display: inline-flex; gap: 5px; align-items: center; }
+    .bubble-loading-dots span { width: 6px; height: 6px; border-radius: 50%; background: #0ea5e9; animation: bubble-dot 0.5s ease-in-out infinite both; }
+    .bubble-loading-dots span:nth-child(1) { animation-delay: 0s; }
     .bubble-loading-dots span:nth-child(2) { animation-delay: 0.1s; }
     .bubble-loading-dots span:nth-child(3) { animation-delay: 0.2s; }
-    @keyframes bubble-dot { 0%, 100% { transform: scale(0.85); opacity: 0.6; } 50% { transform: scale(1.2); opacity: 1; } }
+    @keyframes bubble-dot { 0%, 100% { transform: translateY(0) scale(1); opacity: 0.5; } 50% { transform: translateY(-4px) scale(1.1); opacity: 1; } }
+    .bubble-wrap.loading-enter { animation: loading-fade-in 0.2s ease-out; }
+    @keyframes loading-fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
     .thinking-wrap { max-width: 85%; }
     .thinking-header { cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .thinking-header .chevron { transition: transform 0.2s ease; flex-shrink: 0; }
@@ -51,9 +102,9 @@
   </style>
 </head>
 <body class="flex flex-col bg-slate-50 h-screen overflow-hidden">
-  <header class="bg-white border-b border-slate-200 pl-14 pr-2 py-1.5 flex items-center justify-between flex-shrink-0">
+  <header class="title-bar-drag bg-white border-b border-slate-200 pl-14 pr-2 py-1.5 flex items-center justify-between flex-shrink-0">
     <h1 class="text-base font-medium text-slate-800 truncate">Aris v2</h1>
-    <button id="btn-minimize" class="icon-btn p-2 rounded hover:bg-slate-100 text-slate-600" title="最小化" aria-label="最小化"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg></button>
+    <button id="btn-minimize" class="title-bar-no-drag icon-btn p-2 rounded hover:bg-slate-100 text-slate-600" title="最小化" aria-label="最小化"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg></button>
   </header>
 
   <div class="flex flex-1 min-h-0 overflow-hidden">
@@ -70,12 +121,16 @@
     </aside>
     <div class="flex-1 flex flex-col min-h-0 overflow-hidden overflow-x-hidden bg-slate-50">
   <div id="panel-dialogue" class="panel flex-1 flex flex-col min-h-0 overflow-hidden overflow-x-hidden">
-    <main class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 space-y-3" id="messages"></main>
-    <footer class="border-t border-slate-200 bg-white p-3 flex-shrink-0">
-      <div class="flex gap-2 items-end">
-        <textarea id="input" rows="1" placeholder="输入消息，Shift+Enter 换行…" class="flex-1 min-h-[40px] max-h-[120px] resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500 overflow-y-auto"></textarea>
-        <button id="btn-send" class="icon-btn rounded-lg bg-sky-600 text-white p-2.5 hover:bg-sky-700 flex-shrink-0" title="发送" aria-label="发送"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9 2zm0 0v-8"/></svg></button>
-        <button id="btn-stop" class="icon-btn rounded-lg bg-red-500 text-white p-2.5 hover:bg-red-600 flex-shrink-0 btn-stop-hidden" title="停止生成" aria-label="停止生成"><svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg></button>
+    <main class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-5 space-y-4" id="messages"></main>
+    <footer class="border-t border-slate-200 bg-white flex-shrink-0">
+      <div class="max-w-3xl mx-auto px-4 py-3">
+        <div class="input-bar">
+          <textarea id="input" rows="1" placeholder="输入消息，Shift+Enter 换行…" class="input-textarea"></textarea>
+          <div class="btn-send-wrap">
+            <button id="btn-send" class="icon-btn bg-sky-600 text-white hover:bg-sky-700 transition-colors" title="发送" aria-label="发送"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9 2zm0 0v-8"/></svg></button>
+            <button id="btn-stop" class="icon-btn bg-slate-500 text-white hover:bg-slate-600 btn-stop-hidden transition-colors" title="停止生成" aria-label="停止生成"><svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg></button>
+          </div>
+        </div>
       </div>
     </footer>
   </div>
@@ -246,6 +301,14 @@
         </div>
       </section>
       <section class="rounded-lg border border-slate-200 bg-white p-4">
+        <h2 class="text-sm font-medium text-slate-700 mb-2">界面</h2>
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" id="settings-show-thinking" class="rounded border-slate-300" />
+          <span class="text-slate-700 text-sm">显示思考过程</span>
+        </label>
+        <p class="text-xs text-slate-500 mt-1">开启后对话中会展示「已思考」折叠块，默认关闭。</p>
+      </section>
+      <section class="rounded-lg border border-slate-200 bg-white p-4">
         <div class="flex items-center gap-2 flex-wrap">
           <button type="button" id="settings-save" class="rounded bg-sky-600 text-white px-4 py-2 text-sm hover:bg-sky-700">保存全部配置</button>
           <p id="settings-save-msg" class="text-xs text-slate-500 hidden"></p>
@@ -385,8 +448,10 @@
       }
     }
 
+    let showThinking = false;
     function addAgentActionsToDialogue(actions) {
       if (!actions || !actions.length) return;
+      if (!showThinking) return;
       const streaming = messagesEl.querySelector('.streaming');
       const insertBefore = streaming ? streaming.closest('.bubble-wrap') || streaming : null;
 
@@ -431,7 +496,7 @@
 
     function addLoadingBubble() {
       const row = document.createElement('div');
-      row.className = 'bubble-wrap assistant';
+      row.className = 'bubble-wrap assistant loading-enter';
       const wrap = document.createElement('div');
       wrap.className = 'bubble-inner rounded-lg px-3 py-2 bubble-assistant streaming';
       const dots = document.createElement('span');
@@ -491,6 +556,10 @@
     async function send() {
       const text = (inputEl.value || '').trim();
       if (!text || !window.aris) return;
+      try {
+        const c = await window.aris.getRuntimeConfig();
+        showThinking = (c && (c.SHOW_THINKING === 'true' || c.SHOW_THINKING === true)) ? true : false;
+      } catch (_) { showThinking = false; }
       inputEl.value = '';
       hadStreamingChunks = false;
       currentThinkingRow = null;
@@ -902,6 +971,7 @@
         if (id('settings-web-allowed')) id('settings-web-allowed').value = (c && c.WEB_FETCH_ALLOWED_HOSTS) ? c.WEB_FETCH_ALLOWED_HOSTS : '';
         if (id('settings-web-blocked')) id('settings-web-blocked').value = (c && c.WEB_FETCH_BLOCKED_HOSTS) ? c.WEB_FETCH_BLOCKED_HOSTS : 'localhost,127.0.0.1';
         if (id('settings-reject-unauthorized')) id('settings-reject-unauthorized').checked = (c && (c.REJECT_UNAUTHORIZED === 'false' || c.REJECT_UNAUTHORIZED === false));
+        if (id('settings-show-thinking')) id('settings-show-thinking').checked = (c && c.SHOW_THINKING !== undefined && c.SHOW_THINKING !== null) ? (c.SHOW_THINKING === 'true' || c.SHOW_THINKING === true) : false;
         const msgEl = id('settings-save-msg');
         if (msgEl) { msgEl.classList.add('hidden'); msgEl.textContent = ''; }
         await refreshOllamaStatus();
@@ -932,6 +1002,7 @@
       const allowed = (id('settings-web-allowed') && id('settings-web-allowed').value) ? id('settings-web-allowed').value.trim() : '';
       const blocked = (id('settings-web-blocked') && id('settings-web-blocked').value) ? id('settings-web-blocked').value.trim() : 'localhost,127.0.0.1';
       const rejectUnauthorized = id('settings-reject-unauthorized') ? !id('settings-reject-unauthorized').checked : true;
+      const showThinking = id('settings-show-thinking') ? id('settings-show-thinking').checked : false;
       const msgEl = id('settings-save-msg');
       try {
         await window.aris.setRuntimeConfig({
@@ -944,6 +1015,7 @@
           WEB_FETCH_ALLOWED_HOSTS: allowed,
           WEB_FETCH_BLOCKED_HOSTS: blocked,
           REJECT_UNAUTHORIZED: rejectUnauthorized ? 'true' : 'false',
+          SHOW_THINKING: showThinking ? 'true' : 'false',
         });
         if (msgEl) { msgEl.classList.remove('hidden'); msgEl.textContent = '已保存，下次对话将使用新配置。'; msgEl.className = 'text-xs text-green-600'; }
       } catch (e) {
