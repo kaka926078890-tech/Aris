@@ -23,8 +23,13 @@ app.whenReady().then(() => {
   const PROACTIVE_IDLE_MS = 2 * 60 * 1000;
   let dialogueBusy = false;
   let dialogueAbortController = null;
+  /** 当前轮结束时 resolve，供「新消息在忙时到达」等待后再起新轮 */
+  let resolveCurrentDialogue = null;
   let lastDialogueAt = 0;
   let proactiveTimer = null;
+  /** proactive 正在执行时的 Promise，供 dialogue:send 等待，避免对话与主动发话并发导致工具/会话被打断 */
+  let proactivePromise = null;
+  let resolveProactive = null;
 
   function createWindow() {
     const isMac = process.platform === 'darwin';
@@ -135,7 +140,13 @@ app.whenReady().then(() => {
 
   function registerIpcHandlers() {
     ipcMain.handle('dialogue:send', async (event, userContent) => {
-      if (dialogueBusy) return { error: '请等待当前回复完成后再发送' };
+      if (dialogueBusy) {
+        if (dialogueAbortController) dialogueAbortController.abort();
+        await new Promise((resolve) => { resolveCurrentDialogue = resolve; });
+      }
+      if (proactivePromise) {
+        await proactivePromise;
+      }
       dialogueBusy = true;
       dialogueAbortController = new AbortController();
       const sendChunk = (chunk) => {
@@ -154,6 +165,10 @@ app.whenReady().then(() => {
       } finally {
         dialogueAbortController = null;
         dialogueBusy = false;
+        if (resolveCurrentDialogue) {
+          resolveCurrentDialogue();
+          resolveCurrentDialogue = null;
+        }
       }
     });
 
@@ -239,13 +254,22 @@ app.whenReady().then(() => {
   function runProactiveCheck() {
     if (dialogueBusy || !mainWindow || mainWindow.isDestroyed()) return;
     if (Date.now() - lastDialogueAt < PROACTIVE_IDLE_MS) return;
+    if (proactivePromise) return;
+    proactivePromise = new Promise((resolve) => { resolveProactive = resolve; });
     maybeProactiveMessage()
       .then((msg) => {
         if (msg && mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('aris:proactive', msg);
         }
       })
-      .catch((e) => console.warn('[Aris v2][electron] proactive check failed', e?.message));
+      .catch((e) => console.warn('[Aris v2][electron] proactive check failed', e?.message))
+      .finally(() => {
+        if (resolveProactive) {
+          resolveProactive();
+          resolveProactive = null;
+        }
+        proactivePromise = null;
+      });
   }
 
   function startProactiveInterval() {

@@ -132,6 +132,7 @@ function selectExpressionDesire(desires, recentConversation, recentSentDesires) 
 async function maybeProactiveMessage() {
   if (proactiveInProgress) return null;
   proactiveInProgress = true;
+  let willEnterSilentAfterThisRun = false;
   try {
     const proactiveState = store.state.readProactiveState();
     
@@ -200,11 +201,8 @@ async function maybeProactiveMessage() {
     }
 
     const nextCount = (proactiveState.proactive_no_reply_count || 0) + 1;
-    if (nextCount >= PROACTIVE_SILENT_AFTER) {
-      store.state.writeProactiveState({ low_power_mode: true, proactive_no_reply_count: 0, low_power_entered_at: new Date().toISOString() });
-      console.info('[Aris v2][proactive] 未回复次数达上限，进入静默');
-      return null;
-    }
+    /** 本轮结束后进入静默（不在此处 return，让本轮完整跑完 LLM/工具/发送后再静默） */
+    willEnterSilentAfterThisRun = nextCount >= PROACTIVE_SILENT_AFTER;
     // 先落盘再跑异步逻辑，避免下次定时器触发时仍读到旧 count
     store.state.writeProactiveState({ proactive_no_reply_count: nextCount });
 
@@ -352,6 +350,12 @@ async function maybeProactiveMessage() {
     console.warn('[Aris v2][proactive] 检查失败', e?.message);
     return null;
   } finally {
+    if (willEnterSilentAfterThisRun) {
+      try {
+        store.state.writeProactiveState({ low_power_mode: true, proactive_no_reply_count: 0, low_power_entered_at: new Date().toISOString() });
+        console.info('[Aris v2][proactive] 未回复次数达上限，进入静默');
+      } catch (_) {}
+    }
     proactiveInProgress = false;
   }
 }

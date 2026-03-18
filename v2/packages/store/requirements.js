@@ -173,6 +173,16 @@ async function appendRequirement(text) {
   list.push(newItem);
   _writeList(list, newItem);
   console.info('[Aris v2][store/requirements] 追加', list.length, '项');
+  if (list.length >= 4) {
+    try {
+      const result = await triggerRefinement();
+      if (result && result.success) {
+        console.info('[Aris v2][store/requirements] 已自动提炼', result.message);
+      }
+    } catch (e) {
+      console.warn('[Aris v2][store/requirements] 自动提炼失败', e?.message);
+    }
+  }
   return { success: true, merged: false, count: list.length, message: '已记录' };
 }
 

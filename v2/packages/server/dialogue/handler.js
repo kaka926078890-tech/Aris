@@ -190,6 +190,8 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
 
   let currentMessages = messages;
   let reply = '';
+  /** 流式已发送内容累计，abort 时写入 DB 供下一轮 context（后续可迁入配置） */
+  let streamedContent = '';
   let err = false;
   let hadToolCalls = false;
   let totalInputTokens = 0;
@@ -262,8 +264,9 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   }
 
   if (signal && signal.aborted) {
-    await store.conversations.append(sessionId, 'assistant', reply || '[已停止]');
-    return { content: reply || '', error: false, sessionId, aborted: true };
+    const partial = (streamedContent || reply || '').trim() || '[已停止]';
+    await store.conversations.append(sessionId, 'assistant', partial);
+    return { content: partial, error: false, sessionId, aborted: true };
   }
 
   // 有工具调用时：若本轮已有可用正文，直接用它并流式输出；仅当无正文或为 DSML/工具标记时才再调 chatStream 要一句总结
@@ -274,8 +277,15 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
         const contentForStream = filterReplyForDisplay(reply);
         for (let i = 0; i < contentForStream.length; i += 2) {
           if (signal && signal.aborted) break;
-          sendChunk(contentForStream.slice(i, i + 2));
+          const slice = contentForStream.slice(i, i + 2);
+          streamedContent += slice;
+          sendChunk(slice);
           await new Promise((r) => setTimeout(r, 16));
+        }
+        if (signal && signal.aborted) {
+          const partial = (streamedContent || reply || '').trim() || '[已停止]';
+          await store.conversations.append(sessionId, 'assistant', partial);
+          return { content: partial, error: false, sessionId, aborted: true };
         }
       }
     } else {
@@ -297,19 +307,27 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
           hasOfficialUsage = true;
         }
         if (isDsmlOrToolMarkup(fullContent)) {
-          if (sendChunk) sendChunk('（上轮为工具调用，未生成自然语言回复，可继续发消息）');
+          const msg = '（上轮为工具调用，未生成自然语言回复，可继续发消息）';
+          if (sendChunk) { streamedContent += msg; sendChunk(msg); }
           reply = '';
         } else if (sendChunk && fullContent) {
           for (let i = 0; i < fullContent.length; i += 2) {
             if (signal && signal.aborted) break;
-            sendChunk(fullContent.slice(i, i + 2));
+            const slice = fullContent.slice(i, i + 2);
+            streamedContent += slice;
+            sendChunk(slice);
             await new Promise((r) => setTimeout(r, 16));
+          }
+          if (signal && signal.aborted) {
+            const partial = (streamedContent || reply || '').trim() || '[已停止]';
+            await store.conversations.append(sessionId, 'assistant', partial);
+            return { content: partial, error: false, sessionId, aborted: true };
           }
         }
       } catch (e) {
         console.error('[Aris v2] chatStream error', e?.message);
         const fallback = '（工具调用后的回复生成失败，请重试或换一种说法）';
-        if (sendChunk) sendChunk(fallback);
+        if (sendChunk) { streamedContent += fallback; sendChunk(fallback); }
         reply = fallback;
       }
     }
@@ -319,8 +337,15 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   if (sendChunk && contentForFrontend && !hadToolCalls) {
     for (let i = 0; i < contentForFrontend.length; i += 2) {
       if (signal && signal.aborted) break;
-      sendChunk(contentForFrontend.slice(i, i + 2));
+      const slice = contentForFrontend.slice(i, i + 2);
+      streamedContent += slice;
+      sendChunk(slice);
       await new Promise((r) => setTimeout(r, 24));
+    }
+    if (signal && signal.aborted) {
+      const partial = (streamedContent || reply || '').trim() || '[已停止]';
+      await store.conversations.append(sessionId, 'assistant', partial);
+      return { content: partial, error: false, sessionId, aborted: true };
     }
   }
 

@@ -343,9 +343,10 @@
     const btnStop = document.getElementById('btn-stop');
     const btnMinimize = document.getElementById('btn-minimize');
 
+    /** 随时可发：发送按钮始终显示，停止按钮始终隐藏（发新消息即打断） */
     function setSending(sending) {
-      if (btnSend) btnSend.classList.toggle('btn-send-hidden', sending);
-      if (btnStop) btnStop.classList.toggle('btn-stop-hidden', !sending);
+      if (btnSend) btnSend.classList.remove('btn-send-hidden');
+      if (btnStop) btnStop.classList.add('btn-stop-hidden');
     }
 
     function showPanel(name) {
@@ -356,6 +357,7 @@
       if (panel) panel.classList.remove('hidden');
       if (btn) btn.classList.add('active');
       if (name === 'dialogue') {
+        loadCurrentDialogue();
         scrollToBottom();
         setTimeout(() => scrollToBottom(), 80);
       }
@@ -511,6 +513,33 @@
 
     let streamBuffer = '';
     let hadStreamingChunks = false;
+    /** 当前生效的 chunk/actions 订阅，新 send 开始时先解除，避免双 listener 导致同一 chunk 被 append 两次（文字重复） */
+    let currentUnsubChunk = null;
+    let currentUnsubActions = null;
+
+    /** 打断时收尾当前流式与思考块，保证顺序：部分回复 → 已思考 → 用户打断 → 新回复 */
+    function finalizeCurrentStreamingAndThinking() {
+      const streaming = messagesEl.querySelector('.streaming');
+      let partialRow = null;
+      if (streaming) {
+        const row = streaming.closest('.bubble-wrap');
+        partialRow = row;
+        const text = (streaming.textContent || '').trim();
+        streaming.classList.remove('streaming');
+        if (text) {
+          streaming.classList.add('markdown-body');
+          streaming.innerHTML = renderMarkdown(text);
+        } else if (row) row.remove();
+      }
+      const thinkingRow = messagesEl.querySelector('.thinking-wrap');
+      if (thinkingRow && partialRow && partialRow.parentNode === messagesEl) {
+        messagesEl.insertBefore(thinkingRow, partialRow.nextSibling);
+      }
+      collapseThinkingBlock();
+      streamBuffer = '';
+      hadStreamingChunks = false;
+    }
+
     function appendChunk(chunk) {
       hadStreamingChunks = true;
       streamBuffer += chunk;
@@ -556,31 +585,42 @@
     async function send() {
       const text = (inputEl.value || '').trim();
       if (!text || !window.aris) return;
+      finalizeCurrentStreamingAndThinking();
       try {
         const c = await window.aris.getRuntimeConfig();
         showThinking = (c && (c.SHOW_THINKING === 'true' || c.SHOW_THINKING === true)) ? true : false;
       } catch (_) { showThinking = false; }
       inputEl.value = '';
-      hadStreamingChunks = false;
       currentThinkingRow = null;
       currentThinkingBody = null;
       addBubble('user', text);
       addLoadingBubble();
       setSending(true);
+      if (currentUnsubChunk) { currentUnsubChunk(); currentUnsubChunk = null; }
+      if (currentUnsubActions) { currentUnsubActions(); currentUnsubActions = null; }
       const unsubChunk = window.aris.onDialogueChunk(appendChunk);
+      currentUnsubChunk = unsubChunk;
       let unsubActions;
       if (window.aris.onAgentActions) {
         unsubActions = window.aris.onAgentActions((actions) => {
           if (!Array.isArray(actions) || actions.length === 0) return;
           addAgentActionsToDialogue(actions);
         });
+        currentUnsubActions = unsubActions;
       }
+      let aborted = false;
       try {
         const result = await window.aris.sendMessage(text);
+        if (result && result.aborted) {
+          aborted = true;
+          return;
+        }
         finishStream();
         collapseThinkingBlock();
         unsubChunk && unsubChunk();
         if (unsubActions) unsubActions();
+        currentUnsubChunk = null;
+        currentUnsubActions = null;
         if (result && result.error) addBubble('assistant', '[出错了]' + (result.error ? ' ' + result.error : ''));
         else if (result && result.content && !hadStreamingChunks) addBubble('assistant', result.content);
       } catch (e) {
@@ -588,9 +628,11 @@
         collapseThinkingBlock();
         unsubChunk && unsubChunk();
         if (unsubActions) unsubActions();
+        currentUnsubChunk = null;
+        currentUnsubActions = null;
         addBubble('assistant', '[发送失败]');
       } finally {
-        setSending(false);
+        if (!aborted) setSending(false);
         scrollToBottom();
       }
     }
@@ -598,7 +640,13 @@
     if (btnStop) btnStop.addEventListener('click', () => { if (window.aris && window.aris.abortDialogue) window.aris.abortDialogue(); });
 
     if (window.aris && window.aris.onProactive) {
-      window.aris.onProactive((msg) => addBubble('assistant', msg));
+      window.aris.onProactive((msg) => {
+        if (!messagesEl.querySelector('.streaming')) {
+          loadCurrentDialogue();
+        } else {
+          addBubble('assistant', msg);
+        }
+      });
     }
 
     btnMinimize.addEventListener('click', () => window.aris && window.aris.minimizeWindow());
