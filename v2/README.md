@@ -67,6 +67,18 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 
 **还原步骤**：把上述目录里的内容（整份拷贝即可，包含 `memory/`、`aris.db`、`lancedb/` 等）复制到 **`v2/data/`**，覆盖或合并进现有文件。之后用当前环境变量启动，就会用 `v2/data` 里的数据。
 
+### 导出/导入全部数据（换机或备份）
+
+菜单 **文件 → 导出全部数据** 会生成一个 `.aris` 单文件，包含当前 Aris 的全部数据，便于换机或备份。导出内容包括：
+
+- **对话**：SQLite 数据库（`aris.db`）
+- **向量记忆**：LanceDB 中的全部记忆条
+- **用户与状态**：身份、状态、主动消息状态、要求、情感、纠错、表达欲望
+- **监控**：token 使用、文件修改记录
+- **配置与 memory**：timeline、important_documents、associations、quiet_phrases、retrieval_config、session_summaries、preferences、network_config、proactive_config、behavior_config、avoid_phrases、self_notes、exploration_notes、user_profile_summary.md、aris_ideas.md
+
+**换机步骤**：在旧电脑上使用「导出全部数据」保存为 `.aris` 文件（如 U 盘或网盘），在新电脑上安装并打开 Aris v2，使用 **文件 → 导入全部数据** 选择该 `.aris` 文件即可一键恢复。新电脑上若使用 `ARIS_V2_DATA_DIR`，请先设好数据目录再导入。
+
 ## 运行
 
 ```bash

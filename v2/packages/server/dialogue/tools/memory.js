@@ -85,6 +85,150 @@ const MEMORY_TOOLS = [
   },
 ];
 
+/**
+ * 智能生成检索query：基于原始query和上下文生成更好的检索关键词
+ */
+function generateSmartQuery(originalQuery, context) {
+  if (!originalQuery || typeof originalQuery !== 'string') return originalQuery || '';
+  
+  const query = originalQuery.trim();
+  
+  // 如果是简单查询，直接返回
+  if (query.length <= 20) return query;
+  
+  // 尝试提取关键信息
+  const patterns = [
+    // 提取问题关键词
+    /(什么|怎么|如何|为什么|哪|谁|多少|多久|多大|多长|多远)([^？?。.!！]+)/,
+    // 提取主题关键词
+    /关于([^的]+)(的|问题|话题)/,
+    // 提取具体对象
+    /(游戏|记忆|系统|代码|配置|文件|工具|模型)([^？?。.!！]+)/,
+  ];
+  
+  for (const pattern of patterns) {
+    const match = query.match(pattern);
+    if (match) {
+      // 返回匹配到的关键部分
+      const keyPart = match[1] || match[2] || match[0];
+      if (keyPart && keyPart.length > 2 && keyPart.length < 50) {
+        return keyPart.trim();
+      }
+    }
+  }
+  
+  // 如果查询太长，取前50个字符
+  if (query.length > 50) {
+    return query.slice(0, 50);
+  }
+  
+  return query;
+}
+
+/**
+ * 动态计算记忆类型权重：根据对话上下文调整权重
+ */
+function calculateDynamicWeights(context, config) {
+  const baseWeights = config.memory_type_weights || {
+    dialogue_turn: 1.0,
+    user_preference: 1.2,
+    requirement: 1.5,
+    identity: 1.8
+  };
+  
+  if (!config.context_aware_weights) return baseWeights;
+  
+  const userMessage = context.userMessage || '';
+  const recentTopics = context.recentTopics || [];
+  
+  // 根据上下文调整权重
+  const adjustedWeights = { ...baseWeights };
+  
+  // 如果用户提到身份相关话题，提高身份权重
+  if (userMessage.includes('身份') || userMessage.includes('名字') || userMessage.includes('称呼')) {
+    adjustedWeights.identity = baseWeights.identity * 1.5;
+  }
+  
+  // 如果用户提到要求或偏好，提高相关权重
+  if (userMessage.includes('要求') || userMessage.includes('偏好') || userMessage.includes('喜欢')) {
+    adjustedWeights.requirement = baseWeights.requirement * 1.3;
+    adjustedWeights.user_preference = baseWeights.user_preference * 1.3;
+  }
+  
+  // 如果最近讨论过系统或代码，提高要求权重（通常是配置相关）
+  if (recentTopics.some(topic => topic.includes('系统') || topic.includes('代码') || topic.includes('配置'))) {
+    adjustedWeights.requirement = baseWeights.requirement * 1.4;
+  }
+  
+  return adjustedWeights;
+}
+
+/**
+ * 应用记忆类型权重调整得分
+ */
+function applyMemoryTypeWeights(rows, config, context) {
+  if (!rows || !rows.length) return rows;
+  
+  const weights = calculateDynamicWeights(context, config);
+  
+  return rows.map(row => {
+    const type = row.type || 'dialogue_turn';
+    const weight = weights[type] || 1.0;
+    const adjustedScore = (row._score || 0) * weight;
+    
+    // 时间衰减：越近的记忆权重越高
+    const now = Date.now();
+    const memoryTime = row.created_at ? Number(row.created_at) : now;
+    const timeDiffHours = (now - memoryTime) / (1000 * 60 * 60);
+    const timeWeight = Math.max(0.5, Math.exp(-timeDiffHours / 24)); // 24小时衰减
+    
+    return { ...row, _score: adjustedScore * timeWeight };
+  });
+}
+
+/**
+ * 判断是否需要检索记忆：基于对话上下文智能决策
+ */
+function shouldRetrieveMemory(userMessage, recentConversation, config) {
+  if (!config.dynamic_retrieval_enabled) return true;
+  
+  const message = userMessage.toLowerCase();
+  
+  // 明确需要检索的关键词
+  const retrievalKeywords = [
+    '记得', '之前', '以前', '上次', '记忆',
+    '偏好', '习惯', '喜欢', '讨厌', '要求',
+    '身份', '名字', '称呼', '系统', '代码',
+    '配置', '问题', '改进', '方案', '讨论'
+  ];
+  
+  // 明确不需要检索的关键词（简单问候等）
+  const noRetrievalKeywords = [
+    '你好', '在吗', 'hi', 'hello', '早上好', '晚上好',
+    '谢谢', '拜拜', '再见', 'ok', '好的', '嗯'
+  ];
+  
+  // 检查是否需要检索
+  const hasRetrievalKeyword = retrievalKeywords.some(keyword => message.includes(keyword));
+  const hasNoRetrievalKeyword = noRetrievalKeywords.some(keyword => message.includes(keyword));
+  
+  // 如果是复杂问题或长消息，倾向于检索
+  const isComplexMessage = message.length > 30 || message.includes('?') || message.includes('？');
+  
+  // 如果最近对话中提到过相关话题，倾向于检索
+  const recentContext = recentConversation.slice(-3).join(' ').toLowerCase();
+  const hasRecentContext = retrievalKeywords.some(keyword => recentContext.includes(keyword));
+  
+  // 决策逻辑
+  if (hasRetrievalKeyword) return true;
+  if (hasNoRetrievalKeyword) return false;
+  if (isComplexMessage) return true;
+  if (hasRecentContext) return true;
+  
+  // 默认阈值
+  return Math.random() < (config.retrieval_decision_threshold || 0.3);
+}
+
 async function runMemoryTool(name, args) {
   const a = args || {};
   try {
@@ -99,12 +243,33 @@ async function runMemoryTool(name, args) {
       const useLimit = config.filter_experience_by_association ? maxExp : limit;
       const filterByEntities = config.filter_experience_by_association ? getCurrentRelatedEntityIds() : undefined;
       const searchOptions = filterByEntities && filterByEntities.length > 0 ? { filterByEntities } : undefined;
-      const rows = await store.vector.search(a.query || '', useLimit, searchOptions);
-      const texts = rows.map((r) => r.text).filter(Boolean);
+      
+      // 智能生成检索query
+      const smartQuery = generateSmartQuery(a.query || '');
+      console.info('[Aris v2] 原始query:', (a.query || '').slice(0, 40), '智能query:', smartQuery.slice(0, 40));
+      
+      const rows = await store.vector.search(smartQuery, useLimit * 2, searchOptions); // 获取更多结果用于权重调整
+      
+      // 构建上下文用于动态权重计算
+      const context = {
+        userMessage: a.query || '',
+        recentTopics: []
+      };
+      
+      // 应用动态记忆类型权重
+      const weightedRows = applyMemoryTypeWeights(rows, config, context);
+      
+      // 重新排序
+      weightedRows.sort((a, b) => (b._score || 0) - (a._score || 0));
+      
+      // 取前limit个结果
+      const finalRows = weightedRows.slice(0, limit);
+      
+      const texts = finalRows.map((r) => r.text).filter(Boolean);
       const summaryLine = texts.length
         ? '根据检索，与当前话题相关的有：' + texts.slice(0, 2).map((t) => (t || '').trim().slice(0, 40)).filter(Boolean).join('；') + (texts.length > 2 ? '…' : '')
         : '';
-      console.info('[Aris v2] 召回:', texts.length, '条, query=', (a.query || '').slice(0, 40), filterByEntities ? ', filterByEntity' : '');
+      console.info('[Aris v2] 召回:', texts.length, '条, smart_query=', smartQuery.slice(0, 40), filterByEntities ? ', filterByEntity' : '');
       return {
         ok: true,
         memories: texts,
@@ -158,7 +323,7 @@ async function runMemoryTool(name, args) {
           return { ok: false, error: e?.message };
         }
       }
-      return { ok: true, phrases: [], text: '（未配置禁止用语列表，可在数据目录 memory/ 下创建 avoid_phrases.json，格式：{ "avoid_phrases": ["示例1", "示例2"] }）' };
+      return { ok: true, phrases: [], text: '（未配置禁止用语列表，可在数据目录 memory/ 下创建 avoid_phrases.json，格式：{ \"avoid_phrases\": [\"示例1\", \"示例2\"] }）' };
     }
     if (name === 'get_user_profile_summary') {
       const p = getUserProfileSummaryPath();
@@ -208,4 +373,4 @@ async function runMemoryTool(name, args) {
   return { ok: false, error: 'Unknown tool' };
 }
 
-module.exports = { MEMORY_TOOLS, runMemoryTool };
+module.exports = { MEMORY_TOOLS, runMemoryTool, shouldRetrieveMemory, generateSmartQuery };

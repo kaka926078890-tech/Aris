@@ -71,6 +71,46 @@ function getCorrectionsSummaryLine() {
   return line ? `用户曾纠正：${line}。` : '';
 }
 
+/** 智能记忆检索决策：根据对话上下文决定是否需要检索记忆 */
+function shouldRetrieveMemoryIntelligently(userContent, recentConversation) {
+  const message = userContent.toLowerCase();
+  
+  // 明确需要检索的关键词
+  const retrievalKeywords = [
+    '记得', '之前', '以前', '上次', '记忆',
+    '偏好', '习惯', '喜欢', '讨厌', '要求',
+    '身份', '名字', '称呼', '系统', '代码',
+    '配置', '问题', '改进', '方案', '讨论',
+    '游戏', '炉石', 'lol', '杀戮尖塔'
+  ];
+  
+  // 明确不需要检索的关键词（简单问候等）
+  const noRetrievalKeywords = [
+    '你好', '在吗', 'hi', 'hello', '早上好', '晚上好',
+    '谢谢', '拜拜', '再见', 'ok', '好的', '嗯'
+  ];
+  
+  // 检查是否需要检索
+  const hasRetrievalKeyword = retrievalKeywords.some(keyword => message.includes(keyword));
+  const hasNoRetrievalKeyword = noRetrievalKeywords.some(keyword => message.includes(keyword));
+  
+  // 如果是复杂问题或长消息，倾向于检索
+  const isComplexMessage = message.length > 30 || message.includes('?') || message.includes('？');
+  
+  // 如果最近对话中提到过相关话题，倾向于检索
+  const recentContext = recentConversation.slice(-3).map(r => r.content || '').join(' ').toLowerCase();
+  const hasRecentContext = retrievalKeywords.some(keyword => recentContext.includes(keyword));
+  
+  // 决策逻辑
+  if (hasRetrievalKeyword) return true;
+  if (hasNoRetrievalKeyword) return false;
+  if (isComplexMessage) return true;
+  if (hasRecentContext) return true;
+  
+  // 默认：对于中等长度消息，30%概率检索
+  return message.length > 10 && Math.random() < 0.3;
+}
+
 async function buildPromptContext(sessionId, recent) {
   const id = store.identity.readIdentity();
   const userIdentity = id.name ? `用户名字：${id.name}` + (id.notes ? '\n' + id.notes : '') : '（无）';
@@ -119,6 +159,13 @@ async function buildPromptContext(sessionId, recent) {
     const label = styleMap[behavior.expression_style] || behavior.expression_style;
     systemPrompt = systemPrompt + '\n当前表达风格倾向：' + label + '。';
   }
+  
+  // 智能记忆检索提示：根据上下文决定是否添加检索提示
+  const lastUserMessage = recent.filter(r => r.role === 'user').pop();
+  if (lastUserMessage && shouldRetrieveMemoryIntelligently(lastUserMessage.content, recent)) {
+    systemPrompt += '\n\n【智能记忆提示】当前对话可能需要检索相关记忆，请考虑是否需要调用 search_memories 获取背景信息。';
+  }
+  
   const recentMessages = recent.slice(-(RECENT_ROUNDS * 2));
   return {
     systemPrompt,
