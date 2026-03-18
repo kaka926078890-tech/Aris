@@ -109,7 +109,7 @@ const FILE_TOOLS = [
   },
 ];
 
-async function runFileTool(name, args) {
+async function runFileTool(name, args, context) {
   const a = args || {};
   try {
     if (name === 'list_my_files') {
@@ -156,9 +156,9 @@ async function runFileTool(name, args) {
       return { ok: true };
     }
     if (name === 'get_my_context') {
-      const { getTools } = require('./index.js');
-      const tools = getTools();
-      const toolNames = tools.map((t) => t.function.name).join(', ');
+      const toolNames = (context && Array.isArray(context.toolNames))
+        ? context.toolNames.join(', ')
+        : require('./index.js').getTools().map((t) => t.function.name).join(', ');
       const memoryFiles = getMemoryFiles();
       const memoryList = Object.keys(memoryFiles).join(', ');
       let version = '0.0.0';

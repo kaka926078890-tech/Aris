@@ -1,110 +1,29 @@
 /**
- * v2 对话 handler：方案 A prompt，工具循环，仅通过工具写入记录，禁止解析用户/助手文本。
+ * v2 对话 handler：逻辑循环层。仅编排 BFF（contextBuilder + prompt）、LLM、工具、数据门面。
  */
 const store = require('../../store');
 const config = require('../../config');
-const { buildSystemPrompt, readBehaviorConfig } = require('./prompt.js');
-const { getRelatedAssociationsLines, getCurrentRelatedEntityIds } = require('./associationContext.js');
+const { buildSystemPrompt } = require('./prompt.js');
+const { buildContextDTO } = require('./contextBuilder.js');
+const { getCurrentRelatedEntityIds } = require('./associationContext.js');
 const { maybeGenerateSummary } = require('./summaryGeneration.js');
 const { getTools, runTool } = require('./tools/index.js');
 const { chatWithTools } = require('../llm/client.js');
 const { chatStream } = require('../llm/stream.js');
 const { DIALOGUE_CHUNK_PREV_ROUNDS } = require('../../config/constants.js');
 const { shouldBeQuiet, isResumingDialogue } = require('./quietResume.js');
-const { getImportantDocReminder } = require('./importantDocsReminder.js');
 
 const RECENT_ROUNDS = 3;
-
-function formatMessageTime(created_at) {
-  if (created_at == null) return '';
-  const date = new Date(typeof created_at === 'number' ? created_at * 1000 : created_at);
-  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
-}
-
-function getSubjectiveTimeDescription(lastActiveTimeIso) {
-  const now = new Date();
-  const nowStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  if (!lastActiveTimeIso) return `现在是 ${nowStr}。（暂无记录）`;
-  let last;
-  try {
-    last = new Date(lastActiveTimeIso);
-    if (Number.isNaN(last.getTime())) last = null;
-  } catch (_) {
-    last = null;
-  }
-  if (!last) return `现在是 ${nowStr}。`;
-  const deltaMin = Math.floor((now.getTime() - last.getTime()) / 60000);
-  return `现在是 ${nowStr}。距离上次活跃已过去 ${deltaMin} 分钟。`;
-}
-
-/** 最近一条情感记录，一句内（约 40 字） */
-function getRecentEmotionLine() {
-  const list = store.emotions.getRecent(1);
-  if (!list.length) return '';
-  const e = list[0];
-  const text = (e.text || '').trim().slice(0, 25);
-  const intensity = e.intensity != null ? e.intensity : 3;
-  return text ? `你最近记录的情感（强度${intensity}）：${text}。` : '';
-}
-
-/** 最近用户纠错摘要，一句内（约 50 字） */
-function getCorrectionsSummaryLine() {
-  const list = store.corrections.getRecent(3);
-  if (!list.length) return '';
-  const parts = list.slice(-2).map((t) => {
-    const m = (t || '').match(/用户纠正[：:]\s*([^\n]+)/);
-    return m ? m[1].trim().slice(0, 18) : '';
-  });
-  const raw = parts.filter(Boolean).join('、');
-  const line = raw.slice(0, 50);
-  return line ? `用户曾纠正：${line}。` : '';
-}
+const facade = store.facade;
 
 async function buildPromptContext(sessionId, recent) {
-  const id = store.identity.readIdentity();
-  const userIdentity = id.name ? `用户名字：${id.name}` + (id.notes ? '\n' + id.notes : '') : '（无）';
-  const userRequirements = store.requirements.getSummary() || '（无）';
-  const contextWindow = recent
-    .map((r) => {
-      const who = r.role === 'user' ? '用户' : 'Aris';
-      const timeLabel = formatMessageTime(r.created_at) ? ` (${formatMessageTime(r.created_at)}) ` : ' ';
-      return `${who}${timeLabel}: ${r.content}`;
-    })
-    .join('\n');
-  const state = store.state.readState();
-  const timeDesc = getSubjectiveTimeDescription(state?.last_active_time ?? null);
-  const lastStateLine = state?.last_mental_state ? `你上一次的状态/想法是：${state.last_mental_state}` : '';
-  const lastStateAndSubjectiveTime = [timeDesc, lastStateLine].filter(Boolean).join('\n') || '（无）';
-  const relatedAssociations = await getRelatedAssociationsLines(sessionId, recent);
-  const recentSummaryEntry = store.summaries?.readSummary(sessionId);
-  const recentSummary = recentSummaryEntry?.content?.trim() || '（无）';
-  let systemPrompt = buildSystemPrompt({
-    userIdentity,
-    userRequirements,
-    contextWindow,
-    lastStateAndSubjectiveTime,
-    relatedAssociations,
-    recentSummary,
-  });
-  const isSessionFirstMessage = recent.length === 1 && recent[0].role === 'user';
-  const reminderLine = getImportantDocReminder(isSessionFirstMessage);
-  if (reminderLine) systemPrompt = systemPrompt + '\n\n' + reminderLine;
-  const behavior = readBehaviorConfig();
-  if (behavior.inject_corrections_summary) {
-    const correctionsLine = getCorrectionsSummaryLine();
-    if (correctionsLine) systemPrompt = systemPrompt + '\n' + correctionsLine;
-  }
-  if (behavior.inject_recent_emotion) {
-    const emotionLine = getRecentEmotionLine();
-    if (emotionLine) systemPrompt = systemPrompt + '\n' + emotionLine;
-  }
-
-  const recentMessages = recent.slice(-(RECENT_ROUNDS * 2));
+  const dto = await buildContextDTO(sessionId, recent);
+  const systemPrompt = buildSystemPrompt(dto);
   return {
     systemPrompt,
     messages: [
       { role: 'system', content: systemPrompt },
-      ...recentMessages.map((r) => ({ role: r.role, content: r.content })),
+      ...dto.recentMessages.map((r) => ({ role: r.role, content: r.content })),
     ],
   };
 }
@@ -132,38 +51,34 @@ function sanitizeAssistantContent(content) {
 
 async function handleUserMessage(userContent, sendChunk, sendAgentActions, signal) {
   if (signal && signal.aborted) {
-    const sessionId = await store.conversations.getCurrentSessionId();
+    const sessionId = await facade.getCurrentSessionId();
     return { content: '', error: true, sessionId, aborted: true };
   }
-  const sessionId = await store.conversations.getCurrentSessionId();
-  
-  // 检查用户是否要求安静
+  const sessionId = await facade.getCurrentSessionId();
+
   if (shouldBeQuiet(userContent)) {
-    store.state.writeProactiveState({ low_power_mode: true, proactive_no_reply_count: 0, last_tired_or_quiet_at: new Date().toISOString() });
+    facade.writeProactiveState({ low_power_mode: true, proactive_no_reply_count: 0, last_tired_or_quiet_at: new Date().toISOString() });
     console.info('[Aris v2] 用户要求安静，立即进入低功耗模式');
   } else {
-    // 检查当前是否在低功耗模式
-    const proactiveState = store.state.readProactiveState();
+    const proactiveState = facade.getProactiveState();
     if (proactiveState.low_power_mode) {
-      // 如果在低功耗模式，检查用户是否在恢复对话
       if (isResumingDialogue(userContent)) {
-        store.state.writeProactiveState({ low_power_mode: false, proactive_no_reply_count: 0, low_power_entered_at: null });
+        facade.writeProactiveState({ low_power_mode: false, proactive_no_reply_count: 0, low_power_entered_at: null });
         console.info('[Aris v2] 用户恢复对话，退出低功耗模式');
       }
     } else {
-      // 正常模式，重置计数器
-      store.state.writeProactiveState({ proactive_no_reply_count: 0, low_power_mode: false, low_power_entered_at: null });
+      facade.writeProactiveState({ proactive_no_reply_count: 0, low_power_mode: false, low_power_entered_at: null });
     }
   }
 
-  await store.conversations.append(sessionId, 'user', userContent);
-  store.state.writeProactiveState({ last_user_engaged_at: new Date().toISOString() });
+  await facade.appendConversation(sessionId, 'user', userContent);
+  facade.writeProactiveState({ last_user_engaged_at: new Date().toISOString() });
   const userPreview = (typeof userContent === 'string' && userContent.length > 0)
     ? (userContent.length <= 120 ? userContent.trim() : userContent.trim().slice(0, 120) + '…')
     : '(空)';
   console.info('[Aris v2] 用户消息:', userPreview);
 
-  const recent = await store.conversations.getRecent(sessionId, RECENT_ROUNDS * 2 + 2);
+  const recent = await facade.getRecentConversation(sessionId, RECENT_ROUNDS * 2 + 2);
   const { messages } = await buildPromptContext(sessionId, recent);
   const sysLen = (messages[0] && messages[0].content) ? String(messages[0].content).length : 0;
   console.info('[Aris v2] 本轮 prompt: system 约', sysLen, '字, 消息数', messages.length);
@@ -200,7 +115,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
       content: assistantContent || null,
       tool_calls: res.tool_calls,
     };
-    const toolContext = { sessionId, recent };
+    const toolContext = { sessionId, recent, toolNames: getTools().map((t) => t.function.name) };
     const toolResults = await Promise.all(
       res.tool_calls.map(async (tc) => {
         const name = tc.function?.name;
@@ -245,7 +160,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
 
   if (signal && signal.aborted) {
     const partial = (streamedContent || reply || '').trim() || '[已停止]';
-    await store.conversations.append(sessionId, 'assistant', partial);
+    await facade.appendConversation(sessionId, 'assistant', partial);
     return { content: partial, error: false, sessionId, aborted: true };
   }
 
@@ -264,7 +179,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
         }
         if (signal && signal.aborted) {
           const partial = (streamedContent || reply || '').trim() || '[已停止]';
-          await store.conversations.append(sessionId, 'assistant', partial);
+          await facade.appendConversation(sessionId, 'assistant', partial);
           return { content: partial, error: false, sessionId, aborted: true };
         }
       }
@@ -300,7 +215,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
           }
           if (signal && signal.aborted) {
             const partial = (streamedContent || reply || '').trim() || '[已停止]';
-            await store.conversations.append(sessionId, 'assistant', partial);
+            await facade.appendConversation(sessionId, 'assistant', partial);
             return { content: partial, error: false, sessionId, aborted: true };
           }
         }
@@ -324,25 +239,24 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     }
     if (signal && signal.aborted) {
       const partial = (streamedContent || reply || '').trim() || '[已停止]';
-      await store.conversations.append(sessionId, 'assistant', partial);
+      await facade.appendConversation(sessionId, 'assistant', partial);
       return { content: partial, error: false, sessionId, aborted: true };
     }
   }
 
-  await store.conversations.append(sessionId, 'assistant', reply);
+  await facade.appendConversation(sessionId, 'assistant', reply);
 
   try {
-    const state = store.state.readState();
-    const prevRecent = await store.conversations.getRecent(sessionId, (DIALOGUE_CHUNK_PREV_ROUNDS + 1) * 2 + 2);
+    const prevRecent = await facade.getRecentConversation(sessionId, (DIALOGUE_CHUNK_PREV_ROUNDS + 1) * 2 + 2);
     const prevSlice = prevRecent.slice(-(DIALOGUE_CHUNK_PREV_ROUNDS * 2));
     const blockText = prevSlice
       .map((r) => `${r.role === 'user' ? 'User' : 'Assistant'}: ${r.content}`)
       .join(' | ');
-    if (blockText && store.vector) {
-      const vec = await store.vector.embed(blockText, { prefix: 'document' });
+    if (blockText) {
+      const vec = await facade.embedForDialogue(blockText, { prefix: 'document' });
       if (vec) {
         const relatedEntities = getCurrentRelatedEntityIds();
-        await store.vector.add({
+        await facade.addVectorBlock({
           text: blockText,
           vector: vec,
           type: 'dialogue_turn',
@@ -351,7 +265,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
       }
     }
 
-    store.state.writeState({
+    facade.writeState({
       last_active_time: new Date().toISOString(),
       last_mental_state: reply ? reply.slice(0, 300) : null,
     });
@@ -382,8 +296,8 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
 }
 
 async function getPromptPreview(userMessage) {
-  const sessionId = await store.conversations.getCurrentSessionId();
-  const recent = await store.conversations.getRecent(sessionId, RECENT_ROUNDS * 2 + 2);
+  const sessionId = await facade.getCurrentSessionId();
+  const recent = await facade.getRecentConversation(sessionId, RECENT_ROUNDS * 2 + 2);
   const forBuild = typeof userMessage === 'string' && userMessage.trim()
     ? [...recent, { role: 'user', content: userMessage.trim() }]
     : recent;

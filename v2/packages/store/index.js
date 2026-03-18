@@ -22,6 +22,8 @@ try {
   // vector.js 依赖 LanceDB/embed，可能未安装
 }
 
+const facade = require('./facade.js');
+
 module.exports = {
   identity,
   requirements,
@@ -37,4 +39,5 @@ module.exports = {
   vector: vectorModule,
   db,
   monitor,
+  facade,
 };

@@ -49,7 +49,7 @@ async function runTool(name, args, context) {
     return runRecordTool(name, a, context);
   }
   if (FILE_TOOLS.some((t) => t.function.name === name)) {
-    return runFileTool(name, a);
+    return runFileTool(name, a, context);
   }
   if (MEMORY_TOOLS.some((t) => t.function.name === name)) {
     return runMemoryTool(name, a);
