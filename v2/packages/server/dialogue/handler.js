@@ -37,17 +37,6 @@ function getSubjectiveTimeDescription(lastActiveTimeIso) {
   return `现在是 ${nowStr}。距离上次活跃已过去 ${deltaMin} 分钟。`;
 }
 
-/** 轻量情境标签：根据最近用户消息与 recent_mood_or_scene 生成一句 10 字内提示，供 context_aware_tone 注入 */
-function getContextTagLine(recent, proactiveState) {
-  const lastUser = recent.filter((r) => r.role === 'user').pop();
-  const text = ((lastUser && lastUser.content) || '').trim() + ' ' + ((proactiveState && proactiveState.recent_mood_or_scene) || '');
-  const lower = text.toLowerCase();
-  if (/累|困|想静静|安静|别打扰|休息|歇会/.test(lower)) return '当前情境：用户可能想休息或安静。';
-  if (/游戏|炉石|lol|杀戮尖塔|打一把|开黑/.test(lower)) return '当前话题偏游戏，可更轻松。';
-  if (/谢谢|感谢|开心|不错/.test(lower)) return '当前情境：日常/轻松。';
-  return '';
-}
-
 /** 最近一条情感记录，一句内（约 40 字） */
 function getRecentEmotionLine() {
   const list = store.emotions.getRecent(1);
@@ -69,46 +58,6 @@ function getCorrectionsSummaryLine() {
   const raw = parts.filter(Boolean).join('、');
   const line = raw.slice(0, 50);
   return line ? `用户曾纠正：${line}。` : '';
-}
-
-/** 智能记忆检索决策：根据对话上下文决定是否需要检索记忆 */
-function shouldRetrieveMemoryIntelligently(userContent, recentConversation) {
-  const message = userContent.toLowerCase();
-  
-  // 明确需要检索的关键词
-  const retrievalKeywords = [
-    '记得', '之前', '以前', '上次', '记忆',
-    '偏好', '习惯', '喜欢', '讨厌', '要求',
-    '身份', '名字', '称呼', '系统', '代码',
-    '配置', '问题', '改进', '方案', '讨论',
-    '游戏', '炉石', 'lol', '杀戮尖塔'
-  ];
-  
-  // 明确不需要检索的关键词（简单问候等）
-  const noRetrievalKeywords = [
-    '你好', '在吗', 'hi', 'hello', '早上好', '晚上好',
-    '谢谢', '拜拜', '再见', 'ok', '好的', '嗯'
-  ];
-  
-  // 检查是否需要检索
-  const hasRetrievalKeyword = retrievalKeywords.some(keyword => message.includes(keyword));
-  const hasNoRetrievalKeyword = noRetrievalKeywords.some(keyword => message.includes(keyword));
-  
-  // 如果是复杂问题或长消息，倾向于检索
-  const isComplexMessage = message.length > 30 || message.includes('?') || message.includes('？');
-  
-  // 如果最近对话中提到过相关话题，倾向于检索
-  const recentContext = recentConversation.slice(-3).map(r => r.content || '').join(' ').toLowerCase();
-  const hasRecentContext = retrievalKeywords.some(keyword => recentContext.includes(keyword));
-  
-  // 决策逻辑
-  if (hasRetrievalKeyword) return true;
-  if (hasNoRetrievalKeyword) return false;
-  if (isComplexMessage) return true;
-  if (hasRecentContext) return true;
-  
-  // 默认：对于中等长度消息，30%概率检索
-  return message.length > 10 && Math.random() < 0.3;
 }
 
 async function buildPromptContext(sessionId, recent) {
@@ -141,11 +90,6 @@ async function buildPromptContext(sessionId, recent) {
   const reminderLine = getImportantDocReminder(isSessionFirstMessage);
   if (reminderLine) systemPrompt = systemPrompt + '\n\n' + reminderLine;
   const behavior = readBehaviorConfig();
-  if (behavior.context_aware_tone) {
-    const proactiveState = store.state.readProactiveState();
-    const contextLine = getContextTagLine(recent, proactiveState);
-    if (contextLine) systemPrompt = systemPrompt + '\n' + contextLine;
-  }
   if (behavior.inject_corrections_summary) {
     const correctionsLine = getCorrectionsSummaryLine();
     if (correctionsLine) systemPrompt = systemPrompt + '\n' + correctionsLine;
@@ -154,18 +98,7 @@ async function buildPromptContext(sessionId, recent) {
     const emotionLine = getRecentEmotionLine();
     if (emotionLine) systemPrompt = systemPrompt + '\n' + emotionLine;
   }
-  if (behavior.expression_style) {
-    const styleMap = { warm: '温暖', casual: '随意自然', concise: '简洁' };
-    const label = styleMap[behavior.expression_style] || behavior.expression_style;
-    systemPrompt = systemPrompt + '\n当前表达风格倾向：' + label + '。';
-  }
-  
-  // 智能记忆检索提示：根据上下文决定是否添加检索提示
-  const lastUserMessage = recent.filter(r => r.role === 'user').pop();
-  if (lastUserMessage && shouldRetrieveMemoryIntelligently(lastUserMessage.content, recent)) {
-    systemPrompt += '\n\n【智能记忆提示】当前对话可能需要检索相关记忆，请考虑是否需要调用 search_memories 获取背景信息。';
-  }
-  
+
   const recentMessages = recent.slice(-(RECENT_ROUNDS * 2));
   return {
     systemPrompt,
