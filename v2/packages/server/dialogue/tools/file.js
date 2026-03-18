@@ -170,7 +170,7 @@ async function runFileTool(name, args) {
         }
       } catch (_) {}
       const dataDir = getDataDir();
-      const text = `Aris v2 版本 ${version}。数据目录：${dataDir}。可用工具：${toolNames}。主要 memory 文件（位于 memory/）：${memoryList}。配置与行为细节可通过 read_file 查看 packages/server、packages/store 及 docs/aris_runtime_context.md。`;
+      const text = `Aris v2 版本 ${version}。数据目录：${dataDir}。可用工具：${toolNames}。主要 memory 文件（位于 memory/）：${memoryList}。配置与行为细节可通过 read_file 查看 packages/server、packages/store 及数据目录下配置。`;
       return { ok: true, summary: text };
     }
   } catch (e) {

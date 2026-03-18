@@ -23,7 +23,7 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 | **quiet_phrases.json** | 用户说哪些话时进入「安静」模式（不主动回复） | `quiet_phrases`: 字符串数组，如 `["歇会","安静待会","别说话"]`。命中则进入低功耗，未命中且非空消息可视为恢复对话。 |
 | **retrieval_config.json** | 记忆检索与小结行为 | `enable_association_inject`、`max_association_lines`、`source_types`、`requirement_id_max`；`enable_summary`、`summary_rounds_interval`（2～50）；**分层记忆**：`filter_experience_by_association`（boolean）：search_memories 是否只返回与当前身份/要求相关经历；`max_experience_results`（number）：该模式下最多返回条数（1～20）。缺省由代码默认或首次写入。 |
 | **session_summaries.json** | 各会话最新小结（自动生成，一般无需手改） | 按 session 存 `content`、`updated_at`、`round_index`。 |
-| **network_config.json** | 网络访问工具（fetch_url）开关与安全策略 | `enable_web_fetch`、`enable_web_fetch_js`（为 true 时允许 use_js 用 Puppeteer 抓取 JS 渲染页）、`allowed_hosts`、`blocked_hosts`、`timeout_ms`、`max_calls_per_minute`、`max_length`、`reject_unauthorized`。详见 [网络工具配置](docs/network_tool_config.md)。 |
+| **network_config.json** | 网络访问工具（fetch_url）开关与安全策略 | `enable_web_fetch`、`enable_web_fetch_js`（为 true 时允许 use_js 用 Puppeteer 抓取 JS 渲染页）、`allowed_hosts`、`blocked_hosts`、`timeout_ms`、`max_calls_per_minute`、`max_length`、`reject_unauthorized`。 |
 | **proactive_config.json** | 主动消息克制策略 | `proactive_conservative`（true 时仅用积累的表达欲望，不调用 LLM 生成主动句）、`recent_user_message_min_length`（最近一条用户消息低于该字数且非问句时本轮回不发主动，0 表示不限制）。缺省由代码首次使用时写入。 |
 | **behavior_config.json** | 自我分析/修改边界、情境、纠错、情感与表达风格 | `self_analysis_boundary`、`context_aware_tone`、`inject_corrections_summary`：同上。`inject_recent_emotion`（boolean，默认 true）：为 true 时注入最近一条情感记录一句，便于情感连续性。`expression_style`（字符串，可选）：如 `warm`/`casual`/`concise`，注入「当前表达风格倾向」一句。 |
 | **avoid_phrases.json** | 禁止用语列表（人工维护） | 格式 `{ "avoid_phrases": ["为您服务","有什么可以帮您"] }` 或直接数组。模型通过 **get_avoid_phrases** 按需获取，不每轮灌入。 |
@@ -40,7 +40,7 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 |-------------|------|------------------|
 | **important_documents.json** | 重要文档提醒：仅对用户确需「定期查看」的文档配置；本 session 首条用户消息时若某文档超过间隔未查看则注入至多 1 句提醒。模型通过 read_file 读取到配置中的文档时会更新「最后查看时间」。若某文档为用户「按需查看、平时不用看」则不要加入或设 `check_interval_hours: 0`。 | `important_documents`: 数组，每项 `path`（相对路径，如 `memory/aris_ideas.md` 表示各实例愿望/探索文档，存于 data/memory/）、`name`、`check_interval_hours`（0=不提醒）、`reminder_text`。缺省由代码首次使用时写入。 |
 
-**时间线**：所有记忆/状态类写入会同时追加到 `data/timeline.json`，用于按时刻回溯或审计；详见 [记忆连贯性](docs/memory_coherence.md)。当前产品内暂无时间线展示页，数据可供排查或后续「修改历史」等能力使用。
+**时间线**：所有记忆/状态类写入会同时追加到 `data/timeline.json`，用于按时刻回溯或审计。当前产品内暂无时间线展示页，数据可供排查或后续「修改历史」等能力使用。
 
 **静默/低功耗**：存在。触发方式两种：（1）用户发送安静词（如「歇会」「安静待会」，见 quiet_phrases.json）→ 立即进入低功耗，不再主动发话；（2）用户长时间不回复 → 主动消息逻辑多次触发仍无用户消息时（约 3 次，即最多约 2 条主动消息后）自动进入低功耗，不再主动发话。**恢复对话**：用户**在进入静默之后**发送新消息且非安静词时退出低功耗（由 handler 处理）；定时器检查时仅当「最近一条用户消息的时间晚于进入静默时间」才视为恢复，避免把静默前的旧消息误判为恢复。
 
@@ -120,20 +120,12 @@ npm run build:linux # 产出 AppImage（Linux）
 
 ### Aris 如何了解自己
 
-Aris 可通过 **get_my_context** 工具获取当前运行环境与能力边界的简短摘要（版本、数据目录、可用工具列表、主要 memory 文件）；通过 **read_file** 阅读项目内代码与配置以理解行为与局限（不得修改核心逻辑与安全相关配置）。详见 [运行环境与自我认知](docs/aris_runtime_context.md)。
+Aris 可通过 **get_my_context** 工具获取当前运行环境与能力边界的简短摘要（版本、数据目录、可用工具列表、主要 memory 文件）；通过 **read_file** 阅读项目内代码与配置以理解行为与局限（不得修改核心逻辑与安全相关配置）。
 
 ## 文档
 
-- [架构](docs/architecture.md)
-- [提示词策略（方案 A）](docs/prompt_strategy.md)
-- [Store 层](docs/store.md)
-- [向量设计](docs/vector_design.md)
-- [记忆连贯性（关联/小结/分层/时间线）](docs/memory_coherence.md)
-- [工具](docs/tools.md)
-- [网络访问工具配置（fetch_url）](docs/network_tool_config.md)
-- [运行环境与自我认知（get_my_context）](docs/aris_runtime_context.md)
-- [第一优先级解决方案（ARIS_IDEAS）](docs/first_priority_solutions.md)
+- [分阶段执行清单](docs/todo.md)
 - [第二优先级解决方案（ARIS_IDEAS）](docs/second_priority_solutions.md)
 - [第三优先级解决方案（ARIS_IDEAS 长期愿景）](docs/third_priority_solutions.md)
-- [对话「随时可发」技术方案（打断保留上下文、合并/中断）](docs/dialogue_always_send_solution.md)
-- [分阶段执行清单](docs/todo.md)
+- [记录机制改进方案（中长期未实装）](docs/record_mechanism_improvement.md)
+- [管理页与内容维护（未实装）](docs/ui_management.md)

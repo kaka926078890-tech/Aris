@@ -2,7 +2,7 @@
 
 执行顺序：Phase 0 → 1 → 2 → 3 → 4 → 5 → 6。不得跳过未勾选项。
 
-**Prompt 策略**：首轮完整 system；后续轮采用 **方案 A**（人设+规则+工具定义每轮保留，身份/要求/长记忆用简短摘要注入）。若后续改为方案 B，需更新 `server/dialogue/prompt.js` 及 `docs/prompt_strategy.md`。
+**Prompt 策略**：首轮完整 system；后续轮采用 **方案 A**（人设+规则+工具定义每轮保留，身份/要求/长记忆用简短摘要注入）。若后续改为方案 B，需更新 `server/dialogue/prompt.js` 及文档。
 
 **记录机制短期**：身份累积+历史、要求对象列表+语义去重、关联索引+工具 已实现（见 `record_mechanism_improvement.md` 短期 1/2/3，schema 驱动）。
 
@@ -65,7 +65,7 @@
 
 ## 二、待办事项（按文档汇总）
 
-以下来自 v2_summary、record_mechanism_improvement、vector_design、ui_management、distribution_embedding_options 等文档的未完成项，统一列供排期。
+以下来自 record_mechanism_improvement、vector_design、ui_management 等文档的未完成项，统一列供排期。
 
 ### 1. 前端 / 管理端
 
@@ -74,13 +74,13 @@
 | [ ] 设置/管理页：文档列表 | ui_management.md | 提供 docs/、store/docs/ 下 .md 列表，点开可查看与编辑，保存写回对应文件；仅允许约定目录，避免误改代码 |
 | [ ] 设置/管理页：内容管理 | ui_management.md | 身份表单（姓名、备注）；用户要求列表（新增/编辑/删除）；纠错/情感/表达欲望列表（展示、删除、人工追加）；后端调对应 store |
 | [ ] 路由或 Tab | todo Phase 5 | 对话 \| 设置/管理，便于进入管理页 |
-| [ ] 历史会话列表与单会话查看 | v2_summary | IPC 已支持 getSessions、getConversation、clearAll，前端未做列表与详情页 |
+| [ ] 历史会话列表与单会话查看 | — | IPC 已支持 getSessions、getConversation、clearAll，前端未做列表与详情页 |
 
 ### 2. 向量与检索（可选增强）
 
 | 待办 | 来源 | 说明 |
 |------|------|------|
-| [ ] 每 5～10 轮对话摘要向量 | vector_design.md、v2_summary | 用 LLM 生成摘要，embed 存入 type=dialogue_summary，与 dialogue_turn 并存 |
+| [ ] 每 5～10 轮对话摘要向量 | vector_design.md | 用 LLM 生成摘要，embed 存入 type=dialogue_summary，与 dialogue_turn 并存 |
 | [ ] 意图/事实多向量 | vector_design.md | 同一对话块生成「意图」「事实」两段分别 embed（type: dialogue_intent, dialogue_fact），检索可双路或合并 |
 
 ### 3. 配置与去硬编码
@@ -93,9 +93,9 @@
 
 | 待办 | 来源 | 说明 |
 |------|------|------|
-| [ ] 监控 | v2_summary | token_usage、file_modifications（如 v1 monitor） |
-| [ ] 自升级 | v2_summary | 满足条件时调用自升级流程并写日志 |
-| [ ] getActiveWindowTitle | v2_summary | 获取当前窗口标题作为上下文（可选工具） |
+| [ ] 监控 | — | token_usage、file_modifications（如 v1 monitor） |
+| [ ] 自升级 | — | 满足条件时调用自升级流程并写日志 |
+| [ ] getActiveWindowTitle | — | 获取当前窗口标题作为上下文（可选工具） |
 
 ### 5. 记录机制（中长期，见 record_mechanism_improvement.md）
 
@@ -106,20 +106,20 @@
 | [x] 长期 L1～L2 | 时间轴 | 已实现：store/timeline.js（appendEntry、getEntries）；identity/requirements/associations/corrections/emotions/expressionDesires/state/summaries/conversations 等写路径均追加时间线；数据目录下 timeline.json，支持按 since/until/type 查询。 |
 | [ ] 长期 L3～L5 | 关联与自优化 | getSubgraph、getPaths；retrieval.schema 分层检索；使用统计与自适应策略 |
 
-**记忆连贯性（ARIS_IDEAS + 计划）**：关联驱动检索（MVP）、小结沉淀（阶段 B）、分层记忆（阶段 A）、时间线（阶段 C）均已实现；配置见 retrieval_config.json，架构见 docs/memory_coherence.md。
+**记忆连贯性（ARIS_IDEAS + 计划）**：关联驱动检索（MVP）、小结沉淀（阶段 B）、分层记忆（阶段 A）、时间线（阶段 C）均已实现；配置见 retrieval_config.json。
 
 ### 6. 分发与打包
 
 | 待办 | 来源 | 说明 |
 |------|------|------|
-| [ ] 向量/Ollama 方案落地后补充文档 | distribution_embedding_options.md | 确定方案后，在文档或新文档中补充：实现步骤、目录结构、打包配置示例、启动时检测与回退逻辑 |
+| [ ] 向量/Ollama 方案落地后补充文档 | — | 确定方案后，在文档或新文档中补充：实现步骤、目录结构、打包配置示例、启动时检测与回退逻辑 |
 
 ### 7. 检查项（建议执行一次）
 
 | 待办 | 来源 | 说明 |
 |------|------|------|
-| [x] 无引用现网 src | v2_summary | 已检查：v2 内无 require 引用 src/ |
-| [x] 无解析写入 | v2_summary | 已检查：身份/要求/纠错/情感/表达仅经工具写入，无解析用户或助手文本后自动写入 |
+| [x] 无引用现网 src | — | 已检查：v2 内无 require 引用 src/ |
+| [x] 无解析写入 | — | 已检查：身份/要求/纠错/情感/表达仅经工具写入，无解析用户或助手文本后自动写入 |
 
 ---
 
