@@ -151,6 +151,11 @@ function getArisIdeasPath() {
   return path.join(getMemoryDir(), name);
 }
 
+function getActionCachePath() {
+  const name = getMemoryFiles().action_cache || 'action_cache.json';
+  return path.join(getMemoryDir(), name);
+}
+
 module.exports = {
   getV2Root,
   getDataDir,
@@ -178,4 +183,5 @@ module.exports = {
   getSelfNotesPath,
   getUserProfileSummaryPath,
   getArisIdeasPath,
+  getActionCachePath,
 };

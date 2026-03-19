@@ -97,7 +97,20 @@
 | [ ] 自升级 | — | 满足条件时调用自升级流程并写日志 |
 | [ ] getActiveWindowTitle | — | 获取当前窗口标题作为上下文（可选工具） |
 
-### 5. 记录机制（中长期，见 record_mechanism_improvement.md）
+### 5. 提示词优化（后续）
+
+| 待办 | 来源 | 说明 |
+|------|------|------|
+| [ ] 提示词分层处理 | cache_memory_design 附录 A | 当前为单层一次性注入；后续可做「先注入基础层、再按需注入扩展层」或按角色/任务切换模板 |
+| [ ] 意图先行再注入 | cache_memory_design 附录 A | 当前为每轮固定模板全量注入；后续可增加意图识别（规则或小模型），再根据意图决定注入哪些块、是否先查 action_cache 等 |
+
+### 6. 缓存记忆（操作记录，见 cache_memory_design.md）
+
+| 待办 | 来源 | 说明 |
+|------|------|------|
+| [ ] action_cache 持久化 + 文件修改标记 + 目录缓存 + 工具 | cache_memory_design | 实现 store/action_cache；read_file/write_file 后自动写缓存；file 类带 file_path、file_mtime_at_cache；list_my_files 后写入 dir 缓存（目录 mtime 校验）；write_file/delete_file 失效对应 file 与目录缓存。提供工具 get_read_file_cache/get_recent_read_file_cache/get_dir_cache，不把已读列表灌进 prompt |
+
+### 7. 记录机制（中长期，见 record_mechanism_improvement.md）
 
 | 待办 | 步骤 | 说明 |
 |------|------|------|
@@ -108,13 +121,13 @@
 
 **记忆连贯性（ARIS_IDEAS + 计划）**：关联驱动检索（MVP）、小结沉淀（阶段 B）、分层记忆（阶段 A）、时间线（阶段 C）均已实现；配置见 retrieval_config.json。
 
-### 6. 分发与打包
+### 8. 分发与打包
 
 | 待办 | 来源 | 说明 |
 |------|------|------|
 | [ ] 向量/Ollama 方案落地后补充文档 | — | 确定方案后，在文档或新文档中补充：实现步骤、目录结构、打包配置示例、启动时检测与回退逻辑 |
 
-### 7. 检查项（建议执行一次）
+### 9. 检查项（建议执行一次）
 
 | 待办 | 来源 | 说明 |
 |------|------|------|
@@ -126,5 +139,6 @@
 ## 三、优先级建议
 
 - **优先可做**：管理端 UI（文档列表 + 内容管理）、历史会话列表、安静/恢复关键词可配置。
-- **可选增强**：向量摘要与多向量、监控、自升级、getActiveWindowTitle。
+- **可选增强**：向量摘要与多向量、监控、自升级、getActiveWindowTitle；**缓存记忆（action_cache）** 按 cache_memory_design.md 实现。
+- **后续优化**：提示词分层处理、意图先行再注入（见 cache_memory_design 附录 A）。
 - **中长期**：记录机制 M1～L5 按 record_mechanism_improvement.md 分步迭代。

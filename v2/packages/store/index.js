@@ -14,6 +14,7 @@ const preferences = require('./preferences.js');
 const timeline = require('./timeline.js');
 const db = require('./db.js');
 const monitor = require('./monitor.js');
+const actionCache = require('./action_cache.js');
 
 let vectorModule = null;
 try {
@@ -40,4 +41,5 @@ module.exports = {
   db,
   monitor,
   facade,
+  actionCache,
 };

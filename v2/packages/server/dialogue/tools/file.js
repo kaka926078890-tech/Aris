@@ -4,6 +4,7 @@
 const path = require('path');
 const fs = require('fs');
 const { getV2Root, getDataDir, getMemoryFiles, getArisIdeasPath } = require('../../../config/paths.js');
+const store = require('../../../store');
 
 const MEMORY_ARIS_IDEAS_KEY = 'memory/aris_ideas.md';
 
@@ -19,6 +20,23 @@ function resolvePath(relativePath) {
   }
   const root = getV2Root();
   return path.join(root, normalized);
+}
+
+function normalizeRelForCache(relativePath) {
+  const normalized = path
+    .normalize(String(relativePath ?? ''))
+    .replace(/^(\.\.(\/|\\|$))+/, '')
+    .replace(/\\/g, '/')
+    .trim();
+  if (normalized === 'aris_ideas.md') return MEMORY_ARIS_IDEAS_KEY;
+  return normalized;
+}
+
+function summarizeText(text, maxChars = 2500) {
+  const s = String(text ?? '').trim();
+  if (!s) return '';
+  const head = s.slice(0, maxChars);
+  return head + (s.length > maxChars ? '\n\n[摘要截断]' : '');
 }
 
 /** 若 memory 下 aris_ideas.md 不存在，尝试从 repo 内旧位置复制一份（一次性迁移） */
@@ -51,6 +69,51 @@ const FILE_TOOLS = [
         properties: {
           subpath: { type: 'string', description: '相对子路径', default: '' },
         },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_dir_cache',
+      description: '获取目录缓存（list_my_files 的缓存）。仅返回仍有效的目录条目，用于减少重复 list_my_files。',
+      parameters: {
+        type: 'object',
+        properties: {
+          subpath: { type: 'string', description: '目录相对子路径，如 packages/server；空表示 v2 根目录', default: '' },
+          limit: { type: 'number', description: '最多返回条数（可选）', default: 50 },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_read_file_cache',
+      description: '获取已读过的文件摘要缓存（仅返回仍有效、文件存在且未修改的条目）。用于避免重复 read_file。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path_prefix: { type: 'string', description: '可选：只返回 path 以此前缀开头的缓存，如 packages/server/dialogue' },
+          limit: { type: 'number', description: '最多返回条数', default: 20 },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_recent_read_file_cache',
+      description: '获取当前会话（sessionId）最近的已读文件摘要缓存。用于在对话中继续阅读时快速定位已读路径，减少 list_my_files 与重复 read_file。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path_prefix: { type: 'string', description: '可选：只返回 path 以此前缀开头的缓存，如 packages/server/dialogue' },
+          limit: { type: 'number', description: '最多返回条数', default: 20 },
+        },
+        required: [],
       },
     },
   },
@@ -111,17 +174,64 @@ const FILE_TOOLS = [
 async function runFileTool(name, args, context) {
   const a = args || {};
   try {
+    const sessionId = context?.sessionId;
+    const normalizeRelDir = (subpath) => {
+      let s = path.normalize(String(subpath ?? '')).replace(/\\/g, '/').trim();
+      s = s.replace(/^(\.\.(\/|\\|$))+/, '').replace(/^\/+/, '');
+      // 去掉末尾 /
+      s = s.replace(/\/+$/, '');
+      return s;
+    };
     if (name === 'list_my_files') {
-      const base = path.join(getV2Root(), (a.subpath || '').trim());
+      const subpath = normalizeRelDir(a.subpath || '');
+      const base = path.join(getV2Root(), subpath);
       if (!fs.existsSync(base)) return { ok: true, list: [] };
+
+      // 命中目录缓存则直接返回
+      const cacheRes = store.actionCache.getDirListCache({ dir_path: subpath, limit: null });
+      if (cacheRes?.hit && Array.isArray(cacheRes.list)) return { ok: true, list: cacheRes.list };
+
       const entries = fs.readdirSync(base, { withFileTypes: true });
       const list = entries.map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
+      // 写入目录缓存（用于重复 list_my_files 快速复用）
+      try {
+        const stat = fs.statSync(base);
+        store.actionCache.upsertDirList({
+          dir_path: subpath,
+          entries: list,
+          dir_mtime_at_cache: stat.mtimeMs,
+          session_id: sessionId,
+        });
+      } catch (e) {
+        console.warn('[Aris v2][action_cache] 写入目录缓存失败', e?.message);
+      }
       return { ok: true, list };
+    }
+    if (name === 'get_dir_cache') {
+      const subpath = normalizeRelDir(a.subpath || '');
+      const limit = a.limit != null ? a.limit : 50;
+      const cacheRes = store.actionCache.getDirListCache({ dir_path: subpath, limit });
+      return { ok: true, hit: !!cacheRes?.hit, list: cacheRes?.list || [] };
+    }
+    if (name === 'get_read_file_cache') {
+      const res = store.actionCache.getReadFileCache({
+        path_prefix: a.path_prefix,
+        limit: a.limit,
+      });
+      return res;
+    }
+    if (name === 'get_recent_read_file_cache') {
+      const res = store.actionCache.getRecentReadFileCache({
+        session_id: context?.sessionId,
+        path_prefix: a.path_prefix,
+        limit: a.limit,
+      });
+      return res;
     }
     if (name === 'read_file') {
       const rel = (a.relative_path || '').trim();
-      const normalizedRel = path.normalize(rel).replace(/\\/g, '/');
-      if (normalizedRel === MEMORY_ARIS_IDEAS_KEY || normalizedRel === 'aris_ideas.md') {
+      const normalizedRel = normalizeRelForCache(rel);
+      if (normalizedRel === MEMORY_ARIS_IDEAS_KEY) {
         ensureArisIdeasInMemory();
       }
       const p = resolvePath(rel);
@@ -138,19 +248,56 @@ async function runFileTool(name, args, context) {
       if (content.length > READ_FILE_MAX_CHARS) {
         content = content.slice(0, READ_FILE_MAX_CHARS) + '\n\n[内容过长已截断，仅显示前 ' + READ_FILE_MAX_CHARS + ' 字]';
       }
+      // read_file 成功后写入 action_cache（仅文件路径维度 + mtime 校验，避免摘要失效）
+      try {
+        const summary = summarizeText(content, 2500);
+        store.actionCache.upsertFileRead({
+          file_path: normalizedRel,
+          result_summary: summary,
+          file_mtime_at_cache: stat.mtimeMs,
+          session_id: context?.sessionId,
+        });
+      } catch (e) {
+        // 缓存失败不影响读文件本身
+        console.warn('[Aris v2][action_cache] 写入失败', e?.message);
+      }
       return { ok: true, content };
     }
     if (name === 'write_file') {
+      const relKey = normalizeRelForCache(a.relative_path || '');
       const p = resolvePath(a.relative_path || '');
       const dir = path.dirname(p);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const content = typeof a.content === 'string' ? a.content : String(a.content ?? '');
       fs.writeFileSync(p, content, { flag: a.append ? 'a' : 'w', encoding: 'utf8' });
+      // 写入成功后失效对应缓存条目，避免读缓存摘要与实际文件不一致
+      try {
+        if (relKey) store.actionCache.invalidateFile({ file_path: relKey });
+        // 失效该文件所在目录的目录缓存（仅当该目录处于 v2 根之内时有效；memory/ 下可能不命中）
+        if (relKey && !relKey.startsWith('memory/')) {
+          const dirPath = path.posix.dirname(relKey);
+          const dirKey = (dirPath === '.' ? '' : dirPath);
+          store.actionCache.invalidateDir({ dir_path: dirKey });
+        }
+      } catch (e) {
+        console.warn('[Aris v2][action_cache] 失效失败', e?.message);
+      }
       return { ok: true };
     }
     if (name === 'delete_file') {
+      const relKey = normalizeRelForCache(a.relative_path || '');
       const p = resolvePath(a.relative_path || '');
       if (fs.existsSync(p) && fs.statSync(p).isFile()) fs.unlinkSync(p);
+      try {
+        if (relKey) store.actionCache.invalidateFile({ file_path: relKey });
+        if (relKey && !relKey.startsWith('memory/')) {
+          const dirPath = path.posix.dirname(relKey);
+          const dirKey = (dirPath === '.' ? '' : dirPath);
+          store.actionCache.invalidateDir({ dir_path: dirKey });
+        }
+      } catch (e) {
+        console.warn('[Aris v2][action_cache] 失效失败', e?.message);
+      }
       return { ok: true };
     }
     if (name === 'get_my_context') {
