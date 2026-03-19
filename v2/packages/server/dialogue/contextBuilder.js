@@ -35,7 +35,8 @@ function getRecentEmotionLine(emotionsList) {
   const e = emotionsList[0];
   const text = (e.text || '').trim().slice(0, 25);
   const intensity = e.intensity != null ? e.intensity : 3;
-  return text ? `你最近记录的情感（强度${intensity}）：${text}。` : '';
+  if (!text) return '';
+  return `你最近记录的情感（强度${intensity}）：${text}。强度表示该条情感的重要或强烈程度（数字越大越强），回复时可参考，不必在回复中复述数字。`;
 }
 
 function formatRestartRecoveryInfo(recoveryInfo) {
@@ -115,10 +116,11 @@ async function buildContextDTO(sessionId, recent) {
     .join('\n') || '（暂无）';
   const state = facade.getState();
   const timeDesc = getSubjectiveTimeDescription(state?.last_active_time ?? null);
-  const lastStateLine = state?.last_mental_state ? `你上一次的状态/想法是：${state.last_mental_state}` : '';
+  const rawState = state?.last_mental_state || '';
+  const lastStateLine = rawState ? `你上一次的状态/想法是：${rawState}` : '';
   const lastStateAndSubjectiveTime = [timeDesc, lastStateLine].filter(Boolean).join('\n') || '（无）';
   const relatedAssociations = await getRelatedAssociationsLines(sessionId, recent);
-  const recentSummary = facade.getSessionSummary(sessionId);
+  const recentSummary = facade.getSessionSummary(sessionId) || '（无）';
   const behavior = readBehaviorConfig();
   const emotionLine = behavior.inject_recent_emotion
     ? getRecentEmotionLine(facade.getRecentEmotions(1))

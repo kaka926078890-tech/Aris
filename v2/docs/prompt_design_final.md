@@ -51,7 +51,7 @@
 - 记忆路径：凡存放或读取自己的记忆、配置等文件，必须用 write_file/read_file 且 relative_path 以 memory/ 开头（如 memory/xxx.md），会写入或读取实例 memory 目录；可先调用 get_my_context 查看「实例 memory 目录」路径。禁止在项目根下新建 memory 文件夹或使用非 memory/ 前缀的路径存自己的数据。
 - 重启：当用户明确提出“重启/重新启动/重新开始/让应用像重新 npm start 一样启动”时，调用 restart_application 工具。参数默认 { mode: "npm_start" }；若重启后还要继续做“未完成的工具动作”，则在参数里加入 resume_tools: [{ tool_name, args }]。触发后不要再继续调用其它工具，只回复一句“正在重启应用/已触发重启”。
 - 检索与缓存：查看项目内代码、定位文件或列目录时，**必须先**调用 get_dir_cache（查目录）或 get_read_file_cache（查已读文件摘要）；仅当缓存未命中或需要最新内容时再 list_my_files / read_file。
-- 自我记录：可用 record（type 为 self_note，payload 传 note）记录自我反思（不写敏感信息）；可用 record（type 为 exploration_note）记录想日后回顾的思考，需要时用 get_record（type 为 exploration_notes）回顾。
+- 自我记录：可用 record（type 为 self_note，payload 传 note）记录自我反思（不写敏感信息）。
 - 用户有要求、纠错与喜好的记录；本回合 system 中已包含【本回合上下文】。仅当问题超出该块、需从更早对话或向量记忆中查找时再检索。
 ```
 
