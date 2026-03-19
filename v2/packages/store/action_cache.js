@@ -5,9 +5,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { getActionCachePath, getV2Root, getArisIdeasPath } = require('../config/paths.js');
-
-const MEMORY_ARIS_IDEAS_KEY = 'memory/aris_ideas.md';
+const { getActionCachePath, getV2Root, getArisIdeasPath, getArisIdeasRelativeKey } = require('../config/paths.js');
 
 let actionCache = null;
 function loadCache() {
@@ -39,7 +37,7 @@ function genId() {
 function getAbsPath(file_path) {
   if (!file_path) return null;
   const normalized = String(file_path).replace(/\\/g, '/').replace(/^\/+/, '').trim();
-  if (normalized === MEMORY_ARIS_IDEAS_KEY) return getArisIdeasPath();
+  if (normalized === getArisIdeasRelativeKey()) return getArisIdeasPath();
   return path.join(getV2Root(), normalized);
 }
 

@@ -151,6 +151,12 @@ function getArisIdeasPath() {
   return path.join(getMemoryDir(), name);
 }
 
+/** read_file 缓存等使用的统一相对键，如 memory/aris_ideas.md（文件名来自 memory_files.json） */
+function getArisIdeasRelativeKey() {
+  const name = getMemoryFiles().aris_ideas || 'aris_ideas.md';
+  return `memory/${name}`;
+}
+
 function getActionCachePath() {
   const name = getMemoryFiles().action_cache || 'action_cache.json';
   return path.join(getMemoryDir(), name);
@@ -188,6 +194,7 @@ module.exports = {
   getSelfNotesPath,
   getUserProfileSummaryPath,
   getArisIdeasPath,
+  getArisIdeasRelativeKey,
   getActionCachePath,
   getWorkStatePath,
 };

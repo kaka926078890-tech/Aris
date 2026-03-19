@@ -273,16 +273,77 @@ async function runMemoryTool(name, args) {
       if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
         return { ok: false, error: 'start_time 或 end_time 无法解析，请用 ISO 或毫秒时间戳' };
       }
-      const fetchLimit = limit * 2;
+      
+      // 1. 时间窗口验证：结束时间必须晚于开始时间
+      if (endMs < startMs) {
+        return { 
+          ok: false, 
+          error: 'end_time 必须晚于 start_time',
+          suggestion: `开始时间: ${new Date(startMs).toLocaleString()}, 结束时间: ${new Date(endMs).toLocaleString()}` 
+        };
+      }
+      
+      // 2. 时间窗口大小检查
+      const timeWindowMs = endMs - startMs;
+      const MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30天
+      const LARGE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 7天
+      
+      if (timeWindowMs > MAX_WINDOW_MS) {
+        console.warn(`[Aris v2] 时间窗口过大（${Math.round(timeWindowMs/(24*60*60*1000))}天），可能影响性能`);
+        // 可以添加建议：建议缩小时间范围
+      } else if (timeWindowMs > LARGE_WINDOW_MS) {
+        console.info(`[Aris v2] 时间窗口较大（${Math.round(timeWindowMs/(24*60*60*1000))}天），建议缩小范围以提高准确性`);
+      }
+      
+      // 3. 优化fetchLimit计算
+      // 基于时间窗口大小动态调整fetchLimit
+      // 假设密度与时间窗口成反比：时间窗口越大，密度越低
+      const baseDensity = 0.3; // 基础密度假设
+      const windowFactor = Math.max(0.1, Math.min(1.0, 7 / (timeWindowMs / (24*60*60*1000)))); // 7天窗口密度为1，越大密度越低
+      const expectedDensity = baseDensity * windowFactor;
+      
+      const fetchLimit = Math.max(
+        limit * 3, 
+        Math.ceil(limit / Math.max(0.1, expectedDensity))
+      );
+      
+      console.info(`[Aris v2] 时间窗口检索: 窗口=${Math.round(timeWindowMs/(24*60*60*1000))}天, 期望密度=${expectedDensity.toFixed(2)}, fetchLimit=${fetchLimit}`);
+      
       const rows = await store.vector.search(a.query || '', fetchLimit);
       const timeFiltered = rows.filter((r) => {
         const t = r.created_at != null ? Number(r.created_at) : 0;
         return t >= startMs && t <= endMs;
       });
-      const result = timeFiltered.length > 0 ? timeFiltered.slice(0, limit) : rows.slice(0, limit);
+      
+      // 提前定义时间字符串，确保在所有路径中都可用
+      const startStr = new Date(startMs).toLocaleString();
+      const endStr = new Date(endMs).toLocaleString();
+      
+      // 4. 明确的结果处理逻辑
+      if (timeFiltered.length === 0) {
+        // 明确告知用户时间范围内没有结果
+        return { 
+          ok: true, 
+          memories: [], 
+          text: `在指定时间范围内（${startStr} 到 ${endStr}）没有找到相关记忆`,
+          suggestion: '尝试扩大时间范围或调整查询关键词'
+        };
+      }
+      
+      const result = timeFiltered.slice(0, limit);
       const texts = result.map((r) => r.text).filter(Boolean);
       console.info('[Aris v2] 召回(带时间):', texts.length, '条, query=', (a.query || '').slice(0, 40));
-      return { ok: true, memories: texts, text: texts.length ? texts.join('\n---\n') : '（无该时间范围内的相关记忆）' };
+      return { 
+        ok: true, 
+        memories: texts, 
+        text: texts.length ? texts.join('\n---\n') : '（无该时间范围内的相关记忆）',
+        time_window_info: {
+          start: startStr,
+          end: endStr,
+          window_days: Math.round(timeWindowMs/(24*60*60*1000)),
+          results_count: texts.length
+        }
+      };
     }
     if (name === 'get_user_profile_summary') {
       const p = getUserProfileSummaryPath();

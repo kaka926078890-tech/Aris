@@ -30,7 +30,7 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 | **conversation_rules.md** | 情境与语气、检索与 record 等规则（可选） | 纯文本。若存在则替换代码中的默认规则（情境与语气、【用户约束】用法、record/get_record、search_memories 等）；不存在则用默认一句。 |
 | **self_notes.json** | 自我反思笔记（record type:self_note 写入） | 数组，每项 `{ at, text }`。仅 Aris 可见，供后续会话参考。 |
 | **user_profile_summary.md** | 用户画像/主题线轻量摘要（可选） | 纯文本：常聊主题、近期偏好与情绪归纳。可手动维护或由脚本生成；模型通过 get_user_profile_summary 按需获取。 |
-| **aris_ideas.md** | 各实例独立的 memory 文档（不随代码提交） | 纯文本 Markdown。存于 data/memory/，read_file / write_file 使用相对路径 `memory/aris_ideas.md` 读写；与代码库隔离。 |
+| **aris_ideas.md** | 各实例独立的 memory 文档（不随代码提交） | 纯文本 Markdown。存于实例 memory 目录（路径可通过 get_my_context 查看）；write_file/read_file 的 relative_path 以 `memory/` 开头的均指向该目录（如 `memory/aris_ideas.md`），与代码库隔离。 |
 | **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`quiet_phrases`、`retrieval_config`、`session_summaries`、`network_config`、`proactive_config`、`behavior_config`、`avoid_phrases`、`self_notes`、`aris_ideas` 等，值为实际文件名（如 `identity.json`、`aris_ideas.md`）。 |
 
 **时间线**：所有记忆/状态类写入会同时追加到 `data/timeline.json`，用于按时刻回溯或审计。当前产品内暂无时间线展示页，数据可供排查或后续「修改历史」等能力使用。

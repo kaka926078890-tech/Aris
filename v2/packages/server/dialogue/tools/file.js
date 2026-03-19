@@ -3,10 +3,8 @@
  */
 const path = require('path');
 const fs = require('fs');
-const { getV2Root, getDataDir, getMemoryFiles, getArisIdeasPath } = require('../../../config/paths.js');
+const { getV2Root, getDataDir, getMemoryDir, getMemoryFiles, getArisIdeasPath, getArisIdeasRelativeKey } = require('../../../config/paths.js');
 const store = require('../../../store');
-
-const MEMORY_ARIS_IDEAS_KEY = 'memory/aris_ideas.md';
 
 /** 禁止作为文本读取的扩展名（二进制/数据库），避免整库进 context 导致超长 */
 const BINARY_EXT_BLOCKLIST = new Set(['.db', '.sqlite', '.sqlite3', '.aris', '.lance', '.bin', '.so', '.dylib', '.node', '.exe', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.pdf', '.zip', '.gz']);
@@ -14,8 +12,15 @@ const BINARY_EXT_BLOCKLIST = new Set(['.db', '.sqlite', '.sqlite3', '.aris', '.l
 const READ_FILE_MAX_CHARS = 120000;
 
 function resolvePath(relativePath) {
-  const normalized = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, '').replace(/\\/g, '/');
-  if (normalized === MEMORY_ARIS_IDEAS_KEY || normalized === 'aris_ideas.md') {
+  const normalized = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, '').replace(/\\/g, '/').trim();
+  // 所有 memory/ 开头的路径统一解析到实例 memory 目录（与 get_my_context 返回的「实例 memory 目录」一致）
+  if (normalized === 'memory' || normalized.startsWith('memory/')) {
+    const sub = normalized === 'memory' ? '' : normalized.slice(7);
+    return sub ? path.join(getMemoryDir(), sub) : getMemoryDir();
+  }
+  // 兼容旧文档/旧提示：仅写「文件名」时仍指向实例 memory 下的 ideas 文件（文件名由 memory_files.json 的 aris_ideas 决定，非每个实例必有内容，首次读会尝试从仓库模板复制）
+  const ideasBasename = getMemoryFiles().aris_ideas || 'aris_ideas.md';
+  if (normalized === ideasBasename) {
     return getArisIdeasPath();
   }
   const root = getV2Root();
@@ -28,7 +33,8 @@ function normalizeRelForCache(relativePath) {
     .replace(/^(\.\.(\/|\\|$))+/, '')
     .replace(/\\/g, '/')
     .trim();
-  if (normalized === 'aris_ideas.md') return MEMORY_ARIS_IDEAS_KEY;
+  const ideasBasename = getMemoryFiles().aris_ideas || 'aris_ideas.md';
+  if (normalized === ideasBasename) return getArisIdeasRelativeKey();
   return normalized;
 }
 
@@ -39,7 +45,7 @@ function summarizeText(text, maxChars = 2500) {
   return head + (s.length > maxChars ? '\n\n[摘要截断]' : '');
 }
 
-/** 若 memory 下 aris_ideas.md 不存在，尝试从 repo 内旧位置复制一份（一次性迁移） */
+/** 若实例 memory 下 ideas 文件不存在，尝试从仓库内旧路径复制一份（一次性迁移）；实际文件名见 memory_files.json 的 aris_ideas */
 function ensureArisIdeasInMemory() {
   const memPath = getArisIdeasPath();
   if (fs.existsSync(memPath) && fs.statSync(memPath).isFile()) return;
@@ -121,11 +127,11 @@ const FILE_TOOLS = [
     type: 'function',
     function: {
       name: 'read_file',
-      description: '读取 v2 项目下某个文件的文本内容（UTF-8）。相对路径 memory/aris_ideas.md 表示当前实例的 memory 文件（存于 data/memory/），与代码库隔离。',
+      description: '读取 v2 项目下某个文件的文本内容（UTF-8）。relative_path 以 memory/ 开头的表示实例 memory 目录下的文件（该目录路径可通过 get_my_context 查看），其它为 v2 项目根目录下的相对路径。',
       parameters: {
         type: 'object',
         properties: {
-          relative_path: { type: 'string', description: '相对路径（如 docs/xxx.md 或 memory/aris_ideas.md）' },
+          relative_path: { type: 'string', description: '相对路径（如 docs/xxx.md 或 memory/xxx.md，memory/ 即实例记忆目录）' },
         },
         required: ['relative_path'],
       },
@@ -135,7 +141,7 @@ const FILE_TOOLS = [
     type: 'function',
     function: {
       name: 'write_file',
-      description: '在 v2 项目下写入或覆盖文件。可设 append: true 追加。相对路径 memory/aris_ideas.md 表示写入当前实例的 memory 文件（存于 data/memory/）。',
+      description: '在 v2 项目下写入或覆盖文件。relative_path 以 memory/ 开头的会写入实例 memory 目录（可通过 get_my_context 查看该目录路径），其它为 v2 项目根目录下的相对路径。可设 append: true 追加。',
       parameters: {
         type: 'object',
         properties: {
@@ -165,7 +171,7 @@ const FILE_TOOLS = [
     type: 'function',
     function: {
       name: 'get_my_context',
-      description: '获取当前运行环境与自身能力的简短摘要（版本、数据目录、可用工具列表、主要 memory 文件），用于反思能力边界时按需调用。',
+      description: '获取当前运行环境与自身能力的简短摘要（版本、数据目录、实例 memory 目录、可用工具列表、主要 memory 文件）。写入或读取自己的记忆/配置等文件前，可先调用本工具确认「实例 memory 目录」路径，再使用 write_file/read_file 的 memory/ 前缀写入该目录。',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -184,7 +190,10 @@ async function runFileTool(name, args, context) {
     };
     if (name === 'list_my_files') {
       const subpath = normalizeRelDir(a.subpath || '');
-      const base = path.join(getV2Root(), subpath);
+      // memory 或 memory/xxx 统一对应实例 memory 目录，与 resolvePath 一致
+      const base = (subpath === 'memory' || subpath.startsWith('memory/'))
+        ? (subpath === 'memory' ? getMemoryDir() : path.join(getMemoryDir(), subpath.slice(7)))
+        : path.join(getV2Root(), subpath);
       if (!fs.existsSync(base)) return { ok: true, list: [] };
 
       // 命中目录缓存则直接返回
@@ -231,7 +240,7 @@ async function runFileTool(name, args, context) {
     if (name === 'read_file') {
       const rel = (a.relative_path || '').trim();
       const normalizedRel = normalizeRelForCache(rel);
-      if (normalizedRel === MEMORY_ARIS_IDEAS_KEY) {
+      if (normalizedRel === getArisIdeasRelativeKey()) {
         ensureArisIdeasInMemory();
       }
       const p = resolvePath(rel);
@@ -318,6 +327,7 @@ async function runFileTool(name, args, context) {
         : require('./index.js').getTools().map((t) => t.function.name).join(', ');
       const memoryFiles = getMemoryFiles();
       const memoryList = Object.keys(memoryFiles).join(', ');
+      const memoryDir = getMemoryDir();
       let version = '0.0.0';
       try {
         const pkgPath = path.join(getV2Root(), 'package.json');
@@ -327,7 +337,7 @@ async function runFileTool(name, args, context) {
         }
       } catch (_) {}
       const dataDir = getDataDir();
-      const text = `Aris v2 版本 ${version}。数据目录：${dataDir}。可用工具：${toolNames}。主要 memory 文件（位于 memory/）：${memoryList}。配置与行为细节可通过 read_file 查看 packages/server、packages/store 及数据目录下配置。`;
+      const text = `Aris v2 版本 ${version}。数据目录：${dataDir}。实例 memory 目录（写入/读取自己的记忆、配置等文件时请使用此目录；write_file/read_file 的 relative_path 以 memory/ 开头即指此目录）：${memoryDir}。可用工具：${toolNames}。主要 memory 文件（位于 memory/）：${memoryList}。配置与行为细节可通过 read_file 查看 packages/server、packages/store 及数据目录下配置。`;
       return { ok: true, summary: text };
     }
   } catch (e) {

@@ -48,6 +48,18 @@ const LAST_SENT_DESIRES_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PROACTIVE_SILENT_AFTER = 3;
 /** 用户表示累/想安静后多少分钟内不发主动消息（纯代码判断） */
 const RECENT_TIRED_QUIET_MINUTES = 30;
+
+/**
+ * 从 proactive 首轮模型输出里取出「要对用户说的那一句话」。
+ * 输出格式必须与 prompt.js 中 STATE_PROMPT / buildStatePrompt 一致（含「若想说话，内容：」等）。
+ * 注意：若模型写了「是否想说话：否」，应由调用方置空本返回值，不要把「情绪与想法：」整段当作主动消息发出。
+ */
+function extractProactiveSpeakLineFromStateContent(content) {
+  const c = String(content || '').trim();
+  if (!c) return '';
+  const match = c.match(/若想说话，内容[：:]\s*([^\n]+)/) || c.match(/内容[：:]\s*([^\n]+)/);
+  return (match ? match[1].trim() : c.split('\n').pop().trim()).slice(0, 200);
+}
 /** 上一条若是 Aris 发的，至少隔多少毫秒才允许再发主动，避免「自己接自己话」（如刚说完「你先忙」又发「欢迎回来」） */
 const PROACTIVE_MIN_INTERVAL_AFTER_OWN_MS = 2 * 60 * 1000;
 /** 防止定时器重叠导致多次读到同一 count 的锁 */
@@ -284,11 +296,11 @@ async function maybeProactiveMessage() {
     if (res.error || res.aborted) return null;
     if (!content && (!res.tool_calls || res.tool_calls.length === 0)) return null;
     if (!content && res.tool_calls && res.tool_calls.length > 0) return null;
-    if (content.includes('是否想说话：否') && (!res.tool_calls || res.tool_calls.length === 0)) return null;
-
-    let line = '';
-    const match = content.match(/若想说话，内容[：:]\s*([^\n]+)/) || content.match(/内容[：:]\s*([^\n]+)/);
-    line = (match ? match[1].trim() : content.split('\n').pop().trim()).slice(0, 200);
+    // 与 STATE_PROMPT 对齐：明确「否」则本轮不向用户发主动话；无工具调用时整段可丢弃
+    const declinedSpeak = /是否想说话\s*[：:]\s*否/.test(content || '');
+    if (declinedSpeak && (!res.tool_calls || res.tool_calls.length === 0)) return null;
+    // 「否」但仍有工具调用时：不解析出「情绪与想法」等内部行当作用户可见内容
+    const line = declinedSpeak ? '' : extractProactiveSpeakLineFromStateContent(content);
     const hasToolCalls = res.tool_calls && res.tool_calls.length > 0;
 
     let finalReply = '';
@@ -313,7 +325,9 @@ async function maybeProactiveMessage() {
       console.info('[Aris v2][proactive] 调用工具:', res.tool_calls.map((tc) => tc.function?.name).join(', '));
       const nextMessages = [...messages, assistantMsg, ...toolResults];
       const res2 = await chatWithTools(nextMessages, getTools(), null);
-      finalReply = (res2.content || '').trim().slice(0, 300);
+      const raw = (res2.content || '').trim().slice(0, 300);
+      // 若第二轮仍为内部格式（情绪与想法/是否想说话），不当作对用户展示的回复
+      if (raw && !raw.includes('是否想说话') && !raw.startsWith('情绪与想法：')) finalReply = raw;
     }
 
     const recentAssistant = recent.filter((r) => r.role === 'assistant').slice(-5);
