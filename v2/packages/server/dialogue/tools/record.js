@@ -3,15 +3,15 @@
  */
 const fs = require('fs');
 const store = require('../../../store');
-const { getSelfNotesPath, getExplorationNotesPath, getMemoryDir } = require('../../../config/paths.js');
+const { getSelfNotesPath, getMemoryDir } = require('../../../config/paths.js');
 
 const RECORD_TYPES_WRITE = [
   'identity', 'requirement', 'correction', 'emotion', 'expression_desire',
-  'association', 'preference', 'friend_context', 'self_note', 'exploration_note',
+  'association', 'preference', 'friend_context', 'self_note',
 ];
 const RECORD_TYPES_READ = [
   'identity', 'associations', 'preferences', 'expression_desire_context',
-  'exploration_notes', 'recent_emotions',
+  'recent_emotions',
 ];
 
 const RECORD_TOOLS = [
@@ -29,8 +29,7 @@ type 取值与 payload 说明：
 - association: 两条信息的关联。payload: { source_type, source_id, target_type, target_id, relationship?, strength? }
 - preference: 用户喜好/习惯。payload: { topic, summary, source?, tags? }
 - friend_context: 当前心情或场景。payload: { mood_or_scene }
-- self_note: 自我反思笔记。payload: { note }
-- exploration_note: 思考笔记。payload: { note }`,
+- self_note: 自我反思笔记。payload: { note }`,
       parameters: {
         type: 'object',
         properties: {
@@ -51,7 +50,6 @@ type 与 options：
 - associations: 某条信息的关联。options: { source_type, source_id }
 - preferences: 用户喜好。options: { topic? } 可选按类别筛。
 - expression_desire_context: 某条表达欲望当时的对话。options: { created_at, window_seconds? }
-- exploration_notes: 思考笔记。options: { limit? } 默认 5。
 - recent_emotions: 最近情感。options: { limit? } 默认 5。`,
       parameters: {
         type: 'object',
@@ -147,24 +145,6 @@ async function runRecordTool(name, args, context) {
           fs.writeFileSync(path, JSON.stringify(list, null, 2), 'utf8');
           return { ok: true, message: '已记录' };
         }
-        case 'exploration_note': {
-          const note = (p.note && String(p.note).trim()) || '';
-          if (!note) return { ok: false, error: '笔记内容为空' };
-          const path = getExplorationNotesPath();
-          const dir = getMemoryDir();
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-          let list = [];
-          if (fs.existsSync(path)) {
-            try {
-              const raw = fs.readFileSync(path, 'utf8').trim();
-              if (raw) list = JSON.parse(raw);
-            } catch (_) {}
-            if (!Array.isArray(list)) list = [];
-          }
-          list.push({ at: new Date().toISOString(), text: note.slice(0, 1000) });
-          fs.writeFileSync(path, JSON.stringify(list, null, 2), 'utf8');
-          return { ok: true, message: '已记录' };
-        }
         default:
           return { ok: false, error: '不支持的 record type: ' + type };
       }
@@ -216,21 +196,6 @@ async function runRecordTool(name, args, context) {
             ? messages.map((m) => `${m.role === 'user' ? '用户' : 'Aris'}: ${(m.content || '').slice(0, 500)}`).join('\n')
             : '（该时间窗口内无对话记录）';
           return { ok: true, messages, text };
-        }
-        case 'exploration_notes': {
-          const limit = Math.min(Math.max(Number(opt.limit) || 5, 1), 20);
-          const path = getExplorationNotesPath();
-          let list = [];
-          if (fs.existsSync(path)) {
-            try {
-              const raw = fs.readFileSync(path, 'utf8').trim();
-              if (raw) list = JSON.parse(raw);
-            } catch (_) {}
-            if (!Array.isArray(list)) list = [];
-          }
-          const slice = list.slice(-limit).reverse();
-          const text = slice.length ? slice.map((e) => `[${e.at}] ${(e.text || '').slice(0, 200)}`).join('\n') : '（暂无思考笔记）';
-          return { ok: true, notes: slice, text };
         }
         case 'recent_emotions': {
           const limit = Math.min(Math.max(Number(opt.limit) || 5, 1), 10);

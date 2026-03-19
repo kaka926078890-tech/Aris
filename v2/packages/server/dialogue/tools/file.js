@@ -4,7 +4,6 @@
 const path = require('path');
 const fs = require('fs');
 const { getV2Root, getDataDir, getMemoryFiles, getArisIdeasPath } = require('../../../config/paths.js');
-const { markDocumentViewed } = require('../importantDocsReminder.js');
 
 const MEMORY_ARIS_IDEAS_KEY = 'memory/aris_ideas.md';
 
@@ -59,7 +58,7 @@ const FILE_TOOLS = [
     type: 'function',
     function: {
       name: 'read_file',
-      description: '读取 v2 项目下某个文件的文本内容（UTF-8）。相对路径 memory/aris_ideas.md 表示当前实例的愿望/探索文档（存于 data/memory/），与代码库隔离。',
+      description: '读取 v2 项目下某个文件的文本内容（UTF-8）。相对路径 memory/aris_ideas.md 表示当前实例的 memory 文件（存于 data/memory/），与代码库隔离。',
       parameters: {
         type: 'object',
         properties: {
@@ -73,7 +72,7 @@ const FILE_TOOLS = [
     type: 'function',
     function: {
       name: 'write_file',
-      description: '在 v2 项目下写入或覆盖文件。可设 append: true 追加。相对路径 memory/aris_ideas.md 表示写入当前实例的愿望/探索文档（存于 data/memory/）。',
+      description: '在 v2 项目下写入或覆盖文件。可设 append: true 追加。相对路径 memory/aris_ideas.md 表示写入当前实例的 memory 文件（存于 data/memory/）。',
       parameters: {
         type: 'object',
         properties: {
@@ -139,7 +138,6 @@ async function runFileTool(name, args, context) {
       if (content.length > READ_FILE_MAX_CHARS) {
         content = content.slice(0, READ_FILE_MAX_CHARS) + '\n\n[内容过长已截断，仅显示前 ' + READ_FILE_MAX_CHARS + ' 字]';
       }
-      markDocumentViewed(normalizedRel);
       return { ok: true, content };
     }
     if (name === 'write_file') {

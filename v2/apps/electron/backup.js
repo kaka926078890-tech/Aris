@@ -1,7 +1,7 @@
 /**
  * v2 全量备份/恢复：对话(SQLite)、向量库、用户身份、状态、要求、情感、纠错、表达欲望、监控等，
- * 以及 memory/ 与 data/ 下所有已知配置文件（timeline、important_documents、associations、
- * quiet_phrases、retrieval_config、session_summaries、preferences、network_config、aris_ideas 等）。
+ * 以及 memory/ 与 data/ 下所有已知配置文件（timeline、associations、quiet_phrases、
+ * retrieval_config、session_summaries、preferences、network_config、aris_ideas 等）。
  * 单文件 .aris，支持一键导出/导入，便于公司↔家里或换机迁移。
  */
 const fs = require('fs');
@@ -49,7 +49,6 @@ function exportExtraPaths(config) {
   const c = config;
   return {
     timeline: readJsonIfExists(c.getTimelinePath && c.getTimelinePath(), null),
-    important_documents: readJsonIfExists(c.getImportantDocumentsPath && c.getImportantDocumentsPath(), null),
     associations: readJsonIfExists(c.getAssociationsPath && c.getAssociationsPath(), null),
     quiet_phrases: readJsonIfExists(c.getQuietPhrasesPath && c.getQuietPhrasesPath(), null),
     retrieval_config: readJsonIfExists(c.getRetrievalConfigPath && c.getRetrievalConfigPath(), null),
@@ -60,7 +59,6 @@ function exportExtraPaths(config) {
     behavior_config: readJsonIfExists(c.getBehaviorConfigPath && c.getBehaviorConfigPath(), null),
     avoid_phrases: readJsonIfExists(c.getAvoidPhrasesPath && c.getAvoidPhrasesPath(), null),
     self_notes: readJsonIfExists(c.getSelfNotesPath && c.getSelfNotesPath(), null),
-    exploration_notes: readJsonIfExists(c.getExplorationNotesPath && c.getExplorationNotesPath(), null),
     user_profile_summary_md: readTextIfExists(c.getUserProfileSummaryPath && c.getUserProfileSummaryPath(), ''),
     aris_ideas_md: readTextIfExists(c.getArisIdeasPath && c.getArisIdeasPath(), ''),
   };
@@ -85,7 +83,6 @@ function writeExtraPaths(config, payload) {
   };
   const extra = payload.extra_paths || {};
   w('timeline', c.getTimelinePath, extra.timeline);
-  w('important_documents', c.getImportantDocumentsPath, extra.important_documents);
   w('associations', c.getAssociationsPath, extra.associations);
   w('quiet_phrases', c.getQuietPhrasesPath, extra.quiet_phrases);
   w('retrieval_config', c.getRetrievalConfigPath, extra.retrieval_config);
@@ -96,7 +93,6 @@ function writeExtraPaths(config, payload) {
   w('behavior_config', c.getBehaviorConfigPath, extra.behavior_config);
   w('avoid_phrases', c.getAvoidPhrasesPath, extra.avoid_phrases);
   w('self_notes', c.getSelfNotesPath, extra.self_notes);
-  w('exploration_notes', c.getExplorationNotesPath, extra.exploration_notes);
   if (extra.user_profile_summary_md != null && c.getUserProfileSummaryPath) {
     fs.writeFileSync(c.getUserProfileSummaryPath(), extra.user_profile_summary_md, 'utf8');
   }

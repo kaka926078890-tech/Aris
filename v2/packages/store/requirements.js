@@ -173,16 +173,11 @@ async function appendRequirement(text) {
   list.push(newItem);
   _writeList(list, newItem);
   console.info('[Aris v2][store/requirements] 追加', list.length, '项');
-  if (list.length >= 4) {
-    try {
-      const result = await triggerRefinement();
-      if (result && result.success) {
-        console.info('[Aris v2][store/requirements] 已自动提炼', result.message);
-      }
-    } catch (e) {
-      console.warn('[Aris v2][store/requirements] 自动提炼失败', e?.message);
-    }
-  }
+  setImmediate(() => {
+    triggerRefinementAsDocument().then((r) => {
+      if (r && r.success) console.info('[Aris v2][store/requirements] 已自动总结为文档');
+    }).catch((e) => console.warn('[Aris v2][store/requirements] 自动总结失败', e?.message));
+  });
   return { success: true, merged: false, count: list.length, message: '已记录' };
 }
 
@@ -212,10 +207,32 @@ function listRecent(limit = 50) {
   return limit ? list.slice(-limit) : list;
 }
 
+/** 整体替换用户要求列表（管理页编辑后保存）。list: 与 schema 兼容的项数组，至少含 text */
+function replaceAll(list) {
+  if (!Array.isArray(list)) return;
+  const schema = getSchema();
+  const textField = schema.text_field;
+  const idField = schema.id_field;
+  const createdAtField = schema.created_at_field;
+  const now = new Date().toISOString();
+  const normalized = list.map((item) => {
+    const text = String(item[textField] ?? item.text ?? '').trim();
+    if (!text) return null;
+    return {
+      ...item,
+      [idField]: item[idField] || item.id || genId(),
+      [textField]: text,
+      [createdAtField]: item[createdAtField] || item.created_at || now,
+    };
+  }).filter(Boolean);
+  _writeList(normalized, null);
+  console.info('[Aris v2][store/requirements] replaceAll', normalized.length);
+}
+
 function getSummary() {
   const schema = getSchema();
   const textField = schema.text_field;
-  const list = listRecent(50);
+  const list = listRecent(0); // 0 = 全部，与「原先+新内容总结提炼」一致
   if (!list.length) return '';
   return list.map((item, i) => `${i + 1}. ${String(item[textField] || '').trim()}`).join('\n');
 }
@@ -280,6 +297,33 @@ async function triggerRefinement() {
   }
 }
 
+/** 文档式总结：原先 + 新内容 合并为一份完整文档后存为单条，不遗漏任何信息 */
+async function triggerRefinementAsDocument() {
+  const list = _readRaw();
+  const schema = getSchema();
+  const textField = schema.text_field;
+  const idField = schema.id_field;
+  const createdAtField = schema.created_at_field;
+  const texts = list.map((item) => String(item[textField] || '').trim()).filter(Boolean);
+  if (!texts.length) return { success: false, message: '暂无内容' };
+
+  try {
+    const doc = await refiner.refineToDocument(texts, 'requirements');
+    const now = new Date().toISOString();
+    const singleItem = {
+      [idField]: genId(),
+      [textField]: doc,
+      [createdAtField]: now,
+    };
+    _writeList([singleItem], null);
+    console.info('[Aris v2][store/requirements] 文档式总结已写入 1 条');
+    return { success: true, message: '已总结为一份文档，未遗漏任何内容' };
+  } catch (e) {
+    console.error('[Aris v2][store/requirements] triggerRefinementAsDocument failed', e?.message);
+    return { success: false, error: e?.message };
+  }
+}
+
 module.exports = {
   appendRequirement,
   simpleAppendRequirement,
@@ -287,4 +331,6 @@ module.exports = {
   getSummary,
   getDetailedReport,
   triggerRefinement,
+  triggerRefinementAsDocument,
+  replaceAll,
 };

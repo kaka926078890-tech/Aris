@@ -25,20 +25,13 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 | **session_summaries.json** | 各会话最新小结（自动生成，一般无需手改） | 按 session 存 `content`、`updated_at`、`round_index`。 |
 | **network_config.json** | 网络访问工具（fetch_url）开关与安全策略 | `enable_web_fetch`、`enable_web_fetch_js`（为 true 时允许 use_js 用 Puppeteer 抓取 JS 渲染页）、`allowed_hosts`、`blocked_hosts`、`timeout_ms`、`max_calls_per_minute`、`max_length`、`reject_unauthorized`。 |
 | **proactive_config.json** | 主动消息克制策略 | `proactive_conservative`（true 时仅用积累的表达欲望，不调用 LLM 生成主动句）、`recent_user_message_min_length`（最近一条用户消息低于该字数且非问句时本轮回不发主动，0 表示不限制）。缺省由代码首次使用时写入。 |
-| **behavior_config.json** | 自我分析/修改边界、情境、纠错、情感与表达风格 | `self_analysis_boundary`、`context_aware_tone`、`inject_corrections_summary`：同上。`inject_recent_emotion`（boolean，默认 true）：为 true 时注入最近一条情感记录一句，便于情感连续性。`expression_style`（字符串，可选）：如 `warm`/`casual`/`concise`，注入「当前表达风格倾向」一句。 |
-| **avoid_phrases.json** | 禁止用语列表（人工维护） | 格式 `{ "avoid_phrases": ["为您服务","有什么可以帮您"] }` 或直接数组。模型通过 **get_avoid_phrases** 按需获取，不每轮灌入。 |
-| **conversation_rules.md** | 情境/检索/纠错等规则（可选） | 纯文本。若存在则替换代码中的默认「情境与语气、先检索再回复、get_corrections、append_self_note、get_avoid_phrases」说明，避免硬编码；不存在则用默认一句。 |
-| **self_notes.json** | 自我反思笔记（append_self_note 写入） | 数组，每项 `{ at, text }`。仅 Aris 可见，供后续会话参考。 |
+| **behavior_config.json** | 自我分析/修改边界、情境、情感 | `self_analysis_boundary`、`context_aware_tone`：同上。`inject_recent_emotion`（boolean，默认 true）：为 true 时注入最近一条情感记录一句，便于情感连续性。 |
+| **avoid_phrases.json** | 禁止用语列表（人工维护） | 格式 `{ "avoid_phrases": ["为您服务","有什么可以帮您"] }` 或直接数组。每轮会注入【用户约束】，无需按需调工具。 |
+| **conversation_rules.md** | 情境与语气、检索与 record 等规则（可选） | 纯文本。若存在则替换代码中的默认规则（情境与语气、【用户约束】用法、record/get_record、search_memories 等）；不存在则用默认一句。 |
+| **self_notes.json** | 自我反思笔记（record type:self_note 写入） | 数组，每项 `{ at, text }`。仅 Aris 可见，供后续会话参考。 |
 | **user_profile_summary.md** | 用户画像/主题线轻量摘要（可选） | 纯文本：常聊主题、近期偏好与情绪归纳。可手动维护或由脚本生成；模型通过 get_user_profile_summary 按需获取。 |
-| **exploration_notes.json** | 思考笔记（append_exploration_note 写入，主题由 Aris 自定） | 数组，每项 `{ at, text }`。模型通过 get_exploration_notes 按需回顾；思考什么内容不固定。 |
-| **aris_ideas.md** | 愿望/探索文档（各实例独立，不随代码提交） | 纯文本 Markdown。存于 data/memory/，read_file / write_file 使用相对路径 `memory/aris_ideas.md` 读写；与代码库隔离，避免提交影响所有实例。 |
-| **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`quiet_phrases`、`retrieval_config`、`session_summaries`、`network_config`、`proactive_config`、`behavior_config`、`avoid_phrases`、`self_notes`、`exploration_notes`、`aris_ideas` 等，值为实际文件名（如 `identity.json`、`aris_ideas.md`）。 |
-
-**数据目录根下**（与 `memory/` 平级）：
-
-| 文件 / 配置 | 说明 | 主要字段 / 格式 |
-|-------------|------|------------------|
-| **important_documents.json** | 重要文档提醒：仅对用户确需「定期查看」的文档配置；本 session 首条用户消息时若某文档超过间隔未查看则注入至多 1 句提醒。模型通过 read_file 读取到配置中的文档时会更新「最后查看时间」。若某文档为用户「按需查看、平时不用看」则不要加入或设 `check_interval_hours: 0`。 | `important_documents`: 数组，每项 `path`（相对路径，如 `memory/aris_ideas.md` 表示各实例愿望/探索文档，存于 data/memory/）、`name`、`check_interval_hours`（0=不提醒）、`reminder_text`。缺省由代码首次使用时写入。 |
+| **aris_ideas.md** | 各实例独立的 memory 文档（不随代码提交） | 纯文本 Markdown。存于 data/memory/，read_file / write_file 使用相对路径 `memory/aris_ideas.md` 读写；与代码库隔离。 |
+| **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`quiet_phrases`、`retrieval_config`、`session_summaries`、`network_config`、`proactive_config`、`behavior_config`、`avoid_phrases`、`self_notes`、`aris_ideas` 等，值为实际文件名（如 `identity.json`、`aris_ideas.md`）。 |
 
 **时间线**：所有记忆/状态类写入会同时追加到 `data/timeline.json`，用于按时刻回溯或审计。当前产品内暂无时间线展示页，数据可供排查或后续「修改历史」等能力使用。
 
@@ -75,7 +68,7 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 - **向量记忆**：LanceDB 中的全部记忆条
 - **用户与状态**：身份、状态、主动消息状态、要求、情感、纠错、表达欲望
 - **监控**：token 使用、文件修改记录
-- **配置与 memory**：timeline、important_documents、associations、quiet_phrases、retrieval_config、session_summaries、preferences、network_config、proactive_config、behavior_config、avoid_phrases、self_notes、exploration_notes、user_profile_summary.md、aris_ideas.md
+- **配置与 memory**：timeline、associations、quiet_phrases、retrieval_config、session_summaries、preferences、network_config、proactive_config、behavior_config、avoid_phrases、self_notes、user_profile_summary.md、aris_ideas.md
 
 **换机步骤**：在旧电脑上使用「导出全部数据」保存为 `.aris` 文件（如 U 盘或网盘），在新电脑上安装并打开 Aris v2，使用 **文件 → 导入全部数据** 选择该 `.aris` 文件即可一键恢复。新电脑上若使用 `ARIS_V2_DATA_DIR`，请先设好数据目录再导入。
 

@@ -19,13 +19,14 @@ const facade = store.facade;
 async function buildPromptContext(sessionId, recent) {
   const dto = await buildContextDTO(sessionId, recent);
   const systemPrompt = buildSystemPrompt(dto);
-  return {
-    systemPrompt,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      ...dto.recentMessages.map((r) => ({ role: r.role, content: r.content })),
-    ],
-  };
+  // 近期对话已完整放入 system 的【当前会话最近几轮】（带时间戳），此处只传当前这条用户消息，避免重复
+  const lastMsg = recent.length ? recent[recent.length - 1] : null;
+  const currentUserContent = lastMsg && lastMsg.role === 'user' ? lastMsg.content : (lastMsg ? lastMsg.content : '');
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: currentUserContent || '' },
+  ];
+  return { systemPrompt, messages };
 }
 
 function filterReplyForDisplay(text) {

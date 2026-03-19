@@ -17,12 +17,12 @@
 | **LLM 层** | `packages/server/llm/client.js` | config（env）、无 store | handler、proactive |
 | **提示词层** | `dialogue/prompt.js` + **handler 内 buildPromptContext** | config/paths、store（通过 handler 传参）、**tools/network.js**（isNetworkFetchEnabled） | handler |
 | **工具层** | `dialogue/tools/*.js` | **store**、**config/paths**、**associationContext**（memory 用）、file 里 **getTools**（get_my_context） | handler、proactive |
-| **逻辑循环层** | `dialogue/handler.js`（含 prompt 组装 + 工具循环 + 写库） | prompt、tools、llm、store、quietResume、importantDocsReminder、associationContext、summaryGeneration | electron main（IPC） |
+| **逻辑循环层** | `dialogue/handler.js`（含 prompt 组装 + 工具循环 + 写库） | prompt、tools、llm、store、quietResume、associationContext、summaryGeneration | electron main（IPC） |
 | **数据层** | `packages/store/*.js` | config/paths、fs、sqlite、lancedb | handler、tools、prompt（通过 handler 取数）、proactive、electron/backup |
 
 主要耦合点：
 
-- **handler** 既做「提示词组装」（读 store、调 buildSystemPrompt、再注入 reminder/corrections/emotion），又做「工具循环」「写会话/向量/状态」→ 提示词层与逻辑层混在一起。
+- **handler** 既做「提示词组装」（读 store、调 buildSystemPrompt、再注入 emotion 等），又做「工具循环」「写会话/向量/状态」→ 提示词层与逻辑层混在一起。
 - **prompt.js** 依赖 **tools/network.js**（是否暴露 fetch_url）和 **readBehaviorConfig**，且 **buildSystemPrompt** 里写死「需要时可调用 get_my_context / fetch_url」→ 提示词与工具配置耦合。
 - **工具实现** 直接 require store、paths、associationContext → 工具层与数据层、配置层强耦合；**get_my_context** 再调 **getTools()** → 工具与工具列表耦合。
 - **数据层** 被 handler、所有 record/get 类工具、prompt 组装逻辑多处直接读写的分散调用 → 没有单一「数据门面」，难以做读写策略/审计。
@@ -64,7 +64,7 @@
 |------|--------|------|------|
 | **record** | record_user_identity, get_user_identity, record_user_requirement, record_correction, record_emotion, record_expression_desire, record_association, get_associations, record_preference, get_preferences, record_friend_context, get_expression_desire_context, append_self_note, append_exploration_note, get_exploration_notes, get_recent_emotions | 18 | 身份/要求/纠错/情感/表达欲望/关联/偏好/朋友情境/自我笔记/探索笔记 |
 | **file** | list_my_files, read_file, write_file, delete_file, get_my_context | 5 | 文件与运行环境 |
-| **memory** | search_memories, get_corrections, get_conversation_near_time, get_avoid_phrases, get_user_profile_summary, search_memories_with_time | 6 | 检索、纠错、按时间会话、禁止用语、画像、带时间窗口检索 |
+| **memory** | search_memories, get_conversation_near_time, get_user_profile_summary, search_memories_with_time | 4 | 检索、按时间会话、画像、带时间窗口检索（纠错与禁止用语已每轮注入【用户约束】，无单独工具） |
 | **time** | get_current_time | 1 | 当前时间 |
 | **git** | git_status, git_log | 2 | 仓库状态与日志 |
 | **network** | fetch_url | 1 | 网页抓取（可选） |
@@ -75,7 +75,7 @@
 
 - **冗余/重叠**  
   - **get_user_identity** 与 **get_preferences**：身份和偏好都可视为「用户信息」；若 BFF 已在 system 里注入「用户身份」「用户要求」摘要，模型对「身份」的 get 调用会减少，但「偏好」更细粒度，保留 get 合理。  
-  - **get_corrections**（memory）与 **record_correction**（record）：一个读、一个写，不冗余；但 **纠错** 同时出现在「BFF 注入的一句摘要」和「工具 get_corrections」里，存在**信息重复**，可考虑只保留一种（要么 BFF 注入摘要，要么只提供工具）。  
+  - 纠错与禁止用语已统一注入【用户约束】，不再提供 get_corrections / get_avoid_phrases 工具，避免与 BFF 注入重复。  
   - **search_memories** 与 **search_memories_with_time**：语义检索 vs 带时间窗口，职责清晰，可保留；若未来统一为「search_memories(params)」一个工具更干净。  
   - **get_recent_emotions**（record）与 BFF 注入的「最近情感一句」：同样重复，建议要么只注入要么只工具。
 
@@ -87,7 +87,7 @@
   - **数量**：33 个对「身份/偏好/记忆/纠错/情感/文件/时间/git/网络」来说偏多但尚可接受；真正问题在于**与 store/prompt 的耦合**以及**部分「读」与 BFF 注入重复**。  
   - 建议：  
     1）工具层通过 **context** 拿数据门面，不直接 require store；  
-    2）合并或收缩「仅读」类：例如 get_user_identity 与 BFF 身份摘要二选一；get_corrections / get_recent_emotions 与 BFF 注入二选一；  
+    2）合并或收缩「仅读」类：例如 get_user_identity 与 BFF 身份摘要二选一；get_recent_emotions 与 BFF 注入二选一；  
     3）search_memories / search_memories_with_time 可合并为一个工具，用参数区分是否带时间窗口。
 
 ---
@@ -98,19 +98,17 @@
 
 - **人设与规则**  
   - `persona.md`（或 DEFAULT_PERSONA） + `rules.md`（RULES）  
-  - `memory/conversation_rules.md`（或 DEFAULT_CONVERSATION_RULES）：情境/检索/纠错/禁止用语/探索笔记等说明  
+  - `memory/conversation_rules.md`（或 DEFAULT_CONVERSATION_RULES）：情境/检索/纠错/禁止用语等说明  
 
 - **上下文占位（CONTEXT_TEMPLATE）**  
   - 用户身份、用户要求、上次状态与时间感、相关关联、近期小结、当前会话最近几轮、行为规则  
 
 - **由 handler 在 BFF 之外追加的注入**  
-  - 重要文档提醒（getImportantDocReminder）  
-  - 纠错摘要一句（getCorrectionsSummaryLine）  
   - 最近情感一句（getRecentEmotionLine）  
   - 行为边界（self_analysis_boundary）与 fetch_url/get_my_context 提示（在 buildSystemPrompt 内）
 
 - **数据来源**  
-  - 身份/要求/状态/时间/关联/小结/会话：**handler 从 store 读**，再传给 `buildSystemPrompt`；reminder/corrections/emotion 也在 handler 里读 store 后拼串。
+  - 身份/要求/状态/时间/关联/小结/会话：**contextBuilder** 从 store 读，拼成 DTO 再传给 `buildSystemPrompt`；用户约束（要求/纠错/喜好/禁止）、emotion 等均在 contextBuilder 中拼入 DTO。
 
 ### 3.2 记忆与状态参与方式
 
@@ -121,7 +119,7 @@
   - 其他：全部通过 **工具**（record_* / append_*）由模型触发后写入。
 
 - **读取**  
-  - 拼 system 时：identity、requirements、state、summaries、conversations（最近几轮）、associationContext（相关关联）、important_documents、corrections、emotions（最近一条）等，均在 **handler** 或 **prompt** 或 **associationContext** 中读 store。  
+  - 拼 system 时：identity、requirements、state、summaries、conversations（最近几轮）、associationContext（相关关联）、corrections、emotions（最近一条）等，均在 **handler** 或 **prompt** 或 **associationContext** 中读 store。  
   - 工具执行时：各 runXxx 直接读 store.xxx。
 
 ### 3.3 当前架构流程图（模块与调用关系）
@@ -144,15 +142,12 @@ flowchart TB
     ToolLoop[工具循环: chatWithTools → runTool 直至无 tool_calls]
     PostWrite[写会话/向量/状态/监控]
     Quiet[quietResume: shouldBeQuiet / isResumingDialogue]
-    DocRmd[importantDocsReminder: getImportantDocReminder]
   end
 
-  subgraph BFF["提示词组装 (prompt.js + handler 内注入)"]
+  subgraph BFF["提示词组装 (prompt.js + contextBuilder)"]
     BuildSys[buildSystemPrompt]
     Persona[persona + conversation_rules + rules]
     CtxTemplate[CONTEXT_TEMPLATE 占位]
-    InjReminder[注入: 重要文档提醒]
-    InjCorrect[注入: 纠错摘要]
     InjEmotion[注入: 最近情感]
     BehConfig[readBehaviorConfig]
   end
@@ -315,7 +310,7 @@ flowchart LR
 
 - **BFF 的边界**  
   - 你说的「BFF 只做提示词组装」是对的。  
-  - 补充：当前 **buildPromptContext** 在 handler 里，且混入了「读 store、读 importantDocs、读 behavior、拼 reminder/corrections/emotion」。拆分后应把「从 store 取数并整理成上下文 DTO」也视为 BFF 的输入准备：可由**逻辑层**先调「数据门面」拿到上下文 DTO，再交给 **BFF 模块**只做「DTO + 配置 → system prompt」，这样 BFF 自身不依赖 store，只依赖「上下文结构」。
+  - 补充：当前 **buildPromptContext** 在 handler 里，通过 **contextBuilder** 从 store 取数并整理成 DTO，再交给 **buildSystemPrompt** 拼 system。BFF 层（contextBuilder + prompt.js）负责「数据门面 → DTO → system prompt」，逻辑层只调 BFF 拿 prompt。
 
 - **工具层「做工具的配置」**  
   - 建议：工具列表（name/description/parameters）由**配置或注册表**生成，而不是每个 runXxx 文件里手写一大段；执行时 runTool 通过 **context** 拿数据门面，避免 require store。  
@@ -394,6 +389,6 @@ flowchart TB
 2. **再拆 BFF**：把「从门面取上下文 → 拼 system prompt」独立成模块，handler 只传 DTO，不拼具体字段。  
 3. **工具层去耦**：runTool 通过 context 拿数据门面；工具列表由配置/注册表生成；去掉 get_my_context 内对 getTools 的依赖。  
 4. **LLM 层**：已较干净，仅需保证 API 配置从外部注入或极薄 adapter。  
-5. **收敛工具与 BFF 重复**：如 get_corrections / get_recent_emotions 与 BFF 注入二选一，减少冗余与 token。
+5. **收敛工具与 BFF 重复**：如 get_recent_emotions 与 BFF 注入二选一，减少冗余与 token；纠错与禁止用语已仅通过【用户约束】注入，无单独工具。
 
 按上述顺序拆分后，五层边界会清晰，前端与后端的划分也保持不变：**前端 = 渲染进程 + IPC 调用方；后端 = 主进程中的五层对话管线 + 备份/窗口等。**

@@ -50,6 +50,44 @@ class RequirementsRefiner {
   }
 
   /**
+   * 文档式总结：原先内容 + 新内容 合并为一份完整文档，不遗漏任何一条。
+   * @param {string[]} items - 当前全部条目（或一段文档）
+   * @param {string} [category] - 'requirements' | 'corrections' | 'preferences'，用于提示词
+   * @returns {Promise<string>} 一份完整文档
+   */
+  async refineToDocument(items, category = 'requirements') {
+    const fullText = Array.isArray(items) ? items.filter((x) => typeof x === 'string' && x.trim()).join('\n\n') : String(items || '').trim();
+    if (!fullText) return '';
+
+    const categoryLabel = { requirements: '用户要求', corrections: '纠错记录', preferences: '用户喜好' }[category] || '内容';
+    const prompt = `请将以下「${categoryLabel}」重新总结提炼为**一份完整文档**。
+
+要求：
+1. 可合并同类项（例如：用户喜欢 a、b、c；不喜欢 x、y）。
+2. 表述简洁、连贯，像一段可读的文档。
+3. **不得遗漏任何一条信息**，每条都要在文档中体现。
+4. 只输出提炼后的文档正文，不要编号、不要分条列举、不要解释。`;
+
+    const fullPrompt = `${prompt}\n\n当前内容：\n${fullText}`;
+
+    try {
+      if (typeof chatForRefinement === 'function' && process.env.DEEPSEEK_API_KEY) {
+        const { content, error } = await chatForRefinement([{ role: 'user', content: fullPrompt }]);
+        if (!error && content && typeof content === 'string') {
+          const doc = content.trim();
+          if (doc.length > 0) {
+            console.log(`[RequirementsRefiner] 文档式总结完成 (${category})`);
+            return doc;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[RequirementsRefiner] refineToDocument LLM 失败，回退为合并文本', e?.message);
+    }
+    return fullText;
+  }
+
+  /**
    * 调用 LLM 进行提炼，解析失败或未配置时返回 null
    */
   async _callLLMRefinement(prompt, originalCount) {

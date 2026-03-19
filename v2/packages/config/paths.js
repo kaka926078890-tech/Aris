@@ -122,10 +122,6 @@ function getProactiveStatePath() {
   return path.join(getDataDir(), 'aris_proactive_state.json');
 }
 
-function getImportantDocumentsPath() {
-  return path.join(getDataDir(), 'important_documents.json');
-}
-
 function getProactiveConfigPath() {
   const name = getMemoryFiles().proactive_config || 'proactive_config.json';
   return path.join(getMemoryDir(), name);
@@ -148,11 +144,6 @@ function getSelfNotesPath() {
 
 function getUserProfileSummaryPath() {
   return path.join(getMemoryDir(), 'user_profile_summary.md');
-}
-
-function getExplorationNotesPath() {
-  const name = getMemoryFiles().exploration_notes || 'exploration_notes.json';
-  return path.join(getMemoryDir(), name);
 }
 
 function getArisIdeasPath() {
@@ -181,12 +172,10 @@ module.exports = {
   getStatePath,
   getProactiveStatePath,
   getTimelinePath,
-  getImportantDocumentsPath,
   getProactiveConfigPath,
   getBehaviorConfigPath,
   getAvoidPhrasesPath,
   getSelfNotesPath,
   getUserProfileSummaryPath,
-  getExplorationNotesPath,
   getArisIdeasPath,
 };

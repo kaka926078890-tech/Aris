@@ -4,7 +4,6 @@
  */
 const store = require('../../store');
 const { getRelatedAssociationsLines } = require('./associationContext.js');
-const { getImportantDocReminder } = require('./importantDocsReminder.js');
 const { readBehaviorConfig } = require('./prompt.js');
 
 const RECENT_ROUNDS = 3;
@@ -31,17 +30,6 @@ function getSubjectiveTimeDescription(lastActiveTimeIso) {
   return `现在是 ${nowStr}。距离上次活跃已过去 ${deltaMin} 分钟。`;
 }
 
-function getCorrectionsSummaryLine(correctionsList) {
-  if (!Array.isArray(correctionsList) || correctionsList.length === 0) return '';
-  const parts = correctionsList.slice(-2).map((t) => {
-    const m = (t || '').match(/用户纠正[：:]\s*([^\n]+)/);
-    return m ? m[1].trim().slice(0, 18) : '';
-  });
-  const raw = parts.filter(Boolean).join('、');
-  const line = raw.slice(0, 50);
-  return line ? `用户曾纠正：${line}。` : '';
-}
-
 function getRecentEmotionLine(emotionsList) {
   if (!Array.isArray(emotionsList) || emotionsList.length === 0) return '';
   const e = emotionsList[0];
@@ -54,45 +42,51 @@ function getRecentEmotionLine(emotionsList) {
  * 构建供 BFF（prompt）使用的完整上下文 DTO。
  * @param {string} sessionId
  * @param {Array} recent - 最近消息 [{ role, content, created_at }, ...]
- * @returns {Promise<object>} DTO: userIdentity, userRequirements, contextWindow, lastStateAndSubjectiveTime, relatedAssociations, recentSummary, reminderLine, correctionsLine, emotionLine, recentMessages
+ * @returns {Promise<object>} DTO: userIdentity, userConstraints, contextWindow, lastStateAndSubjectiveTime, relatedAssociations, recentSummary, emotionLine, recentMessages
  */
 async function buildContextDTO(sessionId, recent) {
   const facade = store.facade;
   const id = facade.getIdentity();
   const userIdentity = id.name ? `用户名字：${id.name}` + (id.notes ? '\n' + id.notes : '') : '（无）';
-  const userRequirements = facade.getRequirementsSummary();
+  const avoidPhrases = facade.getAvoidPhrasesForPrompt();
+  const userConstraintsParts = [
+    '【用户要求】',
+    facade.getRequirementsSummary() || '（无）',
+    '【纠错记录】',
+    facade.getCorrectionsFullSummary(),
+    '【用户喜好】',
+    facade.getPreferencesSummaryForPrompt() || '（无）',
+  ];
+  if (avoidPhrases && !String(avoidPhrases).includes('（未配置')) {
+    userConstraintsParts.push('【禁止用语】', avoidPhrases);
+  }
+  const userConstraints = userConstraintsParts.join('\n');
+  // 近期对话以「当前会话最近几轮」形式注入 system（带时间戳、完整），不再在 messages 中重复
   const contextWindow = recent
     .map((r) => {
       const who = r.role === 'user' ? '用户' : 'Aris';
       const timeLabel = formatMessageTime(r.created_at) ? ` (${formatMessageTime(r.created_at)}) ` : ' ';
       return `${who}${timeLabel}: ${r.content}`;
     })
-    .join('\n');
+    .join('\n') || '（暂无）';
   const state = facade.getState();
   const timeDesc = getSubjectiveTimeDescription(state?.last_active_time ?? null);
   const lastStateLine = state?.last_mental_state ? `你上一次的状态/想法是：${state.last_mental_state}` : '';
   const lastStateAndSubjectiveTime = [timeDesc, lastStateLine].filter(Boolean).join('\n') || '（无）';
   const relatedAssociations = await getRelatedAssociationsLines(sessionId, recent);
   const recentSummary = facade.getSessionSummary(sessionId);
-  const isSessionFirstMessage = recent.length === 1 && recent[0].role === 'user';
-  const reminderLine = getImportantDocReminder(isSessionFirstMessage);
   const behavior = readBehaviorConfig();
-  const correctionsLine = behavior.inject_corrections_summary
-    ? getCorrectionsSummaryLine(facade.getRecentCorrections(3))
-    : '';
   const emotionLine = behavior.inject_recent_emotion
     ? getRecentEmotionLine(facade.getRecentEmotions(1))
     : '';
   const recentMessages = recent.slice(-(RECENT_ROUNDS * 2));
   return {
     userIdentity,
-    userRequirements,
+    userConstraints,
     contextWindow,
     lastStateAndSubjectiveTime,
     relatedAssociations,
     recentSummary,
-    reminderLine,
-    correctionsLine,
     emotionLine,
     recentMessages,
   };

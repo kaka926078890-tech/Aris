@@ -86,6 +86,20 @@ function add(payload) {
   _write(list);
   const timeline = require('./timeline.js');
   timeline.appendEntry({ type: 'preference', payload: { id, topic: item[schema.topic_field], summary: item[schema.summary_field] }, actor: 'system' });
+  setImmediate(() => {
+    const Refiner = require('./requirements_refiner.js');
+    const refiner = new Refiner();
+    const all = _readRaw();
+    const tf = schema.topic_field || 'topic';
+    const sf = schema.summary_field || 'summary';
+    const lines = all.map((x) => (x[tf] === '_doc' ? String(x[sf] || '').trim() : `[${x[tf]}] ${x[sf]}`)).filter(Boolean);
+    if (lines.length) {
+      refiner.refineToDocument(lines, 'preferences').then((doc) => {
+        if (doc) replaceWithDocument(doc);
+        console.info('[Aris v2][store/preferences] 已自动总结为文档');
+      }).catch((e) => console.warn('[Aris v2][store/preferences] 自动总结失败', e?.message));
+    }
+  });
   return { success: true, id };
 }
 
@@ -101,7 +115,51 @@ function getSummaryForPrompt(options = {}) {
   const tf = schema.topic_field || 'topic';
   const items = listByTopic(topic, maxLines);
   if (!items.length) return '';
-  return items.map((x) => (topic ? x[sf] : `[${x[tf]}] ${x[sf]}`).trim()).filter(Boolean).join('\n');
+  const docItem = items.find((x) => x[tf] === '_doc' || x.topic === '_doc');
+  const others = items.filter((x) => x[tf] !== '_doc' && x.topic !== '_doc');
+  const docPart = docItem ? String(docItem[sf] || docItem.summary || '').trim() : '';
+  const othersPart = others.map((x) => (topic ? x[sf] : `[${x[tf]}] ${x[sf]}`).trim()).filter(Boolean).join('\n');
+  if (docPart && othersPart) return docPart + '\n\n' + othersPart;
+  if (docPart) return docPart;
+  return othersPart;
 }
 
-module.exports = { listByTopic, add, getSummaryForPrompt };
+/** 返回全部喜好条目，供管理页展示与编辑 */
+function listAll() {
+  return _readRaw();
+}
+
+/** 整体替换喜好列表（管理页编辑后保存）。list: 与 schema 兼容的项数组 */
+function replaceAll(list) {
+  if (!Array.isArray(list)) return;
+  const schema = _getSchema();
+  const normalized = list.map((item) => ({
+    ...item,
+    [schema.id_field]: item[schema.id_field] || item.id || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    [schema.topic_field]: String(item[schema.topic_field] ?? item.topic ?? '').trim() || '其他',
+    [schema.summary_field]: String(item[schema.summary_field] ?? item.summary ?? '').trim() || '（无）',
+    [schema.created_at_field]: item[schema.created_at_field] || item.created_at || new Date().toISOString(),
+    [schema.updated_at_field]: new Date().toISOString(),
+  })).filter((x) => (x[schema.summary_field] || '').trim() !== '');
+  _write(normalized);
+  console.info('[Aris v2][store/preferences] replaceAll', normalized.length);
+}
+
+/** 文档式：将一份完整文档存为单条（topic=_doc，summary=文档内容） */
+function replaceWithDocument(docString) {
+  const text = String(docString ?? '').trim();
+  if (!text) return;
+  const schema = _getSchema();
+  const now = new Date().toISOString();
+  const single = {
+    [schema.id_field]: `${Date.now()}-doc`,
+    [schema.topic_field]: '_doc',
+    [schema.summary_field]: text,
+    [schema.created_at_field]: now,
+    [schema.updated_at_field]: now,
+  };
+  _write([single]);
+  console.info('[Aris v2][store/preferences] replaceWithDocument 已写入 1 条');
+}
+
+module.exports = { listByTopic, add, getSummaryForPrompt, listAll, replaceAll, replaceWithDocument };

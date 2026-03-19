@@ -114,6 +114,7 @@
         <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="history" title="历史记录" aria-label="历史记录"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></button>
         <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="vector" title="向量数据库" aria-label="向量数据库"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg></button>
         <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="content" title="用户与 Aris" aria-label="用户与 Aris"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg></button>
+        <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="memory" title="记忆数据" aria-label="记忆数据"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg></button>
         <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="monitor" title="监控面板" aria-label="监控面板"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg></button>
         <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="prompt" title="提示词预览" aria-label="提示词预览"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg></button>
         <button type="button" class="sidebar-btn rounded-r hover:bg-slate-100" data-panel="settings" title="设置" aria-label="设置"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg></button>
@@ -184,6 +185,41 @@
           <p id="content-corrections-empty" class="text-slate-400 text-sm hidden">暂无</p>
         </div>
         <button type="button" id="content-refresh" class="icon-btn mt-2 p-2 rounded border border-slate-300 hover:bg-slate-100" title="刷新"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg></button>
+      </section>
+    </div>
+  </div>
+
+  <div id="panel-memory" class="panel hidden flex-1 flex flex-col min-h-0 overflow-hidden">
+    <div class="flex-shrink-0 flex items-center gap-2 px-3 py-2 border-b border-slate-200 bg-white">
+      <button type="button" class="memory-tab active px-2 py-1.5 text-sm rounded border border-sky-300 text-sky-700 bg-sky-50" data-memory-tab="requirements">用户要求</button>
+      <button type="button" class="memory-tab px-2 py-1.5 text-sm rounded border border-slate-300 text-slate-600" data-memory-tab="corrections">纠错记录</button>
+      <button type="button" class="memory-tab px-2 py-1.5 text-sm rounded border border-slate-300 text-slate-600" data-memory-tab="preferences">用户喜好</button>
+      <button type="button" class="memory-tab px-2 py-1.5 text-sm rounded border border-slate-300 text-slate-600" data-memory-tab="avoid">禁止用语</button>
+    </div>
+    <div class="flex-1 min-h-0 overflow-y-auto p-3 space-y-4">
+      <section id="memory-requirements" class="memory-section flex flex-col min-h-0">
+        <h2 class="text-sm font-medium text-slate-700 mb-2">用户要求</h2>
+        <p class="text-xs text-slate-500 mb-2">以下内容会完整注入提示词【用户约束】。以文档形式编辑，<strong>保存时会自动总结并刷新</strong>。</p>
+        <textarea id="memory-requirements-doc" class="flex-1 min-h-[200px] w-full rounded border border-slate-300 px-2 py-1.5 text-sm resize-y font-sans" placeholder="（暂无）"></textarea>
+        <button type="button" id="memory-requirements-save" class="mt-2 px-3 py-1.5 text-sm rounded bg-sky-600 text-white hover:bg-sky-700">保存</button>
+      </section>
+      <section id="memory-corrections" class="memory-section hidden flex flex-col min-h-0">
+        <h2 class="text-sm font-medium text-slate-700 mb-2">纠错记录</h2>
+        <p class="text-xs text-slate-500 mb-2">用户纠正过的表述，会完整注入【用户约束】。以文档形式编辑，<strong>保存时会自动总结并刷新</strong>。</p>
+        <textarea id="memory-corrections-doc" class="flex-1 min-h-[200px] w-full rounded border border-slate-300 px-2 py-1.5 text-sm resize-y font-sans" placeholder="（暂无）"></textarea>
+        <button type="button" id="memory-corrections-save" class="mt-2 px-3 py-1.5 text-sm rounded bg-sky-600 text-white hover:bg-sky-700">保存</button>
+      </section>
+      <section id="memory-preferences" class="memory-section hidden flex flex-col min-h-0">
+        <h2 class="text-sm font-medium text-slate-700 mb-2">用户喜好</h2>
+        <p class="text-xs text-slate-500 mb-2">会注入【用户约束】。以文档形式编辑（如：用户喜欢 a、b、c；不喜欢 x、y）。<strong>保存时会自动总结并刷新</strong>。</p>
+        <textarea id="memory-preferences-doc" class="flex-1 min-h-[200px] w-full rounded border border-slate-300 px-2 py-1.5 text-sm resize-y font-sans" placeholder="（暂无）"></textarea>
+        <button type="button" id="memory-preferences-save" class="mt-2 px-3 py-1.5 text-sm rounded bg-sky-600 text-white hover:bg-sky-700">保存</button>
+      </section>
+      <section id="memory-avoid" class="memory-section hidden flex flex-col min-h-0">
+        <h2 class="text-sm font-medium text-slate-700 mb-2">禁止用语</h2>
+        <p class="text-xs text-slate-500 mb-2">Aris 不应使用的表述，会注入【用户约束】。每行一条。</p>
+        <textarea id="memory-avoid-text" class="flex-1 min-h-[120px] w-full rounded border border-slate-300 px-2 py-1.5 text-sm resize-y" placeholder="每行一条禁止用语"></textarea>
+        <button type="button" id="memory-avoid-save" class="mt-2 px-3 py-1.5 text-sm rounded bg-sky-600 text-white hover:bg-sky-700">保存</button>
       </section>
     </div>
   </div>
@@ -364,6 +400,7 @@
       if (name === 'history') loadHistorySessions();
       if (name === 'monitor') loadMonitor();
       if (name === 'content') loadContentPanel();
+      if (name === 'memory') loadMemoryPanel();
       if (name === 'settings') loadSettingsPanel();
     }
 
@@ -980,6 +1017,91 @@
       await window.aris.writeIdentity({ name: name.trim(), notes: notes.trim() });
     });
     document.getElementById('content-refresh')?.addEventListener('click', loadContentPanel);
+
+    function showMemoryTab(tabName) {
+      document.querySelectorAll('.memory-tab').forEach((t) => {
+        t.classList.remove('active', 'border-sky-300', 'text-sky-700', 'bg-sky-50');
+        t.classList.add('border-slate-300', 'text-slate-600');
+      });
+      const btn = document.querySelector('.memory-tab[data-memory-tab="' + tabName + '"]');
+      if (btn) {
+        btn.classList.add('active', 'border-sky-300', 'text-sky-700', 'bg-sky-50');
+        btn.classList.remove('border-slate-300', 'text-slate-600');
+      }
+      document.querySelectorAll('.memory-section').forEach((s) => s.classList.add('hidden'));
+      const section = document.getElementById('memory-' + tabName);
+      if (section) section.classList.remove('hidden');
+    }
+    document.querySelectorAll('.memory-tab').forEach((btn) => {
+      btn.addEventListener('click', () => showMemoryTab(btn.dataset.memoryTab));
+    });
+
+    function buildDocFromRequirements(list) {
+      if (!Array.isArray(list) || !list.length) return '';
+      const textField = list[0].text !== undefined ? 'text' : (Object.keys(list[0]).find((k) => k !== 'id' && k !== 'created_at' && k !== 'updated_at') || 'text');
+      return list.map((item) => String(item[textField] ?? item.text ?? '').trim()).filter(Boolean).join('\n\n');
+    }
+    function buildDocFromCorrections(list) {
+      if (!Array.isArray(list) || !list.length) return '';
+      return list.map((item) => (typeof item === 'string' ? item : (item && item.text) || '')).filter(Boolean).join('\n\n');
+    }
+    function buildDocFromPreferences(list) {
+      if (!Array.isArray(list) || !list.length) return '';
+      const tf = 'topic';
+      const sf = 'summary';
+      return list.map((x) => (x[tf] === '_doc' || x.topic === '_doc') ? (x[sf] || x.summary || '') : `[${x[tf] || x.topic || ''}] ${x[sf] || x.summary || ''}`).filter(Boolean).join('\n\n');
+    }
+
+    async function loadMemoryPanel() {
+      if (!window.aris) return;
+      try {
+        const [requirements, corrections, preferences, avoid] = await Promise.all([
+          window.aris.getRequirements(0),
+          window.aris.getCorrectionsAll(),
+          window.aris.getPreferences(),
+          window.aris.getAvoidPhrases(),
+        ]);
+        const reqDoc = document.getElementById('memory-requirements-doc');
+        if (reqDoc) reqDoc.value = buildDocFromRequirements(requirements);
+        const corrDoc = document.getElementById('memory-corrections-doc');
+        if (corrDoc) corrDoc.value = buildDocFromCorrections(corrections);
+        const prefDoc = document.getElementById('memory-preferences-doc');
+        if (prefDoc) prefDoc.value = buildDocFromPreferences(preferences);
+        const avoidText = document.getElementById('memory-avoid-text');
+        if (avoidText) avoidText.value = (avoid && Array.isArray(avoid.avoid_phrases) ? avoid.avoid_phrases : []).join('\n');
+      } catch (e) { console.error(e); }
+    }
+
+    document.getElementById('memory-requirements-save')?.addEventListener('click', async () => {
+      if (!window.aris) return;
+      const ta = document.getElementById('memory-requirements-doc');
+      const doc = (ta && ta.value) ? ta.value.trim() : '';
+      if (doc) await window.aris.writeRequirementsAsDocument(doc);
+      if (window.aris.triggerRefinementAsDocument) await window.aris.triggerRefinementAsDocument('requirements');
+      loadMemoryPanel();
+    });
+    document.getElementById('memory-corrections-save')?.addEventListener('click', async () => {
+      if (!window.aris) return;
+      const ta = document.getElementById('memory-corrections-doc');
+      const doc = (ta && ta.value) ? ta.value.trim() : '';
+      if (doc) await window.aris.writeCorrectionsAsDocument(doc);
+      if (window.aris.triggerRefinementAsDocument) await window.aris.triggerRefinementAsDocument('corrections');
+      loadMemoryPanel();
+    });
+    document.getElementById('memory-preferences-save')?.addEventListener('click', async () => {
+      if (!window.aris) return;
+      const ta = document.getElementById('memory-preferences-doc');
+      const doc = (ta && ta.value) ? ta.value.trim() : '';
+      if (doc) await window.aris.writePreferencesAsDocument(doc);
+      if (window.aris.triggerRefinementAsDocument) await window.aris.triggerRefinementAsDocument('preferences');
+      loadMemoryPanel();
+    });
+    document.getElementById('memory-avoid-save')?.addEventListener('click', async () => {
+      if (!window.aris) return;
+      const ta = document.getElementById('memory-avoid-text');
+      const phrases = (ta && ta.value ? ta.value : '').split(/\n/).map((s) => s.trim()).filter(Boolean);
+      await window.aris.setAvoidPhrases(phrases);
+    });
 
     async function refreshOllamaStatus() {
       const lightEl = document.getElementById('ollama-light');

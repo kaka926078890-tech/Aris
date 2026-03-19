@@ -226,7 +226,40 @@ app.whenReady().then(() => {
 
     ipcMain.handle('content:getIdentity', () => (store.identity ? store.identity.readIdentity() : { name: '', notes: '' }));
     ipcMain.handle('content:writeIdentity', (_, data) => { if (store.identity) store.identity.writeIdentity(data); });
-    ipcMain.handle('content:getRequirements', () => (store.requirements ? store.requirements.listRecent(50) : []));
+    ipcMain.handle('content:getRequirements', (_, limit) => (store.requirements ? store.requirements.listRecent(limit === 0 ? 0 : (Number(limit) || 50)) : []));
+    ipcMain.handle('content:writeRequirements', (_, list) => { if (store.requirements && store.requirements.replaceAll) store.requirements.replaceAll(list); return { ok: true }; });
+    ipcMain.handle('content:writeRequirementsAsDocument', (_, doc) => {
+      if (!store.requirements || !store.requirements.replaceAll) return { ok: false };
+      const text = typeof doc === 'string' ? doc.trim() : '';
+      if (text) store.requirements.replaceAll([{ text }]);
+      return { ok: true };
+    });
+    ipcMain.handle('content:triggerRequirementsRefinement', async () => (store.requirements && store.requirements.triggerRefinementAsDocument ? await store.requirements.triggerRefinementAsDocument() : { success: false, message: '未加载' }));
+    ipcMain.handle('content:triggerRefinementAsDocument', async (_, category) => {
+      const RequirementsRefiner = require('../../packages/store/requirements_refiner.js');
+      const refiner = new RequirementsRefiner();
+      if (category === 'requirements' && store.requirements && store.requirements.triggerRefinementAsDocument) {
+        return await store.requirements.triggerRefinementAsDocument();
+      }
+      if (category === 'corrections' && store.corrections) {
+        const list = store.corrections.getRecentWithMeta ? store.corrections.getRecentWithMeta(0) : [];
+        const texts = list.map((x) => x.text).filter(Boolean);
+        if (!texts.length) return { success: false, message: '暂无纠错内容' };
+        const doc = await refiner.refineToDocument(texts, 'corrections');
+        if (store.corrections.replaceWithDocument) store.corrections.replaceWithDocument(doc);
+        return { success: true, message: '纠错已总结为一份文档' };
+      }
+      if (category === 'preferences' && store.preferences) {
+        const list = store.preferences.listAll ? store.preferences.listAll() : [];
+        const schema = { topic_field: 'topic', summary_field: 'summary' };
+        const lines = list.map((x) => `[${x[schema.topic_field] || x.topic || ''}] ${x[schema.summary_field] || x.summary || ''}`).filter(Boolean);
+        if (!lines.length) return { success: false, message: '暂无喜好内容' };
+        const doc = await refiner.refineToDocument(lines, 'preferences');
+        if (store.preferences.replaceWithDocument) store.preferences.replaceWithDocument(doc);
+        return { success: true, message: '喜好已总结为一份文档' };
+      }
+      return { success: false, message: '不支持的类别' };
+    });
     ipcMain.handle('content:getState', () => (store.state ? store.state.readState() : null));
     ipcMain.handle('content:getProactiveState', () => (store.state ? store.state.readProactiveState() : null));
     ipcMain.handle('content:getEmotionsRecent', (_, limit) => (store.emotions ? store.emotions.getRecent(Number(limit) || 20) : []));
@@ -236,6 +269,40 @@ app.whenReady().then(() => {
       return list.map((e) => ({ ...e, created_at_display_utc: formatUtc(e.created_at) || '' }));
     });
     ipcMain.handle('content:getCorrectionsRecent', (_, limit) => (store.corrections ? store.corrections.getRecent(Number(limit) || 20) : []));
+    ipcMain.handle('content:getCorrectionsAll', () => (store.corrections && store.corrections.getRecentWithMeta ? store.corrections.getRecentWithMeta(0) : []));
+    ipcMain.handle('content:writeCorrections', (_, list) => { if (store.corrections && store.corrections.replaceAll) store.corrections.replaceAll(list); return { ok: true }; });
+    ipcMain.handle('content:writeCorrectionsAsDocument', (_, doc) => {
+      if (!store.corrections || !store.corrections.replaceAll) return { ok: false };
+      const text = typeof doc === 'string' ? doc.trim() : '';
+      if (text) store.corrections.replaceAll([{ text }]);
+      return { ok: true };
+    });
+    ipcMain.handle('content:getPreferences', () => (store.preferences && store.preferences.listAll ? store.preferences.listAll() : []));
+    ipcMain.handle('content:writePreferences', (_, list) => { if (store.preferences && store.preferences.replaceAll) store.preferences.replaceAll(list); return { ok: true }; });
+    ipcMain.handle('content:writePreferencesAsDocument', (_, doc) => { if (store.preferences && store.preferences.replaceWithDocument) store.preferences.replaceWithDocument(doc); return { ok: true }; });
+    ipcMain.handle('content:getAvoidPhrases', () => {
+      try {
+        const { getAvoidPhrasesPath } = require('../../packages/config/paths.js');
+        const fs = require('fs');
+        const p = getAvoidPhrasesPath();
+        if (!fs.existsSync(p)) return { avoid_phrases: [] };
+        const raw = fs.readFileSync(p, 'utf8').trim();
+        const data = raw ? JSON.parse(raw) : {};
+        return { avoid_phrases: Array.isArray(data.avoid_phrases) ? data.avoid_phrases : [] };
+      } catch (e) { return { avoid_phrases: [] }; }
+    });
+    ipcMain.handle('content:setAvoidPhrases', (_, phrases) => {
+      try {
+        const { getAvoidPhrasesPath } = require('../../packages/config/paths.js');
+        const { getMemoryDir } = require('../../packages/config/paths.js');
+        const fs = require('fs');
+        const list = Array.isArray(phrases) ? phrases.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()) : [];
+        const dir = getMemoryDir();
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(getAvoidPhrasesPath(), JSON.stringify({ avoid_phrases: list }, null, 2), 'utf8');
+        return { ok: true };
+      } catch (e) { return { ok: false, error: e?.message }; }
+    });
 
     ipcMain.handle('config:get', () => ({ ...readConfig(), dataDir: getDataDir() }));
     ipcMain.handle('config:set', (_, data) => {

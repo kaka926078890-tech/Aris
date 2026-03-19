@@ -3,6 +3,7 @@
  * 逻辑层与工具层通过门面访问数据，避免直接依赖各 store 子模块。
  * 仅做读写与聚合，不包含「何时检索」「何时写」的策略。
  */
+const fs = require('fs');
 const identity = require('./identity.js');
 const requirements = require('./requirements.js');
 const state = require('./state.js');
@@ -10,6 +11,8 @@ const conversations = require('./conversations.js');
 const summaries = require('./summaries.js');
 const corrections = require('./corrections.js');
 const emotions = require('./emotions.js');
+const preferences = require('./preferences.js');
+const { getAvoidPhrasesPath } = require('../config/paths.js');
 
 let vectorModule = null;
 try {
@@ -49,6 +52,46 @@ function getSessionSummary(sessionId) {
 
 function getRecentCorrections(limit = 3) {
   return corrections.getRecent(limit);
+}
+
+/** 纠错完整摘要：全部纠错。若为单条文档（无「此前/用户纠正」格式或仅一条长文）则原样返回；否则格式化为「此前→用户纠正」列表 */
+function getCorrectionsFullSummary() {
+  const withMeta = corrections.getRecentWithMeta ? corrections.getRecentWithMeta(0) : [];
+  if (!withMeta.length) return '（无）';
+  if (withMeta.length === 1 && withMeta[0].text) {
+    const raw = withMeta[0].text;
+    if (raw.length > 400 || !/用户纠正[：:]|我此前说[：:]/.test(raw)) return raw;
+  }
+  const list = withMeta.map((x) => x.text);
+  const lines = list.map((raw) => {
+    const m = (raw || '').match(/用户纠正[：:]\s*([^\n]+)/);
+    const correction = m ? m[1].trim().slice(0, 80) : '';
+    const prev = (raw || '').match(/我此前说[：:]\s*([^\n]+)/);
+    const prevText = prev ? prev[1].trim().slice(0, 50) : '';
+    if (!correction) return null;
+    return prevText ? `· 此前：${prevText} → 用户纠正：${correction}` : `· 用户纠正：${correction}`;
+  }).filter(Boolean);
+  return lines.length ? lines.join('\n') : '（无）';
+}
+
+/** 用户喜好摘要：供【用户约束】注入，全部喜好（原先+新内容整块） */
+function getPreferencesSummaryForPrompt() {
+  return preferences.getSummaryForPrompt({ maxLines: 200 }) || '（无）';
+}
+
+/** 禁止用语列表：供【用户约束】注入，一行「禁止使用以下表述：xxx、yyy」 */
+function getAvoidPhrasesForPrompt() {
+  try {
+    const p = getAvoidPhrasesPath();
+    if (!fs.existsSync(p)) return '（未配置，可在 memory/avoid_phrases.json 中配置）';
+    const raw = fs.readFileSync(p, 'utf8').trim();
+    const data = raw ? JSON.parse(raw) : {};
+    const list = Array.isArray(data.avoid_phrases) ? data.avoid_phrases : (Array.isArray(data) ? data : []);
+    const phrases = list.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().slice(0, 30));
+    return phrases.length ? `禁止使用以下表述：${phrases.join('、')}` : '（未配置）';
+  } catch (_) {
+    return '（未配置）';
+  }
 }
 
 function getRecentEmotions(limit = 1) {
@@ -101,6 +144,9 @@ module.exports = {
   getRecentConversation,
   getSessionSummary,
   getRecentCorrections,
+  getCorrectionsFullSummary,
+  getPreferencesSummaryForPrompt,
+  getAvoidPhrasesForPrompt,
   getRecentEmotions,
   appendConversation,
   writeState,

@@ -269,7 +269,7 @@ async function maybeProactiveMessage() {
       '【情感记录】',
       emotionContext,
       '',
-      '（需要用户喜好如游戏、休息偏好时可调用 get_record（type 为 preferences）。）',
+      '用户喜好已在【用户约束】中，无需为此调用 get_record。',
       '',
       '若你想做某事（如查新闻、读文档），可直接在本轮调用相应工具；得到结果后用一句话对用户说出你的发现或感想。',
     ].filter(Boolean).join('\n');
