@@ -38,6 +38,45 @@ function getRecentEmotionLine(emotionsList) {
   return text ? `你最近记录的情感（强度${intensity}）：${text}。` : '';
 }
 
+function formatRestartRecoveryInfo(recoveryInfo) {
+  if (!recoveryInfo || !recoveryInfo.has_recovery_info) return '';
+  
+  const lines = [];
+  lines.push('【重启恢复信息】');
+  
+  if (recoveryInfo.recent_context) {
+    lines.push(`重启前正在处理：${recoveryInfo.recent_context}`);
+  }
+  
+  if (recoveryInfo.last_conversation && recoveryInfo.last_conversation.length > 0) {
+    lines.push('重启前最后几轮对话：');
+    recoveryInfo.last_conversation.forEach((msg, i) => {
+      const who = msg.role === 'user' ? '用户' : 'Aris';
+      const time = msg.created_at ? formatMessageTime(msg.created_at) : '';
+      lines.push(`  ${who}${time ? ` (${time})` : ''}: ${msg.content || ''}`);
+    });
+  }
+  
+  if (recoveryInfo.pending_tasks && recoveryInfo.pending_tasks.length > 0) {
+    lines.push('未完成的任务：');
+    recoveryInfo.pending_tasks.forEach((task, i) => {
+      if (!task.completed) {
+        const taskText = typeof task.task === 'string' ? task.task : JSON.stringify(task.task);
+        lines.push(`  ${i + 1}. ${taskText}`);
+      }
+    });
+  }
+  
+  if (recoveryInfo.thinking_questions && recoveryInfo.thinking_questions.length > 0) {
+    lines.push('正在思考的问题：');
+    recoveryInfo.thinking_questions.forEach((q, i) => {
+      lines.push(`  ${i + 1}. ${q}`);
+    });
+  }
+  
+  return lines.join('\n');
+}
+
 /**
  * 构建供 BFF（prompt）使用的完整上下文 DTO。
  * @param {string} sessionId
@@ -46,6 +85,11 @@ function getRecentEmotionLine(emotionsList) {
  */
 async function buildContextDTO(sessionId, recent) {
   const facade = store.facade;
+  
+  // 检查是否有重启恢复信息
+  const restartRecoveryInfo = facade.checkAndGetRestartRecovery();
+  const restartRecoveryLine = restartRecoveryInfo ? formatRestartRecoveryInfo(restartRecoveryInfo) : '';
+  
   const id = facade.getIdentity();
   const userIdentity = id.name ? `用户名字：${id.name}` + (id.notes ? '\n' + id.notes : '') : '（无）';
   const avoidPhrases = facade.getAvoidPhrasesForPrompt();
@@ -89,6 +133,7 @@ async function buildContextDTO(sessionId, recent) {
     recentSummary,
     emotionLine,
     recentMessages,
+    restartRecoveryLine,
   };
 }
 

@@ -156,6 +156,11 @@ function getActionCachePath() {
   return path.join(getMemoryDir(), name);
 }
 
+function getWorkStatePath() {
+  const name = getMemoryFiles().work_state || 'work_state.json';
+  return path.join(getMemoryDir(), name);
+}
+
 module.exports = {
   getV2Root,
   getDataDir,
@@ -184,4 +189,5 @@ module.exports = {
   getUserProfileSummaryPath,
   getArisIdeasPath,
   getActionCachePath,
+  getWorkStatePath,
 };

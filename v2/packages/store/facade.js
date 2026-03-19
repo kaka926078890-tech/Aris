@@ -19,6 +19,11 @@ try {
   vectorModule = require('./vector.js');
 } catch (_) {}
 
+let workStateModule = null;
+try {
+  workStateModule = require('./workState.js');
+} catch (_) {}
+
 // ---------- 读：供 BFF/contextBuilder 组上下文 ----------
 
 function getIdentity() {
@@ -98,6 +103,42 @@ function getRecentEmotions(limit = 1) {
   return emotions.getRecent(limit);
 }
 
+/** 获取重启后需要恢复的工作状态信息 */
+function getPostRestartRecoveryInfo() {
+  if (!workStateModule) return null;
+  return workStateModule.getPostRestartRecoveryInfo();
+}
+
+/** 清除重启状态（重启恢复后调用） */
+function clearRestartState() {
+  if (!workStateModule) return;
+  workStateModule.clearRestartState();
+}
+
+/** 添加未完成任务 */
+function addPendingTask(task) {
+  if (!workStateModule) return;
+  workStateModule.addPendingTask(task);
+}
+
+/** 获取未完成的任务 */
+function getPendingTasks() {
+  if (!workStateModule) return [];
+  return workStateModule.getPendingTasks();
+}
+
+/** 检查并获取重启恢复信息，如果存在则清除状态并返回信息 */
+function checkAndGetRestartRecovery() {
+  if (!workStateModule) return null;
+  const recoveryInfo = workStateModule.getPostRestartRecoveryInfo();
+  if (recoveryInfo && recoveryInfo.has_recovery_info) {
+    // 获取信息后清除状态，避免重复恢复
+    workStateModule.clearRestartState();
+    return recoveryInfo;
+  }
+  return null;
+}
+
 // ---------- 写：供逻辑层与工具执行后写回 ----------
 
 async function appendConversation(sessionId, role, content) {
@@ -148,6 +189,11 @@ module.exports = {
   getPreferencesSummaryForPrompt,
   getAvoidPhrasesForPrompt,
   getRecentEmotions,
+  getPostRestartRecoveryInfo,
+  clearRestartState,
+  addPendingTask,
+  getPendingTasks,
+  checkAndGetRestartRecovery,
   appendConversation,
   writeState,
   writeProactiveState,

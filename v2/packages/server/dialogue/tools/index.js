@@ -3,11 +3,13 @@ const { FILE_TOOLS, runFileTool } = require('./file.js');
 const { MEMORY_TOOLS, runMemoryTool } = require('./memory.js');
 const { TIME_TOOLS, runTimeTool } = require('./time.js');
 const { GIT_TOOLS, runGitTool } = require('./git.js');
+const { APP_TOOLS, runAppTool } = require('./app.js');
 
 const BASE_TOOLS = [
   ...RECORD_TOOLS,
   ...FILE_TOOLS,
   ...MEMORY_TOOLS,
+  ...APP_TOOLS,
   ...TIME_TOOLS,
   ...GIT_TOOLS,
 ];
@@ -59,6 +61,9 @@ async function runTool(name, args, context) {
   }
   if (GIT_TOOLS.some((t) => t.function.name === name)) {
     return runGitTool(name, a);
+  }
+  if (APP_TOOLS.some((t) => t.function.name === name)) {
+    return runAppTool(name, a);
   }
   if (name === 'fetch_url') {
     try {

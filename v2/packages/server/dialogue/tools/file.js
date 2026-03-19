@@ -63,7 +63,7 @@ const FILE_TOOLS = [
     type: 'function',
     function: {
       name: 'list_my_files',
-      description: '列出 v2 项目下的文件和子目录。可传 subpath 表示子目录。',
+      description: '列出 v2 项目下的文件和子目录。可传 subpath 表示子目录。调用前请先 get_dir_cache(subpath) 看是否有可复用目录缓存，未命中再调用本工具。',
       parameters: {
         type: 'object',
         properties: {
@@ -151,7 +151,7 @@ const FILE_TOOLS = [
     type: 'function',
     function: {
       name: 'delete_file',
-      description: '删除 v2 项目下的某个文件。',
+      description: '删除 v2 项目下的某个文件或文件夹。',
       parameters: {
         type: 'object',
         properties: {
@@ -287,7 +287,19 @@ async function runFileTool(name, args, context) {
     if (name === 'delete_file') {
       const relKey = normalizeRelForCache(a.relative_path || '');
       const p = resolvePath(a.relative_path || '');
-      if (fs.existsSync(p) && fs.statSync(p).isFile()) fs.unlinkSync(p);
+      
+      if (fs.existsSync(p)) {
+        const stat = fs.statSync(p);
+        if (stat.isDirectory()) {
+          // 是文件夹，使用 fs.rmSync 递归删除（Node.js 14+）
+          // recursive: true 表示递归删除，force: true 表示即使文件夹非空也删除
+          fs.rmSync(p, { recursive: true, force: true });
+        } else {
+          // 是文件，直接删除
+          fs.unlinkSync(p);
+        }
+      }
+      
       try {
         if (relKey) store.actionCache.invalidateFile({ file_path: relKey });
         if (relKey && !relKey.startsWith('memory/')) {

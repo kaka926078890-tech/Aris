@@ -343,10 +343,57 @@ app.whenReady().then(() => {
     proactiveTimer = setInterval(runProactiveCheck, PROACTIVE_INTERVAL_MS);
   }
 
+  async function resumePendingRestartTasks() {
+    try {
+      const workState = require('../../packages/store/workState.js');
+      const { getTools, runTool } = require('../../packages/server/dialogue/tools/index.js');
+      const pending = workState.getPendingTasks ? workState.getPendingTasks() : [];
+      if (!Array.isArray(pending) || pending.length === 0) return;
+
+      const sessionId = await store.conversations.getCurrentSessionId();
+      const toolNames = getTools().map((t) => t.function?.name).filter(Boolean);
+      const context = { sessionId, toolNames };
+
+      for (const p of pending) {
+        const idx = typeof p.index === 'number' ? p.index : -1;
+        const task = p?.task || {};
+        const resumeTools = Array.isArray(task.resume_tools) ? task.resume_tools : [];
+        const resumeMessage = typeof task.resume_message === 'string' ? task.resume_message : null;
+
+        if (resumeTools.length === 0) {
+          if (workState.completePendingTask && idx >= 0) workState.completePendingTask(idx);
+          continue;
+        }
+
+        for (const rt of resumeTools) {
+          const toolName = rt?.tool_name;
+          const toolArgs = rt?.args || {};
+          if (!toolName) continue;
+          // 避免重启循环：续跑中如果还要重启，则交给下一次显式触发
+          if (toolName === 'restart_application') continue;
+          const res = await runTool(toolName, toolArgs, context);
+          if (!res || res.ok === false) throw new Error(`resume tool failed: ${toolName}`);
+        }
+
+        const assistantText = resumeMessage || '重启后已继续执行未完成的任务。';
+        try {
+          await store.conversations.append(sessionId, 'assistant', assistantText);
+        } catch (_) {}
+
+        if (workState.completePendingTask && idx >= 0) workState.completePendingTask(idx);
+      }
+
+      if (workState.clearRestartState) workState.clearRestartState();
+    } catch (e) {
+      console.warn('[Aris v2][electron] resumePendingRestartTasks failed:', e?.message || e);
+    }
+  }
+
   createWindowFn = createWindow;
   createWindow();
   registerIpcHandlers();
-  startProactiveInterval();
+  // 启动时先续办重启任务，再开始 proactive
+  resumePendingRestartTasks().finally(() => startProactiveInterval());
 
   ensureOllamaStarted()
     .then((r) => {

@@ -16,5 +16,6 @@
   "self_notes": "self_notes.json",
   "exploration_notes": "exploration_notes.json",
   "aris_ideas": "aris_ideas.md",
-  "action_cache": "action_cache.json"
+  "action_cache": "action_cache.json",
+  "work_state": "work_state.json"
 }
