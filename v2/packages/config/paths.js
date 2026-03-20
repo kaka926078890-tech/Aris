@@ -23,6 +23,7 @@ function getMemoryFiles() {
       session_summaries: 'session_summaries.json',
       preferences: 'preferences.json',
       network_config: 'network_config.json',
+      constraints_brief: 'constraints_brief.json',
     };
   }
   return memoryFiles;
@@ -167,6 +168,11 @@ function getWorkStatePath() {
   return path.join(getMemoryDir(), name);
 }
 
+function getConstraintsBriefPath() {
+  const name = getMemoryFiles().constraints_brief || 'constraints_brief.json';
+  return path.join(getMemoryDir(), name);
+}
+
 module.exports = {
   getV2Root,
   getDataDir,
@@ -197,4 +203,5 @@ module.exports = {
   getArisIdeasRelativeKey,
   getActionCachePath,
   getWorkStatePath,
+  getConstraintsBriefPath,
 };

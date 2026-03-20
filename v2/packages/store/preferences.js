@@ -160,6 +160,9 @@ function replaceWithDocument(docString) {
   };
   _write([single]);
   console.info('[Aris v2][store/preferences] replaceWithDocument 已写入 1 条');
+  try {
+    require('./constraints_brief.js').scheduleRebuild();
+  } catch (_) {}
 }
 
 module.exports = { listByTopic, add, getSummaryForPrompt, listAll, replaceAll, replaceWithDocument };

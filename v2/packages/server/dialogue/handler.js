@@ -5,6 +5,12 @@ const store = require('../../store');
 const config = require('../../config');
 const { buildSystemPrompt } = require('./prompt.js');
 const { buildContextDTO } = require('./contextBuilder.js');
+const {
+  readPromptPlannerConfig,
+  runPromptPlanner,
+  appendPlannerMetricLine,
+  LEGACY_PLAN,
+} = require('./promptPlanner.js');
 const { getCurrentRelatedEntityIds } = require('./associationContext.js');
 const { maybeGenerateSummary } = require('./summaryGeneration.js');
 const { getTools, runTool } = require('./tools/index.js');
@@ -16,17 +22,56 @@ const { shouldBeQuiet, isResumingDialogue } = require('./quietResume.js');
 const RECENT_ROUNDS = 3;
 const facade = store.facade;
 
-async function buildPromptContext(sessionId, recent) {
+async function buildPromptContext(sessionId, recent, options = {}) {
   const dto = await buildContextDTO(sessionId, recent);
-  const systemPrompt = buildSystemPrompt(dto);
-  // 近期对话已完整放入 system 的【当前会话最近几轮】（带时间戳），此处只传当前这条用户消息，避免重复
   const lastMsg = recent.length ? recent[recent.length - 1] : null;
   const currentUserContent = lastMsg && lastMsg.role === 'user' ? lastMsg.content : (lastMsg ? lastMsg.content : '');
+
+  const plannerCfg = readPromptPlannerConfig();
+  let plan = LEGACY_PLAN;
+  let plannerResult = { plan, error: 'planner_disabled', plannerMessages: null };
+  if (plannerCfg.enabled) {
+    plannerResult = await runPromptPlanner({
+      lastUserMessage: currentUserContent || '',
+      recentWindowText: dto.recentWindowForPlanner || '',
+      constraintsBriefText: dto.constraintsBriefBlock || '',
+      signal: options.signal,
+    });
+    plan = plannerResult.plan;
+  }
+
+  const systemPrompt = buildSystemPrompt(dto, plan, { enabled: plannerCfg.enabled });
+  if (plannerCfg.enabled && plannerCfg.log_metrics) {
+    appendPlannerMetricLine({
+      planner_error: plannerResult.error,
+      plan,
+      system_chars: systemPrompt.length,
+    });
+  }
+
   const messages = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: currentUserContent || '' },
   ];
-  return { systemPrompt, messages };
+  const out = { systemPrompt, messages };
+  if (options.includePlannerInPreview) {
+    if (plannerCfg.enabled) {
+      out.plannerPreview = {
+        messages: plannerResult.plannerMessages || [],
+        responseRaw: plannerResult.raw,
+        plan: plannerResult.plan,
+        error: plannerResult.error,
+      };
+    } else {
+      out.plannerPreview = {
+        disabled: true,
+        plan: LEGACY_PLAN,
+        messages: [],
+        note: 'Prompt Planner 未启用（environment ARIS_PROMPT_PLANNER_ENABLED=false 或 memory/behavior_config.json 中 prompt_planner_enabled: false）。本回合固定使用 LEGACY_PLAN（全文约束 + 全场景）。',
+      };
+    }
+  }
+  return out;
 }
 
 function filterReplyForDisplay(text) {
@@ -80,7 +125,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   console.info('[Aris v2] 用户消息:', userPreview);
 
   const recent = await facade.getRecentConversation(sessionId, RECENT_ROUNDS * 2 + 2);
-  const { messages } = await buildPromptContext(sessionId, recent);
+  const { messages } = await buildPromptContext(sessionId, recent, { signal });
   const sysLen = (messages[0] && messages[0].content) ? String(messages[0].content).length : 0;
   console.info('[Aris v2] 本轮 prompt: system 约', sysLen, '字, 消息数', messages.length);
 
@@ -296,14 +341,54 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   return { content: contentForFrontend, error: err, sessionId };
 }
 
+function formatMessagesBlock(msgs) {
+  if (!Array.isArray(msgs) || !msgs.length) return '';
+  return msgs.map((m) => `【${m.role}】\n${m.content ?? ''}`).join('\n\n---\n\n');
+}
+
 async function getPromptPreview(userMessage) {
   const sessionId = await facade.getCurrentSessionId();
   const recent = await facade.getRecentConversation(sessionId, RECENT_ROUNDS * 2 + 2);
   const forBuild = typeof userMessage === 'string' && userMessage.trim()
     ? [...recent, { role: 'user', content: userMessage.trim() }]
     : recent;
-  const { systemPrompt, messages } = await buildPromptContext(sessionId, forBuild);
-  return { systemPrompt, messages, promptText: '【系统】\n' + systemPrompt + '\n\n【对话】\n' + messages.filter((m) => m.role !== 'system').map((m) => `${m.role}: ${m.content}`).join('\n') };
+  const ctx = await buildPromptContext(sessionId, forBuild, { includePlannerInPreview: true });
+
+  let plannerSectionText = '';
+  const pp = ctx.plannerPreview;
+  if (pp?.disabled) {
+    plannerSectionText = `${pp.note}\n\n生效 plan（JSON）：\n${JSON.stringify(pp.plan, null, 2)}`;
+  } else if (pp?.messages?.length) {
+    plannerSectionText =
+      formatMessagesBlock(pp.messages) +
+      '\n\n---\n\n【assistant 返回（原始）】\n' +
+      (pp.responseRaw || '（无）');
+    if (pp.error) plannerSectionText += `\n\n（状态：${pp.error}）`;
+    plannerSectionText += `\n\n生效 plan（JSON）：\n${JSON.stringify(pp.plan, null, 2)}`;
+  } else {
+    plannerSectionText = '（无 Planner 消息）';
+  }
+
+  const mainSectionText =
+    '【system】\n' +
+    ctx.systemPrompt +
+    '\n\n【user】\n' +
+    (ctx.messages[1]?.content ?? '');
+
+  const promptText =
+    '========== ① Prompt Planner（编排 LLM）==========\n\n' +
+    plannerSectionText +
+    '\n\n========== ② 主对话 ==========\n\n' +
+    mainSectionText;
+
+  return {
+    systemPrompt: ctx.systemPrompt,
+    messages: ctx.messages,
+    plannerPreview: ctx.plannerPreview,
+    plannerSectionText,
+    mainSectionText,
+    promptText,
+  };
 }
 
 module.exports = { handleUserMessage, getPromptPreview };

@@ -31,6 +31,9 @@ function appendCorrection(previous, correction) {
   const timeline = require('./timeline.js');
   timeline.appendEntry({ type: 'correction', payload: item, actor: 'system' });
   console.info('[Aris v2][store/corrections] appended');
+  try {
+    require('./constraints_brief.js').scheduleRebuild();
+  } catch (_) {}
   setImmediate(() => {
     const Refiner = require('./requirements_refiner.js');
     const refiner = new Refiner();
@@ -79,6 +82,9 @@ async function replaceWithDocument(docString) {
   const text = String(docString ?? '').trim();
   if (!text) return;
   replaceAll([{ text, created_at: new Date().toISOString() }]);
+  try {
+    require('./constraints_brief.js').scheduleRebuild();
+  } catch (_) {}
 }
 
 module.exports = { appendCorrection, getRecent, getRecentWithMeta, replaceAll, replaceWithDocument };

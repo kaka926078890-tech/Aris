@@ -17,5 +17,6 @@
   "exploration_notes": "exploration_notes.json",
   "aris_ideas": "aris_ideas.md",
   "action_cache": "action_cache.json",
-  "work_state": "work_state.json"
+  "work_state": "work_state.json",
+  "constraints_brief": "constraints_brief.json"
 }

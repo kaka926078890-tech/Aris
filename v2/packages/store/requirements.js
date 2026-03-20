@@ -317,6 +317,9 @@ async function triggerRefinementAsDocument() {
     };
     _writeList([singleItem], null);
     console.info('[Aris v2][store/requirements] 文档式总结已写入 1 条');
+    try {
+      require('./constraints_brief.js').scheduleRebuild();
+    } catch (_) {}
     return { success: true, message: '已总结为一份文档，未遗漏任何内容' };
   } catch (e) {
     console.error('[Aris v2][store/requirements] triggerRefinementAsDocument failed', e?.message);

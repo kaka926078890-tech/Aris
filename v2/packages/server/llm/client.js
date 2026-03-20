@@ -21,7 +21,8 @@ function preview(str, maxLen) {
   return s.slice(0, maxLen) + '…';
 }
 
-async function chat(messages) {
+async function chat(messages, options = {}) {
+  const { signal, max_tokens: maxTokensOverride, temperature: temperatureOverride } = options || {};
   const { apiKey, apiUrl } = getApiConfig();
   if (!apiKey) {
     console.warn('[Aris v2] DEEPSEEK_API_KEY not set');
@@ -31,6 +32,7 @@ async function chat(messages) {
     const msgCount = Array.isArray(messages) ? messages.length : 0;
     console.info('[Aris v2] DeepSeek chat request: messages=', msgCount, 'url=', apiUrl);
     const res = await fetch(`${apiUrl}/v1/chat/completions`, {
+      signal: signal || undefined,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -39,8 +41,8 @@ async function chat(messages) {
       body: JSON.stringify({
         model: 'deepseek-chat',
         messages,
-        max_tokens: MAX_TOKENS_STREAM,
-        temperature: 0.7,
+        max_tokens: maxTokensOverride != null ? maxTokensOverride : MAX_TOKENS_STREAM,
+        temperature: temperatureOverride != null ? temperatureOverride : 0.7,
       }),
     });
     if (!res.ok) throw new Error(`DeepSeek ${res.status}: ${await res.text()}`);
@@ -52,6 +54,7 @@ async function chat(messages) {
     if (content) console.info('[Aris v2] DeepSeek chat 返回内容:', preview(content, LOG_PREVIEW_LEN));
     return { content, tool_calls: msg.tool_calls ?? null, error: false };
   } catch (e) {
+    if (e && e.name === 'AbortError') return { content: '', tool_calls: null, error: true, aborted: true };
     console.error('[Aris v2] chat error', e);
     return { content: `[请求失败: ${e.message}]`, tool_calls: null, error: true };
   }

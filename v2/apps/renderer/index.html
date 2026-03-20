@@ -274,9 +274,28 @@
   <div id="panel-prompt" class="panel hidden flex-1 flex flex-col min-h-0 overflow-hidden">
     <div class="flex-shrink-0 p-3 border-b border-slate-200 bg-white flex gap-2">
       <input type="text" id="prompt-preview-input" placeholder="可选：模拟用户输入" class="flex-1 rounded border border-slate-300 px-2 py-1.5 text-sm" />
-      <button id="prompt-preview-btn" class="icon-btn rounded bg-sky-600 text-white p-2 hover:bg-sky-700" title="获取预览"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg></button>
+      <button id="prompt-preview-btn" class="icon-btn rounded bg-sky-600 text-white p-2 hover:bg-sky-700" title="获取预览（含 Planner + 主对话）"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg></button>
     </div>
-    <pre id="prompt-preview-output" class="flex-1 overflow-auto p-3 text-xs bg-slate-100 border border-slate-200 rounded m-3 whitespace-pre-wrap font-sans"></pre>
+    <div class="flex-1 flex flex-col min-h-0 gap-2 p-3 overflow-hidden">
+      <div class="flex-1 flex flex-col min-h-0 border border-slate-200 rounded overflow-hidden bg-white">
+        <div class="flex items-center justify-between gap-2 px-2 py-1.5 bg-slate-50 border-b border-slate-200 flex-shrink-0">
+          <span class="text-xs font-medium text-slate-600 truncate" title="主对话前会先调用编排 LLM">① Prompt Planner（编排）</span>
+          <button type="button" id="prompt-copy-planner" class="icon-btn p-1.5 rounded text-slate-500 hover:bg-slate-200 hover:text-slate-800 flex-shrink-0" title="复制本段" aria-label="复制 Prompt Planner 段">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          </button>
+        </div>
+        <pre id="prompt-planner-output" class="flex-1 overflow-auto p-2 text-xs bg-slate-50 whitespace-pre-wrap font-sans min-h-[100px]"></pre>
+      </div>
+      <div class="flex-1 flex flex-col min-h-0 border border-slate-200 rounded overflow-hidden bg-white">
+        <div class="flex items-center justify-between gap-2 px-2 py-1.5 bg-slate-50 border-b border-slate-200 flex-shrink-0">
+          <span class="text-xs font-medium text-slate-600 truncate">② 主对话</span>
+          <button type="button" id="prompt-copy-main" class="icon-btn p-1.5 rounded text-slate-500 hover:bg-slate-200 hover:text-slate-800 flex-shrink-0" title="复制本段" aria-label="复制主对话段">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          </button>
+        </div>
+        <pre id="prompt-main-output" class="flex-1 overflow-auto p-2 text-xs bg-slate-100 whitespace-pre-wrap font-sans min-h-[100px]"></pre>
+      </div>
+    </div>
   </div>
 
   <div id="panel-settings" class="panel hidden flex-1 flex flex-col min-h-0 overflow-hidden overflow-x-hidden">
@@ -1193,13 +1212,46 @@
       }
     });
 
+    let promptPreviewPlannerText = '';
+    let promptPreviewMainText = '';
+    async function copyToClipboard(text) {
+      const t = String(text || '');
+      if (!t) return;
+      try {
+        await navigator.clipboard.writeText(t);
+      } catch (_) {
+        const ta = document.createElement('textarea');
+        ta.value = t;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand('copy');
+        } catch (e2) {}
+        document.body.removeChild(ta);
+      }
+    }
     document.getElementById('prompt-preview-btn').addEventListener('click', async () => {
       const input = document.getElementById('prompt-preview-input').value.trim();
       if (!window.aris) return;
-      const data = await window.aris.getPromptPreview(input || undefined);
-      const pre = document.getElementById('prompt-preview-output');
-      pre.textContent = data && data.promptText ? data.promptText : (data ? JSON.stringify(data, null, 2) : '无数据');
+      const plannerPre = document.getElementById('prompt-planner-output');
+      const mainPre = document.getElementById('prompt-main-output');
+      plannerPre.textContent = '加载中…';
+      mainPre.textContent = '加载中…';
+      try {
+        const data = await window.aris.getPromptPreview(input || undefined);
+        promptPreviewPlannerText = (data && data.plannerSectionText) || '';
+        promptPreviewMainText = (data && data.mainSectionText) || '';
+        plannerPre.textContent = promptPreviewPlannerText || (data ? JSON.stringify(data.plannerPreview, null, 2) : '无数据');
+        mainPre.textContent = promptPreviewMainText || (data && data.systemPrompt ? '【system】\n' + data.systemPrompt : '无数据');
+      } catch (e) {
+        plannerPre.textContent = '请求失败：' + (e && e.message ? e.message : e);
+        mainPre.textContent = '';
+      }
     });
+    document.getElementById('prompt-copy-planner').addEventListener('click', () => copyToClipboard(promptPreviewPlannerText));
+    document.getElementById('prompt-copy-main').addEventListener('click', () => copyToClipboard(promptPreviewMainText));
   </script>
 </body>
 </html>

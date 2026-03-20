@@ -3,6 +3,7 @@
  * 不直接写 store，不调 LLM，不执行工具。
  */
 const store = require('../../store');
+const constraintsBrief = require('../../store/constraints_brief.js');
 const { getRelatedAssociationsLines } = require('./associationContext.js');
 const { readBehaviorConfig } = require('./prompt.js');
 
@@ -41,14 +42,14 @@ function getRecentEmotionLine(emotionsList) {
 
 function formatRestartRecoveryInfo(recoveryInfo) {
   if (!recoveryInfo || !recoveryInfo.has_recovery_info) return '';
-  
+
   const lines = [];
   lines.push('【重启恢复信息】');
-  
+
   if (recoveryInfo.recent_context) {
     lines.push(`重启前正在处理：${recoveryInfo.recent_context}`);
   }
-  
+
   if (recoveryInfo.last_conversation && recoveryInfo.last_conversation.length > 0) {
     lines.push('重启前最后几轮对话：');
     recoveryInfo.last_conversation.forEach((msg, i) => {
@@ -57,7 +58,7 @@ function formatRestartRecoveryInfo(recoveryInfo) {
       lines.push(`  ${who}${time ? ` (${time})` : ''}: ${msg.content || ''}`);
     });
   }
-  
+
   if (recoveryInfo.pending_tasks && recoveryInfo.pending_tasks.length > 0) {
     lines.push('未完成的任务：');
     recoveryInfo.pending_tasks.forEach((task, i) => {
@@ -67,34 +68,45 @@ function formatRestartRecoveryInfo(recoveryInfo) {
       }
     });
   }
-  
+
   if (recoveryInfo.thinking_questions && recoveryInfo.thinking_questions.length > 0) {
     lines.push('正在思考的问题：');
     recoveryInfo.thinking_questions.forEach((q, i) => {
       lines.push(`  ${i + 1}. ${q}`);
     });
   }
-  
+
   return lines.join('\n');
+}
+
+/** 供 Prompt Planner 的短窗口（与 system 里「最近几轮」区分，控制长度） */
+function formatRecentWindowForPlanner(recent) {
+  if (!Array.isArray(recent) || !recent.length) return '';
+  return recent
+    .slice(-8)
+    .map((m) => {
+      const role = m.role === 'user' ? '用户' : 'Aris';
+      return `${role}: ${String(m.content || '').slice(0, 800)}`;
+    })
+    .join('\n');
 }
 
 /**
  * 构建供 BFF（prompt）使用的完整上下文 DTO。
  * @param {string} sessionId
  * @param {Array} recent - 最近消息 [{ role, content, created_at }, ...]
- * @returns {Promise<object>} DTO: userIdentity, userConstraints, contextWindow, lastStateAndSubjectiveTime, relatedAssociations, recentSummary, emotionLine, recentMessages
  */
 async function buildContextDTO(sessionId, recent) {
   const facade = store.facade;
-  
-  // 检查是否有重启恢复信息
+
   const restartRecoveryInfo = facade.checkAndGetRestartRecovery();
   const restartRecoveryLine = restartRecoveryInfo ? formatRestartRecoveryInfo(restartRecoveryInfo) : '';
-  
+
   const id = facade.getIdentity();
   const userIdentity = id.name ? `用户名字：${id.name}` + (id.notes ? '\n' + id.notes : '') : '（无）';
-  const avoidPhrases = facade.getAvoidPhrasesForPrompt();
-  const userConstraintsParts = [
+  const avoidPhrasesLine = facade.getAvoidPhrasesForPrompt();
+
+  const userConstraintsPartsNoAvoid = [
     '【用户要求】',
     facade.getRequirementsSummary() || '（无）',
     '【纠错记录】',
@@ -102,18 +114,26 @@ async function buildContextDTO(sessionId, recent) {
     '【用户喜好】',
     facade.getPreferencesSummaryForPrompt() || '（无）',
   ];
-  if (avoidPhrases && !String(avoidPhrases).includes('（未配置')) {
-    userConstraintsParts.push('【禁止用语】', avoidPhrases);
+  const userConstraintsFull = userConstraintsPartsNoAvoid.join('\n');
+
+  let userConstraintsLegacy = userConstraintsFull;
+  if (avoidPhrasesLine && !String(avoidPhrasesLine).includes('（未配置')) {
+    userConstraintsLegacy = `${userConstraintsFull}\n【禁止用语】\n${avoidPhrasesLine}`;
   }
-  const userConstraints = userConstraintsParts.join('\n');
-  // 近期对话以「当前会话最近几轮」形式注入 system（带时间戳、完整），不再在 messages 中重复
-  const contextWindow = recent
-    .map((r) => {
-      const who = r.role === 'user' ? '用户' : 'Aris';
-      const timeLabel = formatMessageTime(r.created_at) ? ` (${formatMessageTime(r.created_at)}) ` : ' ';
-      return `${who}${timeLabel}: ${r.content}`;
-    })
-    .join('\n') || '（暂无）';
+
+  await constraintsBrief.ensureBriefIfNeeded();
+  const briefRecord = constraintsBrief.readBrief();
+  const constraintsBriefBlock = constraintsBrief.formatBriefForPrompt(briefRecord || constraintsBrief._fallbackBrief());
+  const recentWindowForPlanner = formatRecentWindowForPlanner(recent);
+
+  const contextWindow =
+    recent
+      .map((r) => {
+        const who = r.role === 'user' ? '用户' : 'Aris';
+        const timeLabel = formatMessageTime(r.created_at) ? ` (${formatMessageTime(r.created_at)}) ` : ' ';
+        return `${who}${timeLabel}: ${r.content}`;
+      })
+      .join('\n') || '（暂无）';
   const state = facade.getState();
   const timeDesc = getSubjectiveTimeDescription(state?.last_active_time ?? null);
   const rawState = state?.last_mental_state || '';
@@ -122,13 +142,16 @@ async function buildContextDTO(sessionId, recent) {
   const relatedAssociations = await getRelatedAssociationsLines(sessionId, recent);
   const recentSummary = facade.getSessionSummary(sessionId) || '（无）';
   const behavior = readBehaviorConfig();
-  const emotionLine = behavior.inject_recent_emotion
-    ? getRecentEmotionLine(facade.getRecentEmotions(1))
-    : '';
+  const emotionLine = behavior.inject_recent_emotion ? getRecentEmotionLine(facade.getRecentEmotions(1)) : '';
   const recentMessages = recent.slice(-(RECENT_ROUNDS * 2));
   return {
     userIdentity,
-    userConstraints,
+    /** @deprecated 使用 userConstraintsFull + avoidPhrasesLine；保留兼容旧日志 */
+    userConstraints: userConstraintsLegacy,
+    userConstraintsFull,
+    avoidPhrasesLine,
+    constraintsBriefBlock,
+    recentWindowForPlanner,
     contextWindow,
     lastStateAndSubjectiveTime,
     relatedAssociations,
