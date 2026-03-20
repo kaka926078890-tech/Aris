@@ -11,18 +11,30 @@ function maxRetries() {
   return 3;
 }
 
-/** 是否适合重试（非业务 4xx） */
-function isTransientNetError(e) {
+/**
+ * 是否适合重试。用户中止时不要重试；「terminated」多为 undici 在 abort 时抛的 TypeError，易与 ECONNRESET 混淆，故不按字面 retry。
+ * @param {AbortSignal | undefined} signal
+ */
+function isTransientNetError(e, signal) {
   if (!e || e.name === 'AbortError') return false;
+  if (signal && signal.aborted) return false;
   const c = e.cause || e;
   const code = c.code || e.code;
   const msg = String(e.message || '');
   if (code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'ECONNABORTED' || code === 'ENETUNREACH' || code === 'EAI_AGAIN') {
     return true;
   }
-  if (msg.includes('ECONNRESET') || msg.includes('terminated') || msg.includes('fetch failed') || msg.includes('socket')) {
+  if (msg.includes('ECONNRESET') || msg.includes('fetch failed') || msg.includes('socket')) {
     return true;
   }
+  return false;
+}
+
+/** 是否为用户主动中断（与网络失败区分，便于上层返回 aborted） */
+function isLikelyUserAbort(e, signal) {
+  if (!e) return false;
+  if (e.name === 'AbortError') return true;
+  if (signal && signal.aborted) return true;
   return false;
 }
 
@@ -55,10 +67,14 @@ async function postJsonWithRetry(url, init, logLabel = 'llm') {
       }
     } catch (e) {
       lastErr = e;
-      if (attempt < cap - 1 && isTransientNetError(e)) {
+      if (init.signal?.aborted || e.name === 'AbortError') {
+        throw e;
+      }
+      if (attempt < cap - 1 && isTransientNetError(e, init.signal)) {
         const wait = 400 * Math.pow(2, attempt);
         console.warn(`[Aris v2] ${logLabel} transient network error, retry ${attempt + 1}/${cap - 1} in ${wait}ms`, e?.message || e);
         await sleep(wait);
+        if (init.signal?.aborted) throw e;
         continue;
       }
       throw e;
@@ -67,4 +83,4 @@ async function postJsonWithRetry(url, init, logLabel = 'llm') {
   throw lastErr;
 }
 
-module.exports = { postJsonWithRetry, isTransientNetError, maxRetries };
+module.exports = { postJsonWithRetry, isTransientNetError, isLikelyUserAbort, maxRetries };

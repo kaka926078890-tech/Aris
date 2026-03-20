@@ -4,7 +4,7 @@
 require('dotenv').config();
 
 const { getChatTemperature } = require('./temperature.js');
-const { postJsonWithRetry } = require('./fetchRetry.js');
+const { postJsonWithRetry, isLikelyUserAbort } = require('./fetchRetry.js');
 
 const MAX_TOKENS_STREAM = Math.min(Number(process.env.ARIS_STREAM_MAX_TOKENS) || 8192, 32768);
 const MAX_TOKENS_TOOLS = Math.min(Number(process.env.ARIS_TOOL_MAX_TOKENS) || 8192, 32768);
@@ -59,7 +59,7 @@ async function chat(messages, options = {}) {
     if (content) console.info('[Aris v2] DeepSeek chat 返回内容:', preview(content, LOG_PREVIEW_LEN));
     return { content, tool_calls: msg.tool_calls ?? null, error: false };
   } catch (e) {
-    if (e && e.name === 'AbortError') return { content: '', tool_calls: null, error: true, aborted: true };
+    if (isLikelyUserAbort(e, signal)) return { content: '', tool_calls: null, error: true, aborted: true };
     console.error('[Aris v2] chat error', e);
     return { content: `[请求失败: ${e.message}]`, tool_calls: null, error: true };
   }
@@ -121,7 +121,7 @@ async function chatWithTools(messages, tools, signal) {
       usage,
     };
   } catch (e) {
-    if (e && e.name === 'AbortError') return { content: '', tool_calls: null, error: true, aborted: true };
+    if (isLikelyUserAbort(e, signal)) return { content: '', tool_calls: null, error: true, aborted: true };
     console.error('[Aris v2] chatWithTools error', e);
     return { content: `[请求失败: ${e.message}]`, tool_calls: null, error: true };
   }
