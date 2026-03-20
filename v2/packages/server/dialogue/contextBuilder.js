@@ -79,14 +79,19 @@ function formatRestartRecoveryInfo(recoveryInfo) {
   return lines.join('\n');
 }
 
-/** 供 Prompt Planner 的短窗口（与 system 里「最近几轮」区分，控制长度） */
+/**
+ * 供 Prompt Planner 的极短窗口：主对话 system 已含【当前会话最近几轮】全量，
+ * 此处仅保留末尾若干条、单条截断，避免与主 prompt 重复堆叠。
+ */
 function formatRecentWindowForPlanner(recent) {
   if (!Array.isArray(recent) || !recent.length) return '';
+  const PLANNER_RECENT_MAX = 4;
+  const PLANNER_MSG_CHARS = 480;
   return recent
-    .slice(-8)
+    .slice(-PLANNER_RECENT_MAX)
     .map((m) => {
       const role = m.role === 'user' ? '用户' : 'Aris';
-      return `${role}: ${String(m.content || '').slice(0, 800)}`;
+      return `${role}: ${String(m.content || '').slice(0, PLANNER_MSG_CHARS)}`;
     })
     .join('\n');
 }

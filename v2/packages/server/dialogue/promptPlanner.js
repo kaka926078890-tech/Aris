@@ -86,13 +86,15 @@ async function runPromptPlanner(input) {
 
   const system = `你是 Aris 的「提示词编排」助手，只输出一个 JSON 对象，不要 markdown，不要解释。
 
+说明：主对话模型的 system 会注入【当前会话最近几轮】的完整近窗（与下面【最近对话摘录】可能重叠）。下方摘录是**刻意截短的节选**，仅用于你判断场景与风险；**不要**因摘录较短就假定主模型看不到更早内容。
+
 字段（必须全部出现）：
 - scenes: 字符串数组，元素只能为 "code_operation" | "memory_operation" | "restart"
   - code_operation：本回合涉及查看/修改项目代码、读文件、目录结构、实现功能、排查 bug
   - memory_operation：本回合涉及 memory/ 路径、持久化记忆文件、search_memories、向量记忆检索
   - restart：用户明确要求重启应用、npm start、重新启动应用
   纯闲聊、情绪倾诉、无上述需求时 scenes 必须为 []
-- need_full_constraints: boolean。为 true 时主对话会注入【用户约束】全文（要求+纠错+喜好完整）。用户表达不满、强调「又错了」「别忘了」「按我说的」「纠正」、或明显在追究过往错误时应为 true。
+- need_full_constraints: boolean。为 true 时主对话会注入【用户约束】全文（要求+纠错+喜好完整），否则通常只注入【用户约束摘要】。用户表达不满、强调「又错了」「别忘了」「按我说的」「纠正」、或明显在追究过往错误时应为 true。
 - need_session_summary: boolean。需要回顾较长会话脉络、小结里可能有用的信息时为 true；极短闲聊可为 false。
 - need_related_associations: boolean。话题涉及具体人物、项目、游戏等实体关联记忆时为 true。
 - need_last_state: boolean。一般保持 true；仅当用户消息与上下文完全无关且不需要「你上次状态」时可 false。
@@ -100,7 +102,7 @@ async function runPromptPlanner(input) {
 
 原则：宁可在不确定时把 need_full_constraints 设为 true，避免遗漏用户已强调的规则。`;
 
-  const userMsg = `【当前用户消息】\n${user}\n\n【最近对话摘录】\n${recent || '（无）'}\n\n【已提供的用户约束摘要（brief）】\n${brief || '（无）'}`;
+  const userMsg = `【当前用户消息】\n${user}\n\n【最近对话摘录（短节选，主对话另有全窗）】\n${recent || '（无）'}\n\n【用户约束摘要（与主对话将注入的摘要一致，供判断全文开关）】\n${brief || '（无）'}`;
 
   const plannerMessages = [
     { role: 'system', content: system },
