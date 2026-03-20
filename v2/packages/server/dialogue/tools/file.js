@@ -69,7 +69,7 @@ const FILE_TOOLS = [
     type: 'function',
     function: {
       name: 'list_my_files',
-      description: '列出 v2 项目下的文件和子目录。可传 subpath 表示子目录。调用前请先 get_dir_cache(subpath) 看是否有可复用目录缓存，未命中再调用本工具。',
+      description: '列出 v2 项目下的文件和子目录。可传 subpath 表示子目录。内部会优先使用目录缓存（返回中带 from_cache）；也可先 get_dir_cache(subpath) 查看。',
       parameters: {
         type: 'object',
         properties: {
@@ -127,11 +127,12 @@ const FILE_TOOLS = [
     type: 'function',
     function: {
       name: 'read_file',
-      description: '读取 v2 项目下某个文件的文本内容（UTF-8）。relative_path 以 memory/ 开头的表示实例 memory 目录下的文件（该目录路径可通过 get_my_context 查看），其它为 v2 项目根目录下的相对路径。',
+      description: '读取 v2 项目下某个文件的文本内容（UTF-8）。relative_path 以 memory/ 开头的表示实例 memory 目录下的文件（该目录路径可通过 get_my_context 查看），其它为 v2 项目根目录下的相对路径。若文件未修改且存在缓存，可能直接返回摘要（from_cache: true）；需要全文时请传 force_full: true。',
       parameters: {
         type: 'object',
         properties: {
           relative_path: { type: 'string', description: '相对路径（如 docs/xxx.md 或 memory/xxx.md，memory/ 即实例记忆目录）' },
+          force_full: { type: 'boolean', description: '为 true 时跳过读缓存摘要，始终从磁盘读取全文（仍受最大长度限制）', default: false },
         },
         required: ['relative_path'],
       },
@@ -194,11 +195,11 @@ async function runFileTool(name, args, context) {
       const base = (subpath === 'memory' || subpath.startsWith('memory/'))
         ? (subpath === 'memory' ? getMemoryDir() : path.join(getMemoryDir(), subpath.slice(7)))
         : path.join(getV2Root(), subpath);
-      if (!fs.existsSync(base)) return { ok: true, list: [] };
+      if (!fs.existsSync(base)) return { ok: true, list: [], from_cache: false };
 
       // 命中目录缓存则直接返回
       const cacheRes = store.actionCache.getDirListCache({ dir_path: subpath, limit: null });
-      if (cacheRes?.hit && Array.isArray(cacheRes.list)) return { ok: true, list: cacheRes.list };
+      if (cacheRes?.hit && Array.isArray(cacheRes.list)) return { ok: true, list: cacheRes.list, from_cache: true };
 
       const entries = fs.readdirSync(base, { withFileTypes: true });
       const list = entries.map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
@@ -214,7 +215,7 @@ async function runFileTool(name, args, context) {
       } catch (e) {
         console.warn('[Aris v2][action_cache] 写入目录缓存失败', e?.message);
       }
-      return { ok: true, list };
+      return { ok: true, list, from_cache: false };
     }
     if (name === 'get_dir_cache') {
       const subpath = normalizeRelDir(a.subpath || '');
@@ -239,6 +240,7 @@ async function runFileTool(name, args, context) {
     }
     if (name === 'read_file') {
       const rel = (a.relative_path || '').trim();
+      const forceFull = a.force_full === true || a.force_full === 'true';
       const normalizedRel = normalizeRelForCache(rel);
       if (normalizedRel === getArisIdeasRelativeKey()) {
         ensureArisIdeasInMemory();
@@ -252,6 +254,17 @@ async function runFileTool(name, args, context) {
       const stat = fs.statSync(p);
       if (stat.size > READ_FILE_MAX_CHARS * 2) {
         return { ok: false, error: `文件过大（约 ${Math.round(stat.size / 1024)}KB），为避免上下文超长无法完整返回。请指定较小文件或查看文档了解结构。` };
+      }
+      if (!forceFull && typeof store.actionCache.getSingleFileReadIfValid === 'function') {
+        const cached = store.actionCache.getSingleFileReadIfValid(normalizedRel);
+        if (cached && cached.hit && cached.result_summary) {
+          return {
+            ok: true,
+            content: cached.result_summary,
+            from_cache: true,
+            note: '来自 action_cache 摘要（与上次 read_file 一致且文件未改）。需全文请对 read_file 传 force_full: true。',
+          };
+        }
       }
       let content = fs.readFileSync(p, 'utf8');
       if (content.length > READ_FILE_MAX_CHARS) {
@@ -270,7 +283,7 @@ async function runFileTool(name, args, context) {
         // 缓存失败不影响读文件本身
         console.warn('[Aris v2][action_cache] 写入失败', e?.message);
       }
-      return { ok: true, content };
+      return { ok: true, content, from_cache: false };
     }
     if (name === 'write_file') {
       const relKey = normalizeRelForCache(a.relative_path || '');

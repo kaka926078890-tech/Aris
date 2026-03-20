@@ -5,6 +5,20 @@ const fs = require('fs');
 const store = require('../../../store');
 const { getSelfNotesPath, getMemoryDir } = require('../../../config/paths.js');
 
+function isRecordAsyncEnabled() {
+  return process.env.ARIS_RECORD_ASYNC !== 'false';
+}
+
+function scheduleAsyncRecord(fn) {
+  setImmediate(() => {
+    try {
+      fn();
+    } catch (e) {
+      console.warn('[Aris v2] async record failed', e?.message);
+    }
+  });
+}
+
 const RECORD_TYPES_WRITE = [
   'identity', 'requirement', 'correction', 'emotion', 'expression_desire',
   'association', 'preference', 'friend_context', 'self_note',
@@ -24,12 +38,12 @@ type 取值与 payload 说明：
 - identity: 用户身份。payload: { name?, notes? }
 - requirement: 用户要求/偏好描述。payload: { text }
 - correction: 用户纠正。payload: { previous, correction }
-- emotion: 当前情感/观察。payload: { text, intensity?, tags? }
-- expression_desire: 想主动对用户说的话。payload: { text, intensity? }
+- emotion: 当前情感/观察。payload: { text, intensity?, tags? }（默认后台写入，工具可立即返回）
+- expression_desire: 想主动对用户说的话。payload: { text, intensity? }（默认后台写入）
 - association: 两条信息的关联。payload: { source_type, source_id, target_type, target_id, relationship?, strength? }
 - preference: 用户喜好/习惯。payload: { topic, summary, source?, tags? }
 - friend_context: 当前心情或场景。payload: { mood_or_scene }
-- self_note: 自我反思笔记。payload: { note }`,
+- self_note: 自我反思笔记。payload: { note }（默认后台写入）`,
       parameters: {
         type: 'object',
         properties: {
@@ -83,10 +97,29 @@ async function runRecordTool(name, args, context) {
           if (p.previous != null && p.correction != null) store.corrections.appendCorrection(p.previous, p.correction);
           return { ok: true, message: '已记录' };
         case 'emotion':
-          if (p.text) store.emotions.appendEmotion({ text: p.text, intensity: p.intensity, tags: p.tags });
+          if (p.text) {
+            if (isRecordAsyncEnabled()) {
+              scheduleAsyncRecord(() =>
+                store.emotions.appendEmotion({ text: p.text, intensity: p.intensity, tags: p.tags })
+              );
+              return { ok: true, message: '已记下（后台写入）', async: true };
+            }
+            store.emotions.appendEmotion({ text: p.text, intensity: p.intensity, tags: p.tags });
+          }
           return { ok: true, message: '已记录' };
         case 'expression_desire':
           if (p.text) {
+            if (isRecordAsyncEnabled()) {
+              const sessionId = context?.sessionId ?? null;
+              scheduleAsyncRecord(() =>
+                store.expressionDesires.appendDesire({
+                  text: p.text,
+                  intensity: p.intensity,
+                  session_id: sessionId,
+                })
+              );
+              return { ok: true, message: '已记下（后台写入）', async: true };
+            }
             const sessionId = context?.sessionId ?? null;
             store.expressionDesires.appendDesire({ text: p.text, intensity: p.intensity, session_id: sessionId });
           }
@@ -130,19 +163,26 @@ async function runRecordTool(name, args, context) {
         case 'self_note': {
           const note = (p.note && String(p.note).trim()) || '';
           if (!note) return { ok: false, error: '笔记内容为空' };
-          const path = getSelfNotesPath();
+          const notePath = getSelfNotesPath();
           const dir = getMemoryDir();
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-          let list = [];
-          if (fs.existsSync(path)) {
-            try {
-              const raw = fs.readFileSync(path, 'utf8').trim();
-              if (raw) list = JSON.parse(raw);
-            } catch (_) {}
-            if (!Array.isArray(list)) list = [];
+          const flush = () => {
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            let list = [];
+            if (fs.existsSync(notePath)) {
+              try {
+                const raw = fs.readFileSync(notePath, 'utf8').trim();
+                if (raw) list = JSON.parse(raw);
+              } catch (_) {}
+              if (!Array.isArray(list)) list = [];
+            }
+            list.push({ at: new Date().toISOString(), text: note.slice(0, 500) });
+            fs.writeFileSync(notePath, JSON.stringify(list, null, 2), 'utf8');
+          };
+          if (isRecordAsyncEnabled()) {
+            scheduleAsyncRecord(flush);
+            return { ok: true, message: '已记下（后台写入）', async: true };
           }
-          list.push({ at: new Date().toISOString(), text: note.slice(0, 500) });
-          fs.writeFileSync(path, JSON.stringify(list, null, 2), 'utf8');
+          flush();
           return { ok: true, message: '已记录' };
         }
         default:

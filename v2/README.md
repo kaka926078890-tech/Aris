@@ -10,7 +10,7 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 ## 配置
 
 - **用户可见配置**：打开应用后进入侧栏 **设置** 页，可查看**当前数据目录**及在此保存的所有配置（对话 API、网络访问、**显示思考过程**等）。配置保存在数据目录下的 `config.json`，无需编辑 .env 或环境变量。其中「显示思考过程」默认关闭（`SHOW_THINKING=false`），在设置中开启后对话中会展示「已思考」折叠块。
-- **开发/本地**：可复制 `.env.example` 为 `.env`，配置 `DEEPSEEK_API_KEY`、`OLLAMA_HOST` 等；若未设置，应用会使用设置页保存的 `config.json`（与打包版一致）。
+- **开发/本地**：可复制 `.env.example` 为 `.env`，配置 `DEEPSEEK_API_KEY`、`OLLAMA_HOST` 等；若未设置，应用会使用设置页保存的 `config.json`（与打包版一致）。**单轮观测**（可选）：`ARIS_DIALOGUE_METRICS_LOG` 默认会写入数据目录下的 `dialogue_turn_metrics.jsonl`（含 Prompt Planner 耗时、工具轮次、文件类工具调用次数、向量 embed 耗时等）；不需要时设 `false`。**异步 Outbox**（默认开启）：`ARIS_ASYNC_OUTBOX` 为 `false` 时主对话后轮次改为**同步**向量 embed + 监控 + 指标；为 `true`（默认）时先入队 `async_outbox/pending.json`，后台执行并带重试、死信与启动补录，详见 [async_outbox.md](docs/async_outbox.md)。**其它可选环境变量**：`ARIS_CHAT_TEMPERATURE`（主对话默认采样温度，默认约 0.62）、`ARIS_MAX_TOOL_ROUNDS`（单条用户消息内工具循环最大轮数，默认 25）、`ARIS_RECORD_ASYNC`（`emotion` / `expression_desire` / `self_note` 是否异步写入，默认异步；设 `false` 则同步落盘）。详见 `.env.example`。
 - **打包分发**：无需 .env。安装后打开应用，在 **设置** 页填写 DeepSeek API Key、API 地址、网络访问开关等，点击「保存全部配置」即可；下次对话立即生效。
 - **Ollama**：对话不依赖 Ollama；仅需「语义记忆/向量检索」时可选安装 [Ollama](https://ollama.com) 并执行 `ollama pull nomic-embed-text`，设置页有说明。
 
@@ -33,6 +33,7 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 | **user_profile_summary.md** | 用户画像/主题线轻量摘要（可选） | 纯文本：常聊主题、近期偏好与情绪归纳。可手动维护或由脚本生成；模型通过 get_user_profile_summary 按需获取。 |
 | **aris_ideas.md** | 各实例独立的 memory 文档（不随代码提交） | 纯文本 Markdown。存于实例 memory 目录（路径可通过 get_my_context 查看）；write_file/read_file 的 relative_path 以 `memory/` 开头的均指向该目录（如 `memory/aris_ideas.md`），与代码库隔离。 |
 | **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`constraints_brief`、`quiet_phrases`、`retrieval_config`、`session_summaries`、`network_config`、`proactive_config`、`behavior_config`、`avoid_phrases`、`self_notes`、`aris_ideas` 等，值为实际文件名（如 `identity.json`、`constraints_brief.json`）。 |
+| **async_outbox/** | 主对话后轮次异步队列（非 memory） | `pending.json`、`retry_log.jsonl`、`dead_letter.jsonl`；环境变量见 [async_outbox.md](docs/async_outbox.md)。 |
 
 **时间线**：所有记忆/状态类写入会同时追加到 `data/timeline.json`，用于按时刻回溯或审计。当前产品内暂无时间线展示页，数据可供排查或后续「修改历史」等能力使用。
 
@@ -63,13 +64,15 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 
 ### 导出/导入全部数据（换机或备份）
 
-菜单 **文件 → 导出全部数据** 会生成一个 `.aris` 单文件，包含当前 Aris 的全部数据，便于换机或备份。导出内容包括：
+菜单 **文件 → 导出全部数据** 会生成一个 `.aris` 单文件（备份格式版本 **v3**），包含当前 Aris 的全部数据，便于换机或备份。导出内容包括：
 
 - **对话**：SQLite 数据库（`aris.db`）
 - **向量记忆**：LanceDB 中的全部记忆条
 - **用户与状态**：身份、状态、主动消息状态、要求、情感、纠错、表达欲望
 - **监控**：token 使用、文件修改记录
-- **配置与 memory**：timeline、associations、quiet_phrases、retrieval_config、session_summaries、preferences、network_config、proactive_config、behavior_config、avoid_phrases、constraints_brief、self_notes、user_profile_summary.md、aris_ideas.md
+- **数据目录根文件**（v3）：`dialogue_turn_metrics.jsonl`、`prompt_planner_metrics.jsonl`、数据目录下的 `config.json`（与设置页保存的配置一致，便于换机后无需重填）
+- **异步队列**（v3）：`async_outbox/` 下全部文件（pending、重试日志、死信等），避免未消费任务丢失
+- **配置与 memory**：timeline、associations、quiet_phrases、retrieval_config、session_summaries、preferences、network_config、proactive_config、behavior_config、avoid_phrases、constraints_brief、exploration_notes、action_cache、work_state、self_notes、user_profile_summary.md、aris_ideas.md、`memory/conversation_rules.md`（若存在）
 
 **换机步骤**：在旧电脑上使用「导出全部数据」保存为 `.aris` 文件（如 U 盘或网盘），在新电脑上安装并打开 Aris v2，使用 **文件 → 导入全部数据** 选择该 `.aris` 文件即可一键恢复。新电脑上若使用 `ARIS_V2_DATA_DIR`，请先设好数据目录再导入。
 
@@ -114,10 +117,12 @@ npm run build:linux # 产出 AppImage（Linux）
 
 ### Aris 如何了解自己
 
-Aris 可通过 **get_my_context** 工具获取当前运行环境与能力边界的简短摘要（版本、数据目录、可用工具列表、主要 memory 文件）；通过 **read_file** 阅读项目内代码与配置以理解行为与局限（不得修改核心逻辑与安全相关配置）。
+Aris 可通过 **get_my_context** 工具获取当前运行环境与能力边界的简短摘要（版本、数据目录、可用工具列表、主要 memory 文件）；通过 **read_file** 阅读项目内代码与配置以理解行为与局限（不得修改核心逻辑与安全相关配置）；在仓库内可按关键词用 **search_repo_text** 定位文件路径（优先本机 `rg`）。**read_file** 在文件未改且存在 action_cache 时可能直接返回缓存摘要（工具结果中带 `from_cache: true`）；需要全文时在工具参数中传 **`force_full: true`** 从磁盘读取。
 
 ## 文档
 
+- [后续演进方向（备忘）](docs/future_evolution_directions.md)
+- [QQ 机器人（官方合规）与 Aris 对接备忘](docs/qq_bot_official_integration.md)
 - [提示词分层与 Prompt Planner](docs/prompt_packaging.md)
 - [分阶段执行清单](docs/todo.md)
 - [第二优先级解决方案（ARIS_IDEAS）](docs/second_priority_solutions.md)

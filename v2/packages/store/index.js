@@ -24,6 +24,7 @@ try {
 }
 
 const facade = require('./facade.js');
+const asyncOutbox = require('./async_outbox.js');
 
 module.exports = {
   identity,
@@ -42,4 +43,5 @@ module.exports = {
   monitor,
   facade,
   actionCache,
+  asyncOutbox,
 };

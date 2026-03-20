@@ -12,6 +12,36 @@ const DIALOGUE_CHUNK_PREV_ROUNDS = 1;
 /** 摘要间隔（轮数），0 表示不启用周期摘要 */
 const SUMMARY_EVERY_N_ROUNDS = 0;
 
+/**
+ * 单条用户消息触发的工具循环中，「文件类」工具最大调用次数（含 list/read/cache/write/delete/get_my_context）。
+ * 与 handler 中计数一致；仅防止无限探路，不限制 search_memories 等。
+ */
+const FILE_TOOL_MAX_PER_USER_TURN = 10;
+
+/** @type {ReadonlySet<string>} */
+const FILE_TOOL_NAMES = new Set([
+  'list_my_files',
+  'get_dir_cache',
+  'get_read_file_cache',
+  'get_recent_read_file_cache',
+  'read_file',
+  'write_file',
+  'delete_file',
+  'get_my_context',
+  'search_repo_text',
+]);
+
+function isFileToolName(name) {
+  return typeof name === 'string' && FILE_TOOL_NAMES.has(name);
+}
+
+/** 主对话工具循环最大轮数（含工具调用）。可通过 ARIS_MAX_TOOL_ROUNDS 配置，默认 25。 */
+function getMaxToolRounds() {
+  const n = Number(process.env.ARIS_MAX_TOOL_ROUNDS);
+  if (!Number.isNaN(n) && n >= 1 && n <= 500) return Math.floor(n);
+  return 25;
+}
+
 module.exports = {
   VECTOR_SIMILARITY_WEIGHT,
   VECTOR_TIME_WEIGHT,
@@ -19,4 +49,8 @@ module.exports = {
   SEARCH_QUERY_PREFIX,
   DIALOGUE_CHUNK_PREV_ROUNDS,
   SUMMARY_EVERY_N_ROUNDS,
+  FILE_TOOL_MAX_PER_USER_TURN,
+  FILE_TOOL_NAMES,
+  isFileToolName,
+  getMaxToolRounds,
 };

@@ -4,10 +4,12 @@ const { MEMORY_TOOLS, runMemoryTool } = require('./memory.js');
 const { TIME_TOOLS, runTimeTool } = require('./time.js');
 const { GIT_TOOLS, runGitTool } = require('./git.js');
 const { APP_TOOLS, runAppTool } = require('./app.js');
+const { REPO_TOOLS, runRepoSearchTool } = require('./repo_search.js');
 
 const BASE_TOOLS = [
   ...RECORD_TOOLS,
   ...FILE_TOOLS,
+  ...REPO_TOOLS,
   ...MEMORY_TOOLS,
   ...APP_TOOLS,
   ...TIME_TOOLS,
@@ -52,6 +54,9 @@ async function runTool(name, args, context) {
   }
   if (FILE_TOOLS.some((t) => t.function.name === name)) {
     return runFileTool(name, a, context);
+  }
+  if (REPO_TOOLS.some((t) => t.function.name === name)) {
+    return runRepoSearchTool(name, a);
   }
   if (MEMORY_TOOLS.some((t) => t.function.name === name)) {
     return runMemoryTool(name, a);

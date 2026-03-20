@@ -187,6 +187,36 @@ function getReadFileCache(options = {}) {
 }
 
 /**
+ * 单路径：若存在有效 read_file 缓存（mtime 一致），返回摘要，供 read_file 工具短路读盘。
+ * @param {string} file_path 与缓存 key 一致的相对路径（已 normalize，如 packages/foo.js）
+ * @returns {{ hit: false } | { hit: true, result_summary: string, cached_at?: string }}
+ */
+function getSingleFileReadIfValid(file_path) {
+  const fp = String(file_path || '').trim();
+  if (!fp) return { hit: false };
+  const list = loadCache();
+  const key = `file:${fp}`;
+  const item = (list || []).slice().reverse().find((x) => x?.key === key && x?.action === 'read_file');
+  if (!item || typeof item.result_summary !== 'string') return { hit: false };
+
+  const abs = getAbsPath(item.file_path);
+  const currentMtime = statMtimeMsSafe(abs);
+  const cachedMtime = item.file_mtime_at_cache;
+  const mtimeDiff = (currentMtime == null || cachedMtime == null) ? Infinity : Math.abs(currentMtime - cachedMtime);
+  if (currentMtime == null || mtimeDiff > 1) {
+    try {
+      invalidateFile({ file_path: fp });
+    } catch (_) {}
+    return { hit: false };
+  }
+  return {
+    hit: true,
+    result_summary: item.result_summary,
+    cached_at: item.cached_at,
+  };
+}
+
+/**
  * 获取某会话下最近的 read_file 缓存（仍会做 mtime + 存在性校验）。
  * 若 session_id 缺失，则等价于全局最近缓存。
  * @param {{ session_id?: string, path_prefix?: string, limit?: number }} options
@@ -231,5 +261,6 @@ module.exports = {
   getReadFileCache,
   getRecentReadFileCache,
   getDirListCache,
+  getSingleFileReadIfValid,
 };
 

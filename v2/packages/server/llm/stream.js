@@ -3,6 +3,8 @@
  */
 require('dotenv').config();
 
+const { getChatTemperature } = require('./temperature.js');
+
 const MAX_TOKENS_STREAM = Math.min(Number(process.env.ARIS_STREAM_MAX_TOKENS) || 8192, 32768);
 
 async function chatStream(messages, onChunk, signal) {
@@ -26,7 +28,7 @@ async function chatStream(messages, onChunk, signal) {
         model: 'deepseek-chat',
         messages,
         max_tokens: MAX_TOKENS_STREAM,
-        temperature: 0.7,
+        temperature: getChatTemperature(),
         stream: true,
         stream_options: { include_usage: true },
       }),

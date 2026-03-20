@@ -24,7 +24,7 @@ const SCENE_MARKERS = {
 
 const SCENE_RULES_DEFAULT = {
   code_operation:
-    '【查代码/文件流程】当需要查看项目内代码、定位文件或列目录时，必须先调用 get_dir_cache（查目录）或 get_read_file_cache（查已读文件摘要）；仅当缓存未命中或需要最新内容时再 list_my_files / read_file，避免重复探索。',
+    '【查代码/文件流程】需要定位实现时，可先 search_repo_text 按关键词找文件路径，再 get_dir_cache / get_read_file_cache；仅当缓存未命中或需最新全文时再 list_my_files / read_file（read_file 可 force_full），避免层层 list。',
   memory_operation:
     '【记忆路径】凡存放或读取自己的记忆、配置等文件，必须用 write_file/read_file 且 relative_path 以 memory/ 开头（如 memory/xxx.md），会写入或读取实例 memory 目录；可先调用 get_my_context 查看「实例 memory 目录」路径。禁止在项目根下新建 memory 文件夹或使用非 memory/ 前缀的路径存自己的数据。',
   restart:

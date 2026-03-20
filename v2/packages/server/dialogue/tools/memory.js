@@ -68,6 +68,23 @@ const MEMORY_TOOLS = [
 /**
  * 智能生成检索query：基于原始query和上下文生成更好的检索关键词
  */
+/**
+ * 轻量字面重叠：弥补纯向量对专名、固定短语的弱匹配（非 BM25 全文替代）。
+ */
+function keywordOverlapBoost(query, text) {
+  const q = String(query || '').toLowerCase().trim();
+  const t = String(text || '').toLowerCase();
+  if (!q.length || !t.length) return 0;
+  if (t.includes(q) && q.length >= 2) return 0.12;
+  const parts = q.split(/[\s\u3000,，.。!！?？;；]+/).filter((s) => s.length >= 2);
+  if (parts.length === 0) return 0;
+  let hits = 0;
+  for (const p of parts) {
+    if (t.includes(p)) hits += 1;
+  }
+  return Math.min(0.22, (hits / parts.length) * 0.22);
+}
+
 function generateSmartQuery(originalQuery, context) {
   if (!originalQuery || typeof originalQuery !== 'string') return originalQuery || '';
   
@@ -205,8 +222,8 @@ function shouldRetrieveMemory(userMessage, recentConversation, config) {
   if (isComplexMessage) return true;
   if (hasRecentContext) return true;
   
-  // 默认阈值
-  return Math.random() < (config.retrieval_decision_threshold || 0.3);
+  // 无明确信号时不随机检索（避免行为抖动）
+  return false;
 }
 
 async function runMemoryTool(name, args) {
@@ -236,9 +253,13 @@ async function runMemoryTool(name, args) {
         recentTopics: []
       };
       
-      // 应用动态记忆类型权重
-      const weightedRows = applyMemoryTypeWeights(rows, config, context);
-      
+      // 应用动态记忆类型权重 + 字面重叠微调
+      let weightedRows = applyMemoryTypeWeights(rows, config, context);
+      weightedRows = weightedRows.map((row) => {
+        const boost = keywordOverlapBoost(smartQuery, row.text);
+        return { ...row, _score: (row._score || 0) * (1 + boost) };
+      });
+
       // 重新排序
       weightedRows.sort((a, b) => (b._score || 0) - (a._score || 0));
       

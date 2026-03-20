@@ -2,12 +2,14 @@
  * v2 全量备份/恢复：对话(SQLite)、向量库、用户身份、状态、要求、情感、纠错、表达欲望、监控等，
  * 以及 memory/ 与 data/ 下所有已知配置文件（timeline、associations、quiet_phrases、
  * retrieval_config、session_summaries、preferences、network_config、aris_ideas 等）。
+ * v3 起额外包含：data 根目录观测/配置（dialogue_turn_metrics、prompt_planner_metrics、config.json）、
+ * async_outbox/ 全量、以及 constraints_brief / exploration_notes / action_cache / work_state / conversation_rules.md。
  * 单文件 .aris，支持一键导出/导入，便于公司↔家里或换机迁移。
  */
 const fs = require('fs');
 const path = require('path');
 
-const BACKUP_VERSION = 2;
+const BACKUP_VERSION = 3;
 
 function getStore() {
   return require('../../packages/store');
@@ -40,6 +42,86 @@ function readTextIfExists(filePath, defaultValue) {
   return defaultValue == null ? '' : defaultValue;
 }
 
+/** 存在则读 UTF-8，不存在则 null（与空文件区分：空文件返回 ''） */
+function readUtf8OrNull(filePath) {
+  try {
+    if (fs.existsSync(filePath)) {
+      return fs.readFileSync(filePath, 'utf8');
+    }
+  } catch (e) {
+    console.warn('[Aris v2][backup] readUtf8', filePath, e?.message);
+  }
+  return null;
+}
+
+function isSafeFlatFileName(name) {
+  if (typeof name !== 'string' || !name.trim()) return false;
+  if (name.includes('/') || name.includes('\\') || name === '..' || name === '.') return false;
+  return true;
+}
+
+/** data 根目录下需随迁移带走的文本文件（观测、应用配置） */
+const DATA_ROOT_TEXT_FILES = [
+  'dialogue_turn_metrics.jsonl',
+  'prompt_planner_metrics.jsonl',
+  'config.json',
+];
+
+/**
+ * 导出 data 目录下除 sqlite/lancedb 外的关键文件，避免换机丢失观测与异步队列。
+ * @returns {{ root_files: Record<string, string|null>, async_outbox: Record<string, string|null> }}
+ */
+function exportDataDirBundle(dataDir) {
+  const root_files = {};
+  for (const name of DATA_ROOT_TEXT_FILES) {
+    if (!isSafeFlatFileName(name)) continue;
+    root_files[name] = readUtf8OrNull(path.join(dataDir, name));
+  }
+  const async_outbox = {};
+  const outDir = path.join(dataDir, 'async_outbox');
+  try {
+    if (fs.existsSync(outDir) && fs.statSync(outDir).isDirectory()) {
+      const names = fs.readdirSync(outDir);
+      for (const name of names) {
+        if (!isSafeFlatFileName(name)) continue;
+        const p = path.join(outDir, name);
+        if (fs.statSync(p).isFile()) async_outbox[name] = readUtf8OrNull(p);
+      }
+    }
+  } catch (e) {
+    console.warn('[Aris v2][backup] export async_outbox', e?.message);
+  }
+  return { root_files, async_outbox };
+}
+
+function writeDataDirBundle(dataDir, bundle) {
+  if (!bundle || typeof bundle !== 'object') return;
+  const root = bundle.root_files && typeof bundle.root_files === 'object' ? bundle.root_files : {};
+  for (const [name, content] of Object.entries(root)) {
+    if (!isSafeFlatFileName(name)) continue;
+    if (typeof content !== 'string') continue;
+    try {
+      fs.writeFileSync(path.join(dataDir, name), content, 'utf8');
+    } catch (e) {
+      console.warn('[Aris v2][backup] write root file', name, e?.message);
+    }
+  }
+  const ao = bundle.async_outbox && typeof bundle.async_outbox === 'object' ? bundle.async_outbox : {};
+  const outDir = path.join(dataDir, 'async_outbox');
+  if (Object.keys(ao).length) {
+    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+    for (const [name, content] of Object.entries(ao)) {
+      if (!isSafeFlatFileName(name)) continue;
+      if (typeof content !== 'string') continue;
+      try {
+        fs.writeFileSync(path.join(outDir, name), content, 'utf8');
+      } catch (e) {
+        console.warn('[Aris v2][backup] write async_outbox', name, e?.message);
+      }
+    }
+  }
+}
+
 function getMonitorDir() {
   return path.join(getConfig().getDataDir(), 'monitor');
 }
@@ -47,6 +129,9 @@ function getMonitorDir() {
 /** 导出 data/ 与 memory/ 下所有已知配置与文本文件（供全量迁移） */
 function exportExtraPaths(config) {
   const c = config;
+  const memoryDir = c.getMemoryDir && c.getMemoryDir();
+  const mf = (c.getMemoryFiles && c.getMemoryFiles()) || {};
+  const explorationName = mf.exploration_notes || 'exploration_notes.json';
   return {
     timeline: readJsonIfExists(c.getTimelinePath && c.getTimelinePath(), null),
     associations: readJsonIfExists(c.getAssociationsPath && c.getAssociationsPath(), null),
@@ -61,6 +146,11 @@ function exportExtraPaths(config) {
     self_notes: readJsonIfExists(c.getSelfNotesPath && c.getSelfNotesPath(), null),
     user_profile_summary_md: readTextIfExists(c.getUserProfileSummaryPath && c.getUserProfileSummaryPath(), ''),
     aris_ideas_md: readTextIfExists(c.getArisIdeasPath && c.getArisIdeasPath(), ''),
+    constraints_brief: readJsonIfExists(c.getConstraintsBriefPath && c.getConstraintsBriefPath(), null),
+    exploration_notes: memoryDir ? readJsonIfExists(path.join(memoryDir, explorationName), null) : null,
+    action_cache: readJsonIfExists(c.getActionCachePath && c.getActionCachePath(), null),
+    work_state: readJsonIfExists(c.getWorkStatePath && c.getWorkStatePath(), null),
+    conversation_rules_md: memoryDir ? readUtf8OrNull(path.join(memoryDir, 'conversation_rules.md')) : null,
   };
 }
 
@@ -98,6 +188,25 @@ function writeExtraPaths(config, payload) {
   }
   if (extra.aris_ideas_md != null && c.getArisIdeasPath) {
     fs.writeFileSync(c.getArisIdeasPath(), extra.aris_ideas_md, 'utf8');
+  }
+  w('constraints_brief', c.getConstraintsBriefPath, extra.constraints_brief);
+  const mf = (c.getMemoryFiles && c.getMemoryFiles()) || {};
+  if (extra.exploration_notes != null && c.getMemoryDir) {
+    const p = path.join(c.getMemoryDir(), mf.exploration_notes || 'exploration_notes.json');
+    try {
+      fs.writeFileSync(p, JSON.stringify(extra.exploration_notes, null, 2), 'utf8');
+    } catch (e) {
+      console.warn('[Aris v2][backup] writeExtra exploration_notes', e?.message);
+    }
+  }
+  w('action_cache', c.getActionCachePath, extra.action_cache);
+  w('work_state', c.getWorkStatePath, extra.work_state);
+  if (extra.conversation_rules_md != null && c.getMemoryDir) {
+    try {
+      fs.writeFileSync(path.join(c.getMemoryDir(), 'conversation_rules.md'), extra.conversation_rules_md, 'utf8');
+    } catch (e) {
+      console.warn('[Aris v2][backup] writeExtra conversation_rules', e?.message);
+    }
   }
 }
 
@@ -141,6 +250,7 @@ async function exportToFile(filePath) {
   const file_modifications = readJsonIfExists(fileModsPath, {});
 
   const extra_paths = exportExtraPaths(config);
+  const data_dir_bundle = exportDataDirBundle(dataDir);
 
   const payload = {
     version: BACKUP_VERSION,
@@ -156,6 +266,7 @@ async function exportToFile(filePath) {
     corrections: Array.isArray(corrections) ? corrections : [],
     monitor: { token_usage, file_modifications },
     extra_paths,
+    data_dir_bundle,
   };
 
   fs.writeFileSync(filePath, JSON.stringify(payload), 'utf8');
@@ -233,6 +344,9 @@ async function importFromFile(filePath) {
     }
     if (payload.extra_paths && typeof payload.extra_paths === 'object') {
       writeExtraPaths(config, payload);
+    }
+    if (version >= 3 && payload.data_dir_bundle && typeof payload.data_dir_bundle === 'object') {
+      writeDataDirBundle(dataDir, payload.data_dir_bundle);
     }
   }
 

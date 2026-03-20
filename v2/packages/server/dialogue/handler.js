@@ -16,8 +16,15 @@ const { maybeGenerateSummary } = require('./summaryGeneration.js');
 const { getTools, runTool } = require('./tools/index.js');
 const { chatWithTools } = require('../llm/client.js');
 const { chatStream } = require('../llm/stream.js');
-const { DIALOGUE_CHUNK_PREV_ROUNDS } = require('../../config/constants.js');
+const {
+  DIALOGUE_CHUNK_PREV_ROUNDS,
+  FILE_TOOL_MAX_PER_USER_TURN,
+  isFileToolName,
+  getMaxToolRounds,
+} = require('../../config/constants.js');
 const { shouldBeQuiet, isResumingDialogue } = require('./quietResume.js');
+const { appendDialogueTurnMetricLine } = require('./dialogueMetrics.js');
+const asyncOutbox = require('../../store/async_outbox.js');
 
 const RECENT_ROUNDS = 3;
 const facade = store.facade;
@@ -30,13 +37,16 @@ async function buildPromptContext(sessionId, recent, options = {}) {
   const plannerCfg = readPromptPlannerConfig();
   let plan = LEGACY_PLAN;
   let plannerResult = { plan, error: 'planner_disabled', plannerMessages: null };
+  let plannerMs = null;
   if (plannerCfg.enabled) {
+    const tPlanner = performance.now();
     plannerResult = await runPromptPlanner({
       lastUserMessage: currentUserContent || '',
       recentWindowText: dto.recentWindowForPlanner || '',
       constraintsBriefText: dto.constraintsBriefBlock || '',
       signal: options.signal,
     });
+    plannerMs = Math.round(performance.now() - tPlanner);
     plan = plannerResult.plan;
   }
 
@@ -53,7 +63,15 @@ async function buildPromptContext(sessionId, recent, options = {}) {
     { role: 'system', content: systemPrompt },
     { role: 'user', content: currentUserContent || '' },
   ];
-  const out = { systemPrompt, messages };
+  const out = {
+    systemPrompt,
+    messages,
+    metrics: {
+      planner_enabled: plannerCfg.enabled,
+      planner_ms: plannerMs,
+      system_chars: systemPrompt.length,
+    },
+  };
   if (options.includePlannerInPreview) {
     if (plannerCfg.enabled) {
       out.plannerPreview = {
@@ -124,8 +142,9 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     : '(空)';
   console.info('[Aris v2] 用户消息:', userPreview);
 
+  const tTurnStart = performance.now();
   const recent = await facade.getRecentConversation(sessionId, RECENT_ROUNDS * 2 + 2);
-  const { messages } = await buildPromptContext(sessionId, recent, { signal });
+  const { messages, metrics: ctxMetrics } = await buildPromptContext(sessionId, recent, { signal });
   const sysLen = (messages[0] && messages[0].content) ? String(messages[0].content).length : 0;
   console.info('[Aris v2] 本轮 prompt: system 约', sysLen, '字, 消息数', messages.length);
 
@@ -138,8 +157,13 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let hasOfficialUsage = false;
-  const MAX_TOOL_ROUNDS = 100;
+  let embedMs = null;
+  const MAX_TOOL_ROUNDS = getMaxToolRounds();
   const allAgentActions = [];
+  const toolRoundsDetail = [];
+  let fileToolCount = 0;
+  const fileToolLimitMsg =
+    `本回合文件类工具调用已达上限（${FILE_TOOL_MAX_PER_USER_TURN}），请直接说明目标路径或换种方式描述需求。`;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (signal && signal.aborted) break;
@@ -155,6 +179,8 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     if (!res.tool_calls || res.tool_calls.length === 0) break;
 
     hadToolCalls = true;
+    const namesThisRound = res.tool_calls.map((tc) => tc.function?.name || '?');
+    toolRoundsDetail.push({ round, tools: namesThisRound });
     const assistantContent = sanitizeAssistantContent(res.content);
     const assistantMsg = {
       role: 'assistant',
@@ -162,24 +188,28 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
       tool_calls: res.tool_calls,
     };
     const toolContext = { sessionId, recent, toolNames: getTools().map((t) => t.function.name) };
-    const toolResults = await Promise.all(
-      res.tool_calls.map(async (tc) => {
-        const name = tc.function?.name;
-        const args = tc.function?.arguments;
-        let result;
+    const toolResults = [];
+    for (const tc of res.tool_calls) {
+      const name = tc.function?.name;
+      const args = tc.function?.arguments;
+      let result;
+      if (isFileToolName(name) && fileToolCount >= FILE_TOOL_MAX_PER_USER_TURN) {
+        result = { ok: false, error: fileToolLimitMsg };
+      } else {
+        if (isFileToolName(name)) fileToolCount += 1;
         try {
           result = await runTool(name, args, toolContext);
         } catch (e) {
           console.warn('[Aris v2] runTool error', name, e?.message);
           result = { ok: false, error: String(e?.message || '执行异常') };
         }
-        return {
-          role: 'tool',
-          tool_call_id: tc.id,
-          content: JSON.stringify(result),
-        };
-      })
-    );
+      }
+      toolResults.push({
+        role: 'tool',
+        tool_call_id: tc.id,
+        content: JSON.stringify(result),
+      });
+    }
     const toolSummary = res.tool_calls.map((tc, i) => {
       const r = toolResults[i];
       let ok = true;
@@ -298,31 +328,78 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     const blockText = prevSlice
       .map((r) => `${r.role === 'user' ? 'User' : 'Assistant'}: ${r.content}`)
       .join(' | ');
-    if (blockText) {
-      const vec = await facade.embedForDialogue(blockText, { prefix: 'document' });
-      if (vec) {
-        const relatedEntities = getCurrentRelatedEntityIds();
-        await facade.addVectorBlock({
-          text: blockText,
-          vector: vec,
-          type: 'dialogue_turn',
-          metadata: { session_id: sessionId, related_entities: relatedEntities },
-        });
+
+    if (asyncOutbox.isEnabled()) {
+      facade.writeState({
+        last_active_time: new Date().toISOString(),
+        last_mental_state: reply ? reply.slice(0, 300) : null,
+      });
+      const enqueues = [];
+      if (blockText) {
+        enqueues.push(
+          asyncOutbox.enqueue('vector_dialogue', {
+            blockText,
+            sessionId,
+            relatedEntities: getCurrentRelatedEntityIds(),
+          }),
+        );
       }
-    }
+      if (store.monitor && store.monitor.recordTokenUsage) {
+        const roundId = new Date().toISOString();
+        if (hasOfficialUsage && (totalInputTokens > 0 || totalOutputTokens > 0)) {
+          enqueues.push(
+            asyncOutbox.enqueue('token_usage', {
+              sessionId,
+              roundId,
+              inputTokens: totalInputTokens,
+              outputTokens: totalOutputTokens,
+              isEstimated: false,
+            }),
+          );
+        } else {
+          const inputChars = currentMessages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
+          const outputChars = (reply || '').length;
+          enqueues.push(
+            asyncOutbox.enqueue('token_usage', {
+              sessionId,
+              roundId,
+              inputTokens: Math.ceil(inputChars / 4),
+              outputTokens: Math.ceil(outputChars / 4),
+              isEstimated: true,
+            }),
+          );
+        }
+      }
+      await Promise.all(enqueues);
+    } else {
+      if (blockText) {
+        const tEmb = performance.now();
+        const vec = await facade.embedForDialogue(blockText, { prefix: 'document' });
+        embedMs = Math.round(performance.now() - tEmb);
+        if (vec) {
+          const relatedEntities = getCurrentRelatedEntityIds();
+          await facade.addVectorBlock({
+            text: blockText,
+            vector: vec,
+            type: 'dialogue_turn',
+            metadata: { session_id: sessionId, related_entities: relatedEntities },
+          });
+        }
+      }
 
-    facade.writeState({
-      last_active_time: new Date().toISOString(),
-      last_mental_state: reply ? reply.slice(0, 300) : null,
-    });
+      facade.writeState({
+        last_active_time: new Date().toISOString(),
+        last_mental_state: reply ? reply.slice(0, 300) : null,
+      });
 
-    if (store.monitor && store.monitor.recordTokenUsage) {
-      if (hasOfficialUsage && (totalInputTokens > 0 || totalOutputTokens > 0)) {
-        store.monitor.recordTokenUsage(sessionId, new Date().toISOString(), totalInputTokens, totalOutputTokens, false);
-      } else {
-        const inputChars = currentMessages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
-        const outputChars = (reply || '').length;
-        store.monitor.recordTokenUsage(sessionId, new Date().toISOString(), Math.ceil(inputChars / 4), Math.ceil(outputChars / 4), true);
+      if (store.monitor && store.monitor.recordTokenUsage) {
+        if (hasOfficialUsage && (totalInputTokens > 0 || totalOutputTokens > 0)) {
+          store.monitor.recordTokenUsage(sessionId, new Date().toISOString(), totalInputTokens, totalOutputTokens, false);
+        } else {
+          const inputChars = currentMessages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
+          const outputChars = (reply || '').length;
+          store.monitor.recordTokenUsage(sessionId, new Date().toISOString(), Math.ceil(inputChars / 4), Math.ceil(outputChars / 4), true);
+        }
       }
     }
   } catch (e) {
@@ -333,6 +410,31 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     ? (contentForFrontend.length <= 200 ? contentForFrontend : contentForFrontend.slice(0, 200) + '…')
     : '(无文本回复)';
   console.info('[Aris v2] 本轮最终回复:', finalPreview);
+
+  const metricLine = {
+    session_id: sessionId,
+    planner_ms: ctxMetrics && ctxMetrics.planner_ms != null ? ctxMetrics.planner_ms : null,
+    planner_enabled: !!(ctxMetrics && ctxMetrics.planner_enabled),
+    system_chars: ctxMetrics && ctxMetrics.system_chars != null ? ctxMetrics.system_chars : sysLen,
+    tool_rounds: toolRoundsDetail.length,
+    tool_rounds_detail: toolRoundsDetail,
+    file_tool_calls: fileToolCount,
+    embed_ms: asyncOutbox.isEnabled() ? null : embedMs,
+    vector_async: asyncOutbox.isEnabled() ? true : undefined,
+    total_turn_ms: Math.round(performance.now() - tTurnStart),
+    total_input_tokens: totalInputTokens,
+    total_output_tokens: totalOutputTokens,
+    had_tool_calls: hadToolCalls,
+  };
+  if (asyncOutbox.isEnabled()) {
+    try {
+      await asyncOutbox.enqueue('dialogue_metric', { entry: metricLine });
+    } catch (e) {
+      console.warn('[Aris v2] dialogue_metric 入队失败', e?.message || e);
+    }
+  } else {
+    appendDialogueTurnMetricLine(metricLine);
+  }
 
   setImmediate(() => {
     maybeGenerateSummary(sessionId).catch((e) => console.warn('[Aris v2] 小结异步任务异常', e?.message));
