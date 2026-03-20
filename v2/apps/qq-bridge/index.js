@@ -42,7 +42,11 @@ function checkAuth(req) {
 
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
-    return json(res, 200, { ok: true, service: 'aris-qq-bridge' });
+    return json(res, 200, {
+      ok: true,
+      service: 'aris-qq-bridge',
+      qq_bot_credentials_loaded: !!(process.env.QQ_BOT_APP_ID && process.env.QQ_BOT_APP_SECRET),
+    });
   }
 
   if (req.method !== 'POST' || req.url !== '/chat') {
