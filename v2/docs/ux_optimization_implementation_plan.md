@@ -18,6 +18,7 @@
 | **P5 记忆检索** | 已实现 MVP：`search_memories` 在向量分数上叠加 **keywordOverlapBoost**（字面重叠）；移除 `shouldRetrieveMemory` 末尾 **随机**检索。完整 BM25/混合检索仍为可选演进。 |
 | **P6 仓库搜索** | 已实现：工具 **`search_repo_text`**（`tools/repo_search.js`），优先 **rg**，失败则 Node 有限扫描；计入文件类工具 **10 次**配额。 |
 | **工具循环上限** | 已实现：**`ARIS_MAX_TOOL_ROUNDS`**（默认 **25**，原 100）。 |
+| **LLM 网络重试** | 已实现：`packages/server/llm/fetchRetry.js`，`chat` / `chatWithTools` 对 **ECONNRESET**、**terminated** 等瞬时错误与 **HTTP 429** 做有限重试；**`ARIS_LLM_MAX_RETRIES`**（默认 3）。与 UX 改版无直接因果关系，用于缓解外网抖动及多进程并发时的偶发断连。 |
 
 ### 说明：P3 / P4 与「需你拍板」的关系
 

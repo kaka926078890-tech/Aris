@@ -4,6 +4,7 @@
 require('dotenv').config();
 
 const { getChatTemperature } = require('./temperature.js');
+const { postJsonWithRetry } = require('./fetchRetry.js');
 
 const MAX_TOKENS_STREAM = Math.min(Number(process.env.ARIS_STREAM_MAX_TOKENS) || 8192, 32768);
 const MAX_TOKENS_TOOLS = Math.min(Number(process.env.ARIS_TOOL_MAX_TOKENS) || 8192, 32768);
@@ -33,22 +34,24 @@ async function chat(messages, options = {}) {
   try {
     const msgCount = Array.isArray(messages) ? messages.length : 0;
     console.info('[Aris v2] DeepSeek chat request: messages=', msgCount, 'url=', apiUrl);
-    const res = await fetch(`${apiUrl}/v1/chat/completions`, {
-      signal: signal || undefined,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
+    const data = await postJsonWithRetry(
+      `${apiUrl}/v1/chat/completions`,
+      {
+        signal: signal || undefined,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages,
+          max_tokens: maxTokensOverride != null ? maxTokensOverride : MAX_TOKENS_STREAM,
+          temperature: temperatureOverride != null ? temperatureOverride : getChatTemperature(),
+        }),
       },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages,
-        max_tokens: maxTokensOverride != null ? maxTokensOverride : MAX_TOKENS_STREAM,
-        temperature: temperatureOverride != null ? temperatureOverride : getChatTemperature(),
-      }),
-    });
-    if (!res.ok) throw new Error(`DeepSeek ${res.status}: ${await res.text()}`);
-    const data = await res.json();
+      'chat',
+    );
     const msg = data.choices?.[0]?.message ?? {};
     const usage = data.usage;
     const content = msg.content ?? '';
@@ -71,24 +74,26 @@ async function chatWithTools(messages, tools, signal) {
   try {
     const toolCount = Array.isArray(tools) ? tools.length : 0;
     console.info('[Aris v2] DeepSeek chatWithTools request: messages=', messages?.length || 0, 'tools=', toolCount);
-    const res = await fetch(`${apiUrl}/v1/chat/completions`, {
-      signal: signal || undefined,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
+    const data = await postJsonWithRetry(
+      `${apiUrl}/v1/chat/completions`,
+      {
+        signal: signal || undefined,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages,
+          tools: Array.isArray(tools) && tools.length > 0 ? tools : undefined,
+          stream: false,
+          max_tokens: MAX_TOKENS_TOOLS,
+          temperature: getChatTemperature(),
+        }),
       },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages,
-        tools: Array.isArray(tools) && tools.length > 0 ? tools : undefined,
-        stream: false,
-        max_tokens: MAX_TOKENS_TOOLS,
-        temperature: getChatTemperature(),
-      }),
-    });
-    if (!res.ok) throw new Error(`DeepSeek ${res.status}: ${await res.text()}`);
-    const data = await res.json();
+      'chatWithTools',
+    );
     const msg = data.choices?.[0]?.message ?? {};
     const usage = data.usage ? { prompt_tokens: data.usage.prompt_tokens ?? 0, completion_tokens: data.usage.completion_tokens ?? 0 } : null;
     const content = msg.content ?? '';
