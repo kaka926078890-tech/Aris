@@ -4,6 +4,7 @@
 require('dotenv').config();
 
 const { getChatTemperature } = require('./temperature.js');
+const { buildLlmFetchInit } = require('./fetchRetry.js');
 
 const MAX_TOKENS_STREAM = Math.min(Number(process.env.ARIS_STREAM_MAX_TOKENS) || 8192, 32768);
 
@@ -17,22 +18,25 @@ async function chatStream(messages, onChunk, signal) {
   }
   try {
     console.info('[Aris v2] DeepSeek chatStream request: messages=', messages?.length || 0);
-    const res = await fetch(`${apiUrl}/v1/chat/completions`, {
-      signal: signal || undefined,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages,
-        max_tokens: MAX_TOKENS_STREAM,
-        temperature: getChatTemperature(),
-        stream: true,
-        stream_options: { include_usage: true },
+    const res = await fetch(
+      `${apiUrl}/v1/chat/completions`,
+      buildLlmFetchInit({
+        signal: signal || undefined,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages,
+          max_tokens: MAX_TOKENS_STREAM,
+          temperature: getChatTemperature(),
+          stream: true,
+          stream_options: { include_usage: true },
+        }),
       }),
-    });
+    );
     if (!res.ok) throw new Error(`DeepSeek ${res.status}: ${await res.text()}`);
     const reader = res.body?.getReader();
     if (!reader) throw new Error('No response body');

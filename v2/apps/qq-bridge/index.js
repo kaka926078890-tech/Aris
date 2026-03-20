@@ -11,6 +11,7 @@ const http = require('http');
 require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 
 const { handleUserMessage } = require('../../packages/server');
+const { handleOfficialWebhook } = require('./official.js');
 
 const PORT = parseInt(process.env.ARIS_QQ_BRIDGE_PORT || '8765', 10) || 8765;
 const TOKEN = process.env.ARIS_QQ_BRIDGE_TOKEN || '';
@@ -40,6 +41,15 @@ function checkAuth(req) {
   return m && m[1] === TOKEN;
 }
 
+async function runArisChat(text, sessionId) {
+  const chunks = [];
+  const sendChunk = (c) => {
+    if (typeof c === 'string' && c) chunks.push(c);
+  };
+  const sendAgentActions = () => {};
+  return handleUserMessage(text, sendChunk, sendAgentActions, undefined, { sessionId });
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
     return json(res, 200, {
@@ -47,6 +57,24 @@ const server = http.createServer(async (req, res) => {
       service: 'aris-qq-bridge',
       qq_bot_credentials_loaded: !!(process.env.QQ_BOT_APP_ID && process.env.QQ_BOT_APP_SECRET),
     });
+  }
+
+  if (req.method === 'POST' && req.url === '/qq/webhook') {
+    let payload;
+    try {
+      const raw = await readBody(req);
+      payload = raw ? JSON.parse(raw) : {};
+    } catch (_) {
+      return json(res, 400, { error: 'invalid_json' });
+    }
+    try {
+      const result = await handleOfficialWebhook(payload, runArisChat);
+      return json(res, 200, result);
+    } catch (e) {
+      console.error('[aris-qq-bridge][qq-webhook]', e?.message || e);
+      // 对平台回调返回 200，避免网关无限重试打爆本机；错误留日志排查
+      return json(res, 200, { ok: false, error: String(e?.message || e) });
+    }
   }
 
   if (req.method !== 'POST' || req.url !== '/chat') {
@@ -74,14 +102,8 @@ const server = http.createServer(async (req, res) => {
     return json(res, 400, { error: 'missing_sessionId' });
   }
 
-  const chunks = [];
-  const sendChunk = (c) => {
-    if (typeof c === 'string' && c) chunks.push(c);
-  };
-  const sendAgentActions = () => {};
-
   try {
-    const result = await handleUserMessage(text, sendChunk, sendAgentActions, undefined, { sessionId });
+    const result = await runArisChat(text, sessionId);
     const content = result && typeof result.content === 'string' ? result.content : '';
     return json(res, 200, {
       ok: !result.error,

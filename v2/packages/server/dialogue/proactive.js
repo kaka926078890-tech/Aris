@@ -291,6 +291,7 @@ async function maybeProactiveMessage() {
       { role: 'user', content: '请根据上述上下文，输出你的当前情绪/想法，以及是否想主动说一句话及内容。若想做某事（如查新闻、读文件），也可直接调用工具。' },
     ];
 
+    console.info('[Aris v2][proactive] 即将请求 DeepSeek（state_agent，含工具）messages=%s', messages.length);
     const res = await chatWithTools(messages, getTools(), null);
     const content = res.content || '';
     if (res.error || res.aborted) return null;
@@ -324,6 +325,7 @@ async function maybeProactiveMessage() {
       );
       console.info('[Aris v2][proactive] 调用工具:', res.tool_calls.map((tc) => tc.function?.name).join(', '));
       const nextMessages = [...messages, assistantMsg, ...toolResults];
+      console.info('[Aris v2][proactive] 即将请求 DeepSeek（state_agent 工具后续轮）messages=%s', nextMessages.length);
       const res2 = await chatWithTools(nextMessages, getTools(), null);
       const raw = (res2.content || '').trim().slice(0, 300);
       // 若第二轮仍为内部格式（情绪与想法/是否想说话），不当作对用户展示的回复

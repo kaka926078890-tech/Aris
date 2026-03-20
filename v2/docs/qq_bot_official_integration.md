@@ -26,11 +26,24 @@
 **桥接服务 + 按 QQ 身份使用独立 `sessionId`**，与「仅桌面单会话」区分：
 
 1. **对话入口**：`handleUserMessage` 支持第 5 个参数 `{ sessionId }`。传入时本回合使用该会话读写 SQLite / 向量 metadata，**不**切换桌面当前会话。
-2. **本机 HTTP**：`v2/apps/qq-bridge/index.js`，`npm run qq-bridge`（默认 `127.0.0.1:8765`）。`POST /chat`，Body：`{ "text": "用户原文", "sessionId": "qq:private:xxx" }`，Header：可选 `Authorization: Bearer <ARIS_QQ_BRIDGE_TOKEN>`。
+2. **本机 HTTP**：`v2/apps/qq-bridge/index.js`，`npm run qq-bridge`（默认 `127.0.0.1:8765`）。  
+   - 调试入口：`POST /chat`，Body：`{ "text": "用户原文", "sessionId": "qq:private:xxx" }`，Header：可选 `Authorization: Bearer <ARIS_QQ_BRIDGE_TOKEN>`。  
+   - 官方回调入口（MVP）：`POST /qq/webhook`，接收腾讯事件后自动调用 Aris 并回发消息。
 3. **开放平台凭证（环境变量）**：复制 `.env.example` 中 `QQ_BOT_*` 到本机 `v2/.env`（**勿提交**）：`QQ_BOT_APP_ID`、`QQ_BOT_APP_SECRET`（秘钥）、`QQ_BOT_TOKEN`（面板上的机器人令牌）、`QQ_BOT_UIN`（机器人 QQ 号）。网关若与桥接同机，可 `require('dotenv')` 读取以换 AccessToken、调 OpenAPI。
-4. **腾讯侧**：在开放平台配置 Webhook 指到你的**公网网关**，网关将官方事件转为对上述 `POST /chat` 的调用，并用官方 OpenAPI 回消息（网关需你按最新文档实现或选用云函数）。
+4. **腾讯侧**：在开放平台配置 Webhook 指到你的**公网网关**，将事件转发到桥接的 `POST /qq/webhook`（或由网关自行调 `/chat` 也可）。桥接会用 `QQ_BOT_APP_ID` / `QQ_BOT_APP_SECRET` 换 AccessToken，并调用 OpenAPI 回消息（消息路径与字段以官方文档为准）。
 
 `sessionId` 格式建议：`qq:private:<用户标识>`、`qq:group:<群标识>` 等，**仅**含字母数字与 `_:. -`，长度 ≤160（与代码校验一致）。
+
+### 回调与会话策略（MVP 已支持）
+
+- 事件解析：优先读取 `payload.d`，识别 `group_openid` / `user_openid` + `content`。  
+- 会话策略：  
+  - `ARIS_QQ_SESSION_MODE=group_member`（默认）：`qq:group:<group_openid>:<member_openid>`  
+  - `ARIS_QQ_SESSION_MODE=group_shared`：`qq:group:<group_openid>`
+- 回发：  
+  - 群：`POST /v2/groups/{group_openid}/messages`  
+  - 私聊：`POST /v2/users/{openid}/messages`  
+  请求头：`Authorization: QQBot <access_token>`、`X-Union-Appid: <QQ_BOT_APP_ID>`。
 
 ### 你需要提供的物料（对接前）
 
