@@ -21,6 +21,35 @@
 
 开放平台常见会区分不同场景（例如 **QQ 频道**、**QQ 群**、**消息列表单聊** 等）。**每种场景的开放范围、事件类型、消息类型可能不同**，选型前在文档与控制台中确认「你的场景是否支持、需哪些权限」。
 
+## 方案二（本仓库已实现基座）
+
+**桥接服务 + 按 QQ 身份使用独立 `sessionId`**，与「仅桌面单会话」区分：
+
+1. **对话入口**：`handleUserMessage` 支持第 5 个参数 `{ sessionId }`。传入时本回合使用该会话读写 SQLite / 向量 metadata，**不**切换桌面当前会话。
+2. **本机 HTTP**：`v2/apps/qq-bridge/index.js`，`npm run qq-bridge`（默认 `127.0.0.1:8765`）。`POST /chat`，Body：`{ "text": "用户原文", "sessionId": "qq:private:xxx" }`，Header：可选 `Authorization: Bearer <ARIS_QQ_BRIDGE_TOKEN>`。
+3. **腾讯侧**：在开放平台配置 Webhook 指到你的**公网网关**，网关将官方事件转为对上述 `POST /chat` 的调用，并用官方 OpenAPI 回消息（网关需你按最新文档实现或选用云函数）。
+
+`sessionId` 格式建议：`qq:private:<用户标识>`、`qq:group:<群标识>` 等，**仅**含字母数字与 `_:. -`，长度 ≤160（与代码校验一致）。
+
+### 你需要提供的物料（对接前）
+
+| 物料 | 用途 |
+|------|------|
+| 开放平台 **AppID / AppSecret**（或当前文档要求的凭证） | 鉴权、调 OpenAPI |
+| 机器人已开通的 **场景**（频道 / 群 / 单聊等）与 **事件订阅方式** | 决定网关如何解析消息 |
+| **Webhook 公网 URL** 或 **内网穿透** 调试地址 | 腾讯回调到你的网关 |
+| 若需 HTTPS：**证书或托管平台** | 生产 Webhook 常要求 HTTPS |
+| **测试群 / 测试号** | 联调发消息 |
+| （可选）网关运行环境：云函数、Docker、自有 VPS | 部署桥接上游 |
+
+本仓库 **不包含** 腾讯签名校验与具体 JSON 字段解析，请以 [官方文档](https://bot.q.qq.com/wiki/) 为准在网关内实现。
+
+### 局限（多用户）
+
+使用显式 `sessionId` 时，**低功耗 / proactive 等仍写入全局 `aris_proactive_state.json`**，多 QQ 用户同时聊天可能互相影响；若需严格隔离，需后续按会话拆分 proactive 或单独数据目录（见 [future_evolution_directions.md](future_evolution_directions.md)）。
+
+---
+
 ## 与 Aris v2 的衔接方式（架构）
 
 当前 Aris 桌面端通过 **Electron IPC** 调用 `handleUserMessage`（`packages/server`），**没有对外 HTTP**。要接官方 QQ，需要新增一层 **桥接服务**（可单独 Node 进程）：

@@ -5,6 +5,7 @@
   "private": true,
   "main": "apps/electron/main.js",
   "scripts": {
+    "qq-bridge": "node apps/qq-bridge/index.js",
     "start": "electron .",
     "postinstall": "node scripts/install-renderer.js",
     "dev:renderer": "node scripts/run-in-renderer.js dev",

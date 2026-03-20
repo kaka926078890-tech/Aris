@@ -113,12 +113,36 @@ function sanitizeAssistantContent(content) {
   return str;
 }
 
-async function handleUserMessage(userContent, sendChunk, sendAgentActions, signal) {
+/** 外部渠道（如 QQ 桥接）传入的 sessionId，限制字符集与长度，避免注入异常 key */
+function sanitizeExternalSessionId(raw) {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!s || s.length > 160) return null;
+  if (!/^[a-zA-Z0-9_:.-]+$/.test(s)) return null;
+  return s;
+}
+
+/**
+ * @param {{ sessionId?: string }} options
+ */
+async function resolveSessionIdForTurn(options) {
+  const ext = sanitizeExternalSessionId(options && options.sessionId);
+  if (ext) return ext;
+  return facade.getCurrentSessionId();
+}
+
+/**
+ * @param {string} userContent
+ * @param {(chunk: string) => void} sendChunk
+ * @param {(actions: unknown) => void} sendAgentActions
+ * @param {AbortSignal} [signal]
+ * @param {{ sessionId?: string }} [options] — 若传 `sessionId`（如 `qq:private:xxx`），本回合使用该会话，不读写桌面当前会话；供官方 QQ 桥接等多路隔离。
+ */
+async function handleUserMessage(userContent, sendChunk, sendAgentActions, signal, options = {}) {
+  const sessionId = await resolveSessionIdForTurn(options);
   if (signal && signal.aborted) {
-    const sessionId = await facade.getCurrentSessionId();
     return { content: '', error: true, sessionId, aborted: true };
   }
-  const sessionId = await facade.getCurrentSessionId();
 
   if (shouldBeQuiet(userContent)) {
     facade.writeProactiveState({ low_power_mode: true, proactive_no_reply_count: 0, last_tired_or_quiet_at: new Date().toISOString() });
