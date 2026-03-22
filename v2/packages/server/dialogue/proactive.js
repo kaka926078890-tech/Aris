@@ -12,6 +12,9 @@ const { shouldBeQuiet, isResumingDialogue } = require('./quietResume.js');
 const DEFAULT_PROACTIVE_CONFIG = {
   proactive_conservative: false,
   recent_user_message_min_length: 5,
+  timer_enabled: true,
+  timer_interval_minutes: 3,
+  timer_idle_minutes: 2,
 };
 
 function readProactiveConfig() {
@@ -27,6 +30,9 @@ function readProactiveConfig() {
     return {
       proactive_conservative: Boolean(data.proactive_conservative),
       recent_user_message_min_length: Math.min(100, Math.max(0, Number(data.recent_user_message_min_length) ?? 5)),
+      timer_enabled: Boolean(data.timer_enabled ?? true),
+      timer_interval_minutes: Math.min(60, Math.max(1, Number(data.timer_interval_minutes) ?? 3)),
+      timer_idle_minutes: Math.min(30, Math.max(0, Number(data.timer_idle_minutes) ?? 2)),
     };
   } catch (_) {
     return DEFAULT_PROACTIVE_CONFIG;

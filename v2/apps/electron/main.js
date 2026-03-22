@@ -13,6 +13,7 @@ let createWindowFn = null;
 
 app.whenReady().then(() => {
   const path = require('path');
+  const fs = require('fs');
   const { loadAndApplyRuntimeConfig, readConfig, writeConfig, getDataDir } = require('./runtimeConfig.js');
   loadAndApplyRuntimeConfig();
 
@@ -22,8 +23,10 @@ app.whenReady().then(() => {
   const { resolveRendererIndexPath, PRELOAD_SCRIPT } = require('./config.js');
   const { ensureOllamaStarted, getOllamaStatus } = require('./ollama.js');
 
-  const PROACTIVE_INTERVAL_MS = 3 * 60 * 1000;
-  const PROACTIVE_IDLE_MS = 2 * 60 * 1000;
+  // 默认值
+  const DEFAULT_PROACTIVE_INTERVAL_MS = 3 * 60 * 1000;
+  const DEFAULT_PROACTIVE_IDLE_MS = 2 * 60 * 1000;
+  
   let dialogueBusy = false;
   let dialogueAbortController = null;
   /** 当前轮结束时 resolve，供「新消息在忙时到达」等待后再起新轮 */
@@ -33,6 +36,43 @@ app.whenReady().then(() => {
   /** proactive 正在执行时的 Promise，供 dialogue:send 等待，避免对话与主动发话并发导致工具/会话被打断 */
   let proactivePromise = null;
   let resolveProactive = null;
+
+  function readProactiveConfig() {
+    try {
+      const { getProactiveConfigPath } = require('../../packages/config/paths.js');
+      const p = getProactiveConfigPath();
+      if (!fs.existsSync(p)) {
+        return {
+          timer_enabled: true,
+          timer_interval_minutes: 3,
+          timer_idle_minutes: 2,
+        };
+      }
+      const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+      return {
+        timer_enabled: Boolean(data.timer_enabled ?? true),
+        timer_interval_minutes: Math.min(60, Math.max(1, Number(data.timer_interval_minutes) ?? 3)),
+        timer_idle_minutes: Math.min(30, Math.max(0, Number(data.timer_idle_minutes) ?? 2)),
+      };
+    } catch (_) {
+      return {
+        timer_enabled: true,
+        timer_interval_minutes: 3,
+        timer_idle_minutes: 2,
+      };
+    }
+  }
+
+  function getProactiveIntervalMs() {
+    const config = readProactiveConfig();
+    if (!config.timer_enabled) return 0; // 0 表示不启动定时器
+    return config.timer_interval_minutes * 60 * 1000;
+  }
+
+  function getProactiveIdleMs() {
+    const config = readProactiveConfig();
+    return config.timer_idle_minutes * 60 * 1000;
+  }
 
   function createWindow() {
     const isMac = process.platform === 'darwin';
@@ -317,7 +357,8 @@ app.whenReady().then(() => {
 
   function runProactiveCheck() {
     if (dialogueBusy || !mainWindow || mainWindow.isDestroyed()) return;
-    if (Date.now() - lastDialogueAt < PROACTIVE_IDLE_MS) return;
+    const idleMs = getProactiveIdleMs();
+    if (Date.now() - lastDialogueAt < idleMs) return;
     if (proactivePromise) return;
     proactivePromise = new Promise((resolve) => { resolveProactive = resolve; });
     maybeProactiveMessage()
@@ -337,7 +378,16 @@ app.whenReady().then(() => {
   }
 
   function startProactiveInterval() {
-    proactiveTimer = setInterval(runProactiveCheck, PROACTIVE_INTERVAL_MS);
+    const intervalMs = getProactiveIntervalMs();
+    if (intervalMs <= 0) {
+      console.info('[Aris v2][electron] 定时器触发已禁用');
+      return;
+    }
+    if (proactiveTimer) {
+      clearInterval(proactiveTimer);
+    }
+    proactiveTimer = setInterval(runProactiveCheck, intervalMs);
+    console.info(`[Aris v2][electron] 定时器触发已启动，间隔 ${intervalMs / 60000} 分钟`);
   }
 
   async function resumePendingRestartTasks() {
