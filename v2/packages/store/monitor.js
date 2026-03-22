@@ -24,7 +24,10 @@ function ensureDir() {
   }
 }
 
-function recordTokenUsage(sessionId, roundId, inputTokens, outputTokens, isEstimated = false) {
+/**
+ * @param {object | null} [rowExtras] request_kind、tool_round；非估算时还可含 prompt_cached_tokens、prompt_uncached_tokens、reasoning_tokens
+ */
+function recordTokenUsage(sessionId, roundId, inputTokens, outputTokens, isEstimated = false, rowExtras = null) {
   ensureDir();
   let list = [];
   try {
@@ -34,14 +37,36 @@ function recordTokenUsage(sessionId, roundId, inputTokens, outputTokens, isEstim
       if (raw) list = JSON.parse(raw);
       if (!Array.isArray(list)) list = [];
     }
-    list.push({
+    const row = {
       session_id: sessionId,
       round_id: String(roundId),
       input_tokens: Number(inputTokens) || 0,
       output_tokens: Number(outputTokens) || 0,
       is_estimated: !!isEstimated,
       created_at: new Date().toISOString(),
-    });
+    };
+    if (rowExtras && typeof rowExtras === 'object') {
+      if (rowExtras.request_kind) row.request_kind = String(rowExtras.request_kind);
+      if (rowExtras.tool_round != null && rowExtras.tool_round !== '') {
+        const tr = Number(rowExtras.tool_round);
+        if (!Number.isNaN(tr)) row.tool_round = Math.floor(tr);
+      }
+      if (!isEstimated) {
+        if (Object.prototype.hasOwnProperty.call(rowExtras, 'prompt_cached_tokens')) {
+          const pc = Number(rowExtras.prompt_cached_tokens);
+          if (!Number.isNaN(pc) && pc >= 0) row.prompt_cached_tokens = Math.floor(pc);
+        }
+        if (Object.prototype.hasOwnProperty.call(rowExtras, 'prompt_uncached_tokens')) {
+          const pu = Number(rowExtras.prompt_uncached_tokens);
+          if (!Number.isNaN(pu) && pu >= 0) row.prompt_uncached_tokens = Math.floor(pu);
+        }
+        if (Object.prototype.hasOwnProperty.call(rowExtras, 'reasoning_tokens')) {
+          const rt = Number(rowExtras.reasoning_tokens);
+          if (!Number.isNaN(rt) && rt >= 0) row.reasoning_tokens = Math.floor(rt);
+        }
+      }
+    }
+    list.push(row);
     fs.writeFileSync(fp, JSON.stringify(list, null, 2), 'utf8');
   } catch (e) {
     console.warn('[Aris v2][monitor] recordTokenUsage write failed', e?.message);

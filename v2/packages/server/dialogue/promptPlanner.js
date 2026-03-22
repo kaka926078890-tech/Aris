@@ -115,16 +115,19 @@ async function runPromptPlanner(input) {
 
   try {
     const res = await chat(plannerMessages, { signal, max_tokens: maxTok, temperature: 0.2 });
-    if (res.aborted) return { plan: DEFAULT_PLAN, raw: '', error: 'aborted', plannerMessages };
-    if (res.error || !res.content) return { plan: CONSERVATIVE_PLAN, raw: res.content || '', error: 'chat_error', plannerMessages };
+    const plannerUsage = res.usage && typeof res.usage === 'object' ? res.usage : null;
+    if (res.aborted) return { plan: DEFAULT_PLAN, raw: '', error: 'aborted', plannerMessages, usage: plannerUsage };
+    if (res.error || !res.content) {
+      return { plan: CONSERVATIVE_PLAN, raw: res.content || '', error: 'chat_error', plannerMessages, usage: plannerUsage };
+    }
     const plan = parsePlannerJson(res.content);
-    if (!plan) return { plan: CONSERVATIVE_PLAN, raw: res.content, error: 'parse_failed', plannerMessages };
+    if (!plan) return { plan: CONSERVATIVE_PLAN, raw: res.content, error: 'parse_failed', plannerMessages, usage: plannerUsage };
     if (plan.risk_level === 'high') plan.need_full_constraints = true;
-    return { plan, raw: res.content, error: null, plannerMessages };
+    return { plan, raw: res.content, error: null, plannerMessages, usage: plannerUsage };
   } catch (e) {
-    if (e && e.name === 'AbortError') return { plan: DEFAULT_PLAN, raw: '', error: 'aborted', plannerMessages };
+    if (e && e.name === 'AbortError') return { plan: DEFAULT_PLAN, raw: '', error: 'aborted', plannerMessages, usage: null };
     console.warn('[Aris v2][promptPlanner]', e?.message);
-    return { plan: CONSERVATIVE_PLAN, raw: '', error: String(e?.message || 'request_failed'), plannerMessages };
+    return { plan: CONSERVATIVE_PLAN, raw: '', error: String(e?.message || 'request_failed'), plannerMessages, usage: null };
   }
 }
 

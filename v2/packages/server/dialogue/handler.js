@@ -16,18 +16,76 @@ const { maybeGenerateSummary } = require('./summaryGeneration.js');
 const { getTools, runTool } = require('./tools/index.js');
 const { chatWithTools } = require('../llm/client.js');
 const { chatStream } = require('../llm/stream.js');
+const { extractUsageCacheMetrics } = require('../llm/usageLog.js');
 const {
   DIALOGUE_CHUNK_PREV_ROUNDS,
-  FILE_TOOL_MAX_PER_USER_TURN,
+  getFileToolMaxPerUserTurn,
   isFileToolName,
   getMaxToolRounds,
 } = require('../../config/constants.js');
 const { shouldBeQuiet, isResumingDialogue } = require('./quietResume.js');
 const { appendDialogueTurnMetricLine } = require('./dialogueMetrics.js');
 const asyncOutbox = require('../../store/async_outbox.js');
+const crypto = require('crypto');
 
 const RECENT_ROUNDS = 3;
 const facade = store.facade;
+
+function makeTokenRowId() {
+  return `${Date.now().toString(36)}_${crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2, 11)}`;
+}
+
+/** 单次 LLM 请求写一条 monitor/token_usage（含 Planner、每轮 chatWithTools、工具后 chatStream） */
+async function recordMonitorLlmRow(sessionId, requestKind, toolRound, usage) {
+  if (!store.monitor?.recordTokenUsage || !usage || typeof usage !== 'object') return;
+  const pt = Number(usage.prompt_tokens) || 0;
+  const ct = Number(usage.completion_tokens) || 0;
+  const ex = extractUsageCacheMetrics(usage);
+  const rowExtras = { request_kind: requestKind };
+  if (toolRound != null && toolRound !== '') rowExtras.tool_round = toolRound;
+  if (ex.prompt_cache_known) {
+    rowExtras.prompt_cached_tokens = ex.prompt_cached_tokens;
+    rowExtras.prompt_uncached_tokens = Math.max(0, Math.floor(pt) - Math.floor(ex.prompt_cached_tokens));
+  }
+  if (ex.reasoning_known) rowExtras.reasoning_tokens = ex.reasoning_tokens;
+  const roundId = makeTokenRowId();
+  if (asyncOutbox.isEnabled()) {
+    await asyncOutbox.enqueue('token_usage', {
+      sessionId,
+      roundId,
+      inputTokens: pt,
+      outputTokens: ct,
+      isEstimated: false,
+      promptCachedTokens: ex.prompt_cached_tokens,
+      promptCacheKnown: ex.prompt_cache_known,
+      promptUncachedTokens: ex.prompt_cache_known ? Math.max(0, Math.floor(pt) - Math.floor(ex.prompt_cached_tokens)) : undefined,
+      reasoningTokens: ex.reasoning_tokens,
+      reasoningKnown: ex.reasoning_known,
+      requestKind,
+      toolRound: toolRound != null ? toolRound : undefined,
+    });
+  } else {
+    store.monitor.recordTokenUsage(sessionId, roundId, pt, ct, false, rowExtras);
+  }
+}
+
+async function recordMonitorEstimatedTurnRow(sessionId, inputTokens, outputTokens) {
+  if (!store.monitor?.recordTokenUsage) return;
+  const roundId = makeTokenRowId();
+  const rowExtras = { request_kind: 'estimated_turn' };
+  if (asyncOutbox.isEnabled()) {
+    await asyncOutbox.enqueue('token_usage', {
+      sessionId,
+      roundId,
+      inputTokens,
+      outputTokens,
+      isEstimated: true,
+      requestKind: 'estimated_turn',
+    });
+  } else {
+    store.monitor.recordTokenUsage(sessionId, roundId, inputTokens, outputTokens, true, rowExtras);
+  }
+}
 
 async function buildPromptContext(sessionId, recent, options = {}) {
   const dto = await buildContextDTO(sessionId, recent);
@@ -66,6 +124,7 @@ async function buildPromptContext(sessionId, recent, options = {}) {
       planner_enabled: plannerCfg.enabled,
       planner_ms: plannerMs,
       system_chars: stableSystemPrompt.length,
+      planner_usage: plannerCfg.enabled ? plannerResult.usage || null : null,
     },
   };
   if (options.includeLegacySystem) {
@@ -167,9 +226,15 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
 
   const tTurnStart = performance.now();
   const recent = await facade.getRecentConversation(sessionId, RECENT_ROUNDS * 2 + 2);
+  let hasOfficialUsage = false;
   const { messages, metrics: ctxMetrics } = await buildPromptContext(sessionId, recent, { signal });
   const sysLen = (messages[0] && messages[0].content) ? String(messages[0].content).length : 0;
   console.info('[Aris v2] 本轮 prompt: 稳定 system 约', sysLen, '字, API 消息数', messages.length);
+
+  if (ctxMetrics.planner_usage) {
+    await recordMonitorLlmRow(sessionId, 'prompt_planner', null, ctxMetrics.planner_usage);
+    hasOfficialUsage = true;
+  }
 
   let currentMessages = messages;
   let reply = '';
@@ -179,14 +244,14 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   let hadToolCalls = false;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
-  let hasOfficialUsage = false;
   let embedMs = null;
   const MAX_TOOL_ROUNDS = getMaxToolRounds();
+  const fileToolMaxPerTurn = getFileToolMaxPerUserTurn();
   const allAgentActions = [];
   const toolRoundsDetail = [];
   let fileToolCount = 0;
   const fileToolLimitMsg =
-    `本回合文件类工具调用已达上限（${FILE_TOOL_MAX_PER_USER_TURN}），请直接说明目标路径或换种方式描述需求。`;
+    `本回合文件类工具调用已达上限（${fileToolMaxPerTurn}），请直接说明目标路径或换种方式描述需求。`;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (signal && signal.aborted) break;
@@ -198,6 +263,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
       totalInputTokens += Number(res.usage.prompt_tokens) || 0;
       totalOutputTokens += Number(res.usage.completion_tokens) || 0;
       hasOfficialUsage = true;
+      await recordMonitorLlmRow(sessionId, 'chat_with_tools', round, res.usage);
     }
     if (!res.tool_calls || res.tool_calls.length === 0) break;
 
@@ -216,7 +282,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
       const name = tc.function?.name;
       const args = tc.function?.arguments;
       let result;
-      if (isFileToolName(name) && fileToolCount >= FILE_TOOL_MAX_PER_USER_TURN) {
+      if (isFileToolName(name) && fileToolCount >= fileToolMaxPerTurn) {
         result = { ok: false, error: fileToolLimitMsg };
       } else {
         if (isFileToolName(name)) fileToolCount += 1;
@@ -299,6 +365,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
           totalInputTokens += Number(streamRes.usage.prompt_tokens) || 0;
           totalOutputTokens += Number(streamRes.usage.completion_tokens) || 0;
           hasOfficialUsage = true;
+          await recordMonitorLlmRow(sessionId, 'chat_stream', null, streamRes.usage);
         }
         if (isDsmlOrToolMarkup(fullContent)) {
           const msg = '（上轮为工具调用，未生成自然语言回复，可继续发消息）';
@@ -367,31 +434,19 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
           }),
         );
       }
-      if (store.monitor && store.monitor.recordTokenUsage) {
-        const roundId = new Date().toISOString();
-        if (hasOfficialUsage && (totalInputTokens > 0 || totalOutputTokens > 0)) {
-          enqueues.push(
-            asyncOutbox.enqueue('token_usage', {
-              sessionId,
-              roundId,
-              inputTokens: totalInputTokens,
-              outputTokens: totalOutputTokens,
-              isEstimated: false,
-            }),
-          );
-        } else {
-          const inputChars = currentMessages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
-          const outputChars = (reply || '').length;
-          enqueues.push(
-            asyncOutbox.enqueue('token_usage', {
-              sessionId,
-              roundId,
-              inputTokens: Math.ceil(inputChars / 4),
-              outputTokens: Math.ceil(outputChars / 4),
-              isEstimated: true,
-            }),
-          );
-        }
+      if (store.monitor && store.monitor.recordTokenUsage && !hasOfficialUsage) {
+        const inputChars = currentMessages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
+        const outputChars = (reply || '').length;
+        enqueues.push(
+          asyncOutbox.enqueue('token_usage', {
+            sessionId,
+            roundId: makeTokenRowId(),
+            inputTokens: Math.ceil(inputChars / 4),
+            outputTokens: Math.ceil(outputChars / 4),
+            isEstimated: true,
+            requestKind: 'estimated_turn',
+          }),
+        );
       }
       await Promise.all(enqueues);
     } else {
@@ -415,14 +470,10 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
         last_mental_state: reply ? reply.slice(0, 300) : null,
       });
 
-      if (store.monitor && store.monitor.recordTokenUsage) {
-        if (hasOfficialUsage && (totalInputTokens > 0 || totalOutputTokens > 0)) {
-          store.monitor.recordTokenUsage(sessionId, new Date().toISOString(), totalInputTokens, totalOutputTokens, false);
-        } else {
-          const inputChars = currentMessages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
-          const outputChars = (reply || '').length;
-          store.monitor.recordTokenUsage(sessionId, new Date().toISOString(), Math.ceil(inputChars / 4), Math.ceil(outputChars / 4), true);
-        }
+      if (store.monitor && store.monitor.recordTokenUsage && !hasOfficialUsage) {
+        const inputChars = currentMessages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
+        const outputChars = (reply || '').length;
+        await recordMonitorEstimatedTurnRow(sessionId, Math.ceil(inputChars / 4), Math.ceil(outputChars / 4));
       }
     }
   } catch (e) {

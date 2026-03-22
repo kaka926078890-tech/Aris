@@ -153,12 +153,37 @@ async function runJob(job) {
   }
   if (type === 'token_usage') {
     if (!monitorMod || !monitorMod.recordTokenUsage) return;
+    const rowExtras = {};
+    if (payload.requestKind) rowExtras.request_kind = String(payload.requestKind);
+    if (payload.toolRound != null && payload.toolRound !== '') {
+      const tr = Number(payload.toolRound);
+      if (!Number.isNaN(tr)) rowExtras.tool_round = Math.floor(tr);
+    }
+    if (!payload.isEstimated) {
+      if (payload.promptCacheKnown) {
+        const pc = Number(payload.promptCachedTokens);
+        if (!Number.isNaN(pc) && pc >= 0) rowExtras.prompt_cached_tokens = Math.floor(pc);
+        const inp = Number(payload.inputTokens) || 0;
+        const exPu = Number(payload.promptUncachedTokens);
+        const pcEff = !Number.isNaN(pc) && pc >= 0 ? Math.floor(pc) : 0;
+        const pu =
+          !Number.isNaN(exPu) && exPu >= 0
+            ? Math.floor(exPu)
+            : Math.max(0, Math.floor(inp) - pcEff);
+        rowExtras.prompt_uncached_tokens = pu;
+      }
+      if (payload.reasoningKnown) {
+        const rt = Number(payload.reasoningTokens);
+        if (!Number.isNaN(rt) && rt >= 0) rowExtras.reasoning_tokens = Math.floor(rt);
+      }
+    }
     monitorMod.recordTokenUsage(
       payload.sessionId,
       payload.roundId,
       Number(payload.inputTokens) || 0,
       Number(payload.outputTokens) || 0,
       !!payload.isEstimated,
+      Object.keys(rowExtras).length ? rowExtras : null,
     );
     return;
   }

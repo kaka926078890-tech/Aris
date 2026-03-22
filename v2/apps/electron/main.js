@@ -2,7 +2,10 @@
  * 主进程入口。仅在此处加载 electron 与 dotenv，其余模块在 app.whenReady() 内加载，
  * 避免启动阶段加载路径触发 macOS 上 SIGBUS。
  */
-require('dotenv').config({ path: require('path').join(__dirname, '..', '..', '.env') });
+require('dotenv').config({
+  path: require('path').join(__dirname, '..', '..', '.env'),
+  override: true,
+});
 const { app, BrowserWindow, ipcMain, Menu, dialog } = require('electron');
 
 let mainWindow = null;
@@ -16,7 +19,7 @@ app.whenReady().then(() => {
   const { handleUserMessage, getPromptPreview, maybeProactiveMessage } = require('../../packages/server');
   const { exportToFile, importFromFile } = require('./backup.js');
   const store = require('../../packages/store');
-  const { RENDERER_INDEX, PRELOAD_SCRIPT } = require('./config.js');
+  const { resolveRendererIndexPath, PRELOAD_SCRIPT } = require('./config.js');
   const { ensureOllamaStarted, getOllamaStatus } = require('./ollama.js');
 
   const PROACTIVE_INTERVAL_MS = 3 * 60 * 1000;
@@ -44,13 +47,7 @@ app.whenReady().then(() => {
       },
     });
 
-    const indexPath = path.join(__dirname, '..', 'renderer', 'dist', 'index.html');
-    const fallback = path.join(__dirname, '..', 'renderer', 'index.html');
-    if (require('fs').existsSync(indexPath)) {
-      mainWindow.loadFile(indexPath);
-    } else {
-      mainWindow.loadFile(fallback);
-    }
+    mainWindow.loadFile(resolveRendererIndexPath());
 
     mainWindow.on('closed', () => { mainWindow = null; });
     setupAppMenu();

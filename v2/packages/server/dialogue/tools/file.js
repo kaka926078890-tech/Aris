@@ -4,12 +4,16 @@
 const path = require('path');
 const fs = require('fs');
 const { getV2Root, getDataDir, getMemoryDir, getMemoryFiles, getArisIdeasPath, getArisIdeasRelativeKey } = require('../../../config/paths.js');
+const { getReadFileMaxChars } = require('../../../config/constants.js');
 const store = require('../../../store');
 
 /** 禁止作为文本读取的扩展名（二进制/数据库），避免整库进 context 导致超长 */
 const BINARY_EXT_BLOCKLIST = new Set(['.db', '.sqlite', '.sqlite3', '.aris', '.lance', '.bin', '.so', '.dylib', '.node', '.exe', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.pdf', '.zip', '.gz']);
-/** read_file 最大返回字符数，避免单次工具结果撑爆 context（约 3 万 token 量级） */
-const READ_FILE_MAX_CHARS = 120000;
+
+function readFileMaxBytesBeforeReject() {
+  const maxChars = getReadFileMaxChars();
+  return Math.min(80 * 1024 * 1024, Math.max(maxChars * 8, 4 * 1024 * 1024));
+}
 
 function resolvePath(relativePath) {
   const normalized = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, '').replace(/\\/g, '/').trim();
@@ -252,8 +256,12 @@ async function runFileTool(name, args, context) {
         return { ok: false, error: '该文件为二进制或数据库格式，无法作为文本返回。请指定 .md、.json、.js、.html 等文本文件，或使用 list_my_files 查看结构。' };
       }
       const stat = fs.statSync(p);
-      if (stat.size > READ_FILE_MAX_CHARS * 2) {
-        return { ok: false, error: `文件过大（约 ${Math.round(stat.size / 1024)}KB），为避免上下文超长无法完整返回。请指定较小文件或查看文档了解结构。` };
+      const maxBytes = readFileMaxBytesBeforeReject();
+      if (stat.size > maxBytes) {
+        return {
+          ok: false,
+          error: `文件过大（约 ${Math.round(stat.size / 1024)}KB），超过本机可读上限（约 ${Math.round(maxBytes / 1024 / 1024)}MB）。可调小文件或设置 ARIS_READ_FILE_MAX_CHARS / 见 README。`,
+        };
       }
       if (!forceFull && typeof store.actionCache.getSingleFileReadIfValid === 'function') {
         const cached = store.actionCache.getSingleFileReadIfValid(normalizedRel);
@@ -267,8 +275,9 @@ async function runFileTool(name, args, context) {
         }
       }
       let content = fs.readFileSync(p, 'utf8');
-      if (content.length > READ_FILE_MAX_CHARS) {
-        content = content.slice(0, READ_FILE_MAX_CHARS) + '\n\n[内容过长已截断，仅显示前 ' + READ_FILE_MAX_CHARS + ' 字]';
+      const readCap = getReadFileMaxChars();
+      if (content.length > readCap) {
+        content = content.slice(0, readCap) + '\n\n[内容过长已截断，仅显示前 ' + readCap + ' 字]';
       }
       // read_file 成功后写入 action_cache（仅文件路径维度 + mtime 校验，避免摘要失效）
       try {

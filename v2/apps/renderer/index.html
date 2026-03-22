@@ -10,7 +10,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Inter', sans-serif; background: #fafafa; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
-    .bubble-user { background: #e0f2fe; color: #0c4a6e; }
+    /* pre-wrap：与输入框一致保留 Shift+Enter 换行（textContent 含 \n 时默认 white-space 会折叠换行） */
+    .bubble-user { background: #e0f2fe; color: #0c4a6e; white-space: pre-wrap; }
     .bubble-assistant { background: #f0fdf4; color: #14532d; }
     .bubble-wrap { display: flex; width: 100%; min-width: 0; -webkit-user-select: text; user-select: text; }
     .bubble-wrap.user { justify-content: flex-end; }
@@ -251,9 +252,10 @@
         <input id="monitor-filter-session" type="text" placeholder="会话 ID…" class="flex-1 min-w-0 max-w-[120px] rounded border border-slate-300 px-2 py-1 text-sm" />
         <span id="monitor-token-summary" class="text-xs text-slate-500"></span>
       </div>
+      <div id="monitor-token-day-stats" class="hidden flex-shrink-0 px-3 py-2 text-xs text-slate-700 bg-amber-50/90 border-b border-amber-100 leading-relaxed"></div>
       <div class="flex-1 min-h-0 overflow-auto px-3 py-2">
         <table class="w-full text-sm border-collapse">
-          <thead><tr class="text-left text-slate-500 border-b border-slate-200"><th class="py-1 pr-2">时间</th><th class="py-1 pr-2">会话</th><th class="py-1 pr-2 text-right">输入</th><th class="py-1 pr-2 text-right">输出</th><th class="py-1 text-right">估算</th></tr></thead>
+          <thead><tr class="text-left text-slate-500 border-b border-slate-200"><th class="py-1 pr-2">时间</th><th class="py-1 pr-2">会话</th><th class="py-1 pr-2">请求</th><th class="py-1 pr-2 text-right">输入</th><th class="py-1 pr-2 text-right">输出</th><th class="py-1 pr-2 text-right" title="prompt_tokens_details.cached_tokens">缓存命中</th><th class="py-1 pr-2 text-right" title="约等于 input − 命中（API 未拆分时与输入一致）">未命中</th><th class="py-1 pr-2 text-right" title="命中 / 本行输入 token">缓存占比</th><th class="py-1 pr-2 text-right" title="completion_tokens_details.reasoning_tokens 等">推理</th><th class="py-1 text-right">估算</th></tr></thead>
           <tbody id="monitor-token-body"></tbody>
         </table>
         <p id="monitor-token-empty" class="text-slate-500 text-sm py-3 hidden">暂无 token 记录</p>
@@ -877,6 +879,11 @@
     function renderMonitorToken(list) {
       const dateVal = document.getElementById('monitor-filter-date')?.value || '';
       const sessionVal = (document.getElementById('monitor-filter-session')?.value || '').trim().toLowerCase();
+      const dayStatsEl = document.getElementById('monitor-token-day-stats');
+      if (dayStatsEl && !dateVal) {
+        dayStatsEl.classList.add('hidden');
+        dayStatsEl.textContent = '';
+      }
       let filtered = (list || []).filter((r) => (!dateVal || (r.created_at || '').startsWith(dateVal)) && (!sessionVal || (r.session_id || '').toLowerCase().includes(sessionVal)));
       const body = document.getElementById('monitor-token-body');
       const empty = document.getElementById('monitor-token-empty');
@@ -886,17 +893,97 @@
       if (filtered.length === 0) {
         if (empty) empty.classList.remove('hidden');
         if (summary) summary.textContent = '';
+        if (dayStatsEl) {
+          dayStatsEl.classList.add('hidden');
+          dayStatsEl.textContent = '';
+        }
         return;
       }
       if (empty) empty.classList.add('hidden');
       const totalIn = filtered.reduce((s, r) => s + (Number(r.input_tokens) || 0), 0);
       const totalOut = filtered.reduce((s, r) => s + (Number(r.output_tokens) || 0), 0);
-      if (summary) summary.textContent = '共 ' + filtered.length + ' 条 | 输入 ' + totalIn + ' | 输出 ' + totalOut;
+      const totalCached = filtered.reduce((s, r) => s + (Object.prototype.hasOwnProperty.call(r, 'prompt_cached_tokens') ? (Number(r.prompt_cached_tokens) || 0) : 0), 0);
+      const totalReason = filtered.reduce((s, r) => s + (Object.prototype.hasOwnProperty.call(r, 'reasoning_tokens') ? (Number(r.reasoning_tokens) || 0) : 0), 0);
+      const anyCacheCol = filtered.some((r) => Object.prototype.hasOwnProperty.call(r, 'prompt_cached_tokens'));
+      const anyReasonCol = filtered.some((r) => Object.prototype.hasOwnProperty.call(r, 'reasoning_tokens'));
+      const totalUncached = filtered.reduce((s, r) => {
+        if (!Object.prototype.hasOwnProperty.call(r, 'prompt_cached_tokens')) return s;
+        if (Object.prototype.hasOwnProperty.call(r, 'prompt_uncached_tokens')) return s + (Number(r.prompt_uncached_tokens) || 0);
+        return s + Math.max(0, (Number(r.input_tokens) || 0) - (Number(r.prompt_cached_tokens) || 0));
+      }, 0);
+      let sumText = '共 ' + filtered.length + ' 次请求 | 输入 ' + totalIn + ' | 输出 ' + totalOut;
+      if (anyCacheCol) sumText += ' | 命中 ' + totalCached + ' | 未命中 ' + totalUncached;
+      if (anyReasonCol) sumText += ' | 推理(合计) ' + totalReason;
+      if (summary) summary.textContent = sumText;
+
+      if (dayStatsEl && dateVal) {
+        const withDetail = filtered.filter((r) => Object.prototype.hasOwnProperty.call(r, 'prompt_cached_tokens'));
+        const sumInDetail = withDetail.reduce((s, r) => s + (Number(r.input_tokens) || 0), 0);
+        const sumCachedD = withDetail.reduce((s, r) => s + (Number(r.prompt_cached_tokens) || 0), 0);
+        const sumUncachedD = withDetail.reduce((s, r) => {
+          if (Object.prototype.hasOwnProperty.call(r, 'prompt_uncached_tokens')) return s + (Number(r.prompt_uncached_tokens) || 0);
+          return s + Math.max(0, (Number(r.input_tokens) || 0) - (Number(r.prompt_cached_tokens) || 0));
+        }, 0);
+        const pct = sumInDetail > 0 ? ((100 * sumCachedD) / sumInDetail).toFixed(1) : '—';
+        const missPct = sumInDetail > 0 ? ((100 * sumUncachedD) / sumInDetail).toFixed(1) : '—';
+        dayStatsEl.textContent =
+          '【当日统计】（与上方日期 + 会话筛选一致）请求 ' +
+          filtered.length +
+          ' 次；其中含 Prompt 缓存明细 ' +
+          withDetail.length +
+          ' 次 | 输入合计(仅明细行) ' +
+          sumInDetail +
+          ' | 命中 ' +
+          sumCachedD +
+          ' | 未命中 ' +
+          sumUncachedD +
+          ' | 缓存占输入 ' +
+          pct +
+          '% | 未命中占输入 ' +
+          missPct +
+          '%';
+        dayStatsEl.classList.remove('hidden');
+      } else if (dayStatsEl) {
+        dayStatsEl.classList.add('hidden');
+        dayStatsEl.textContent = '';
+      }
+      function rowPromptUncached(r) {
+        if (!Object.prototype.hasOwnProperty.call(r, 'prompt_cached_tokens')) return null;
+        if (Object.prototype.hasOwnProperty.call(r, 'prompt_uncached_tokens')) return Number(r.prompt_uncached_tokens) || 0;
+        return Math.max(0, (Number(r.input_tokens) || 0) - (Number(r.prompt_cached_tokens) || 0));
+      }
+      function rowCacheHitPct(r) {
+        const inn = Number(r.input_tokens) || 0;
+        if (!Object.prototype.hasOwnProperty.call(r, 'prompt_cached_tokens') || inn <= 0) return null;
+        const c = Number(r.prompt_cached_tokens) || 0;
+        return ((100 * c) / inn).toFixed(1);
+      }
+      function tokenRequestKindLabel(r) {
+        const k = r.request_kind;
+        if (k === 'prompt_planner') return '编排';
+        if (k === 'chat_with_tools') {
+          const tr = r.tool_round;
+          if (tr != null && tr !== '' && !Number.isNaN(Number(tr))) return '工具#' + tr;
+          return '工具';
+        }
+        if (k === 'chat_stream') return '流式';
+        if (k === 'estimated_turn') return '估算(整轮)';
+        return k ? String(k) : '—';
+      }
       filtered.forEach((r) => {
         const tr = document.createElement('tr');
         tr.className = 'border-b border-slate-100';
         const created = r.created_at ? new Date(r.created_at).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'medium' }) : '';
-        tr.innerHTML = '<td class="py-1 pr-2 text-slate-600">' + created + '</td><td class="py-1 pr-2 text-slate-500 font-mono text-xs truncate max-w-[80px]" title="' + (r.session_id || '') + '">' + (r.session_id || '').slice(-10) + '</td><td class="py-1 pr-2 text-right">' + (r.input_tokens ?? 0) + '</td><td class="py-1 pr-2 text-right">' + (r.output_tokens ?? 0) + '</td><td class="py-1 text-right text-slate-400">' + (r.is_estimated ? '是' : '') + '</td>';
+        const hasPc = Object.prototype.hasOwnProperty.call(r, 'prompt_cached_tokens');
+        const hasRt = Object.prototype.hasOwnProperty.call(r, 'reasoning_tokens');
+        const pcStr = hasPc ? String(Number(r.prompt_cached_tokens)) : '—';
+        const pu = rowPromptUncached(r);
+        const puStr = pu != null ? String(pu) : '—';
+        const hitPct = rowCacheHitPct(r);
+        const pctStr = hitPct != null ? hitPct + '%' : '—';
+        const rtStr = hasRt ? String(Number(r.reasoning_tokens)) : '—';
+        const kindLabel = tokenRequestKindLabel(r);
+        tr.innerHTML = '<td class="py-1 pr-2 text-slate-600">' + created + '</td><td class="py-1 pr-2 text-slate-500 font-mono text-xs truncate max-w-[80px]" title="' + (r.session_id || '').replace(/"/g, '&quot;') + '">' + (r.session_id || '').slice(-10) + '</td><td class="py-1 pr-2 text-slate-600 text-xs whitespace-nowrap" title="' + (r.request_kind || '').replace(/"/g, '&quot;') + '">' + kindLabel + '</td><td class="py-1 pr-2 text-right">' + (r.input_tokens ?? 0) + '</td><td class="py-1 pr-2 text-right">' + (r.output_tokens ?? 0) + '</td><td class="py-1 pr-2 text-right text-emerald-700">' + pcStr + '</td><td class="py-1 pr-2 text-right text-amber-800">' + puStr + '</td><td class="py-1 pr-2 text-right text-sky-800">' + pctStr + '</td><td class="py-1 pr-2 text-right text-violet-700">' + rtStr + '</td><td class="py-1 text-right text-slate-400">' + (r.is_estimated ? '是' : '') + '</td>';
         body.appendChild(tr);
       });
     }

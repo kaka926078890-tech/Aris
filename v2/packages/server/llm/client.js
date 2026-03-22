@@ -61,7 +61,7 @@ async function chat(messages, options = {}) {
     const content = msg.content ?? '';
     if (usage) logDeepSeekUsageResponse('chat', usage);
     if (content) console.info('[Aris v2] DeepSeek chat 返回内容:', preview(content, LOG_PREVIEW_LEN));
-    return { content, tool_calls: msg.tool_calls ?? null, error: false };
+    return { content, tool_calls: msg.tool_calls ?? null, error: false, usage: usage && typeof usage === 'object' ? usage : null };
   } catch (e) {
     if (isLikelyUserAbort(e, signal)) return { content: '', tool_calls: null, error: true, aborted: true };
     console.error('[Aris v2] chat error', e);
@@ -104,9 +104,8 @@ async function chatWithTools(messages, tools, signal) {
     const msg = data.choices?.[0]?.message ?? {};
     const rawUsage = data.usage;
     if (rawUsage) logDeepSeekUsageResponse('chatWithTools', rawUsage);
-    const usage = rawUsage
-      ? { prompt_tokens: rawUsage.prompt_tokens ?? 0, completion_tokens: rawUsage.completion_tokens ?? 0 }
-      : null;
+    /** 保留完整 usage（含 prompt_tokens_details.cached_tokens 等），供监控汇总 */
+    const usage = rawUsage && typeof rawUsage === 'object' ? rawUsage : null;
     const content = msg.content ?? '';
     const toolCalls = msg.tool_calls ?? null;
     if (content) console.info('[Aris v2] DeepSeek chatWithTools 返回文本:', preview(content, LOG_PREVIEW_LEN));

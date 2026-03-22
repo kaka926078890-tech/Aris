@@ -13,10 +13,14 @@ const DIALOGUE_CHUNK_PREV_ROUNDS = 1;
 const SUMMARY_EVERY_N_ROUNDS = 0;
 
 /**
- * 单条用户消息触发的工具循环中，「文件类」工具最大调用次数（含 list/read/cache/write/delete/get_my_context）。
- * 与 handler 中计数一致；仅防止无限探路，不限制 search_memories 等。
+ * 单条用户消息触发的工具循环中，「文件类」工具最大调用次数（含 list/read/cache/write/delete/get_my_context 等）。
+ * 可通过 ARIS_FILE_TOOL_MAX_PER_USER_TURN 配置（默认放宽；上限防误配爆炸）。
  */
-const FILE_TOOL_MAX_PER_USER_TURN = 10;
+function getFileToolMaxPerUserTurn() {
+  const n = Number(process.env.ARIS_FILE_TOOL_MAX_PER_USER_TURN);
+  if (!Number.isNaN(n) && n >= 1) return Math.min(Math.floor(n), 100000);
+  return 1000;
+}
 
 /** @type {ReadonlySet<string>} */
 const FILE_TOOL_NAMES = new Set([
@@ -42,6 +46,13 @@ function getMaxToolRounds() {
   return 25;
 }
 
+/** read_file 单次返回最大字符数（截断）；可用 ARIS_READ_FILE_MAX_CHARS，默认约 200 万。 */
+function getReadFileMaxChars() {
+  const n = Number(process.env.ARIS_READ_FILE_MAX_CHARS);
+  if (!Number.isNaN(n) && n >= 1) return Math.min(Math.floor(n), 20000000);
+  return 2000000;
+}
+
 module.exports = {
   VECTOR_SIMILARITY_WEIGHT,
   VECTOR_TIME_WEIGHT,
@@ -49,8 +60,13 @@ module.exports = {
   SEARCH_QUERY_PREFIX,
   DIALOGUE_CHUNK_PREV_ROUNDS,
   SUMMARY_EVERY_N_ROUNDS,
-  FILE_TOOL_MAX_PER_USER_TURN,
+  getFileToolMaxPerUserTurn,
+  /** @deprecated 使用 getFileToolMaxPerUserTurn() */
+  get FILE_TOOL_MAX_PER_USER_TURN() {
+    return getFileToolMaxPerUserTurn();
+  },
   FILE_TOOL_NAMES,
   isFileToolName,
   getMaxToolRounds,
+  getReadFileMaxChars,
 };

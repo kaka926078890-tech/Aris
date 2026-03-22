@@ -6,7 +6,10 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 
-require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
+require('dotenv').config({
+  path: path.join(__dirname, '..', '..', '.env'),
+  override: true,
+});
 
 const { loadAndApplyRuntimeConfig } = require('../electron/runtimeConfig.js');
 loadAndApplyRuntimeConfig();
