@@ -210,11 +210,11 @@ function writeExtraPaths(config, payload) {
   }
 }
 
-async function exportToFile(filePath) {
+/** 与写入 .aris 文件相同结构的 JSON 对象（供 Web 导出等复用） */
+async function buildExportPayload() {
   const store = getStore();
   const config = getConfig();
   const dataDir = config.getDataDir();
-  const memoryDir = config.getMemoryDir();
 
   let sqliteBase64 = '';
   const sqlitePath = config.getSqlitePath();
@@ -252,7 +252,7 @@ async function exportToFile(filePath) {
   const extra_paths = exportExtraPaths(config);
   const data_dir_bundle = exportDataDirBundle(dataDir);
 
-  const payload = {
+  return {
     version: BACKUP_VERSION,
     exported_at: new Date().toISOString(),
     sqlite: sqliteBase64,
@@ -268,19 +268,28 @@ async function exportToFile(filePath) {
     extra_paths,
     data_dir_bundle,
   };
+}
 
+async function exportToFile(filePath) {
+  const payload = await buildExportPayload();
   fs.writeFileSync(filePath, JSON.stringify(payload), 'utf8');
-  console.info('[Aris v2][backup] export', filePath, 'memory=', memory.length);
+  console.info('[Aris v2][backup] export', filePath, 'memory=', payload.memory.length);
   return {
-    memoryCount: memory.length,
-    hasConversations: !!sqliteBase64,
-    hasIdentity: !!(identity && (identity.name || identity.notes)),
+    memoryCount: payload.memory.length,
+    hasConversations: !!payload.sqlite,
+    hasIdentity: !!(payload.identity && (payload.identity.name || payload.identity.notes)),
   };
 }
 
-async function importFromFile(filePath) {
-  const raw = fs.readFileSync(filePath, 'utf8');
-  const payload = JSON.parse(raw);
+/**
+ * 从已解析的备份对象恢复（与 importFromFile 逻辑一致，供 Web HTTP 等调用）。
+ * @param {object} payload
+ * @param {{ label?: string }} [meta]
+ */
+async function importFromParsedPayload(payload, meta = {}) {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('备份格式无效：根对象缺失');
+  }
   const store = getStore();
   const config = getConfig();
   const dataDir = config.getDataDir();
@@ -350,7 +359,14 @@ async function importFromFile(filePath) {
     }
   }
 
-  console.info('[Aris v2][backup] import', filePath, 'version=', version);
+  const label = meta.label != null ? String(meta.label) : 'payload';
+  console.info('[Aris v2][backup] import', label, 'version=', version);
 }
 
-module.exports = { exportToFile, importFromFile };
+async function importFromFile(filePath) {
+  const raw = fs.readFileSync(filePath, 'utf8');
+  const payload = JSON.parse(raw);
+  await importFromParsedPayload(payload, { label: filePath });
+}
+
+module.exports = { exportToFile, importFromFile, buildExportPayload, importFromParsedPayload };

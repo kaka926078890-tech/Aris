@@ -1,8 +1,19 @@
 const { spawn } = require('child_process');
-const { app } = require('electron');
 const { getV2Root } = require('../../../config/paths.js');
 
 let restartScheduled = false;
+
+/** Web / 仅 Node 环境未安装 electron 时不可用；勿在模块顶层 require('electron')，否则 web-chat 无法启动。 */
+function exitElectronOrProcess() {
+  try {
+    const { app } = require('electron');
+    if (app && typeof app.exit === 'function') {
+      app.exit(0);
+      return;
+    }
+  } catch (_) {}
+  process.exit(0);
+}
 
 function getNpmBin() {
   return process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -65,13 +76,7 @@ async function runAppTool(name, args) {
   });
 
   // 给 handler/LMM 一点时间返回工具结果与下一轮输出
-  setTimeout(() => {
-    try {
-      app.exit(0);
-    } catch (_) {
-      process.exit(0);
-    }
-  }, delayMs);
+  setTimeout(exitElectronOrProcess, delayMs);
 
   return { ok: true, message: '正在重启应用（执行 npm start）…' };
 }

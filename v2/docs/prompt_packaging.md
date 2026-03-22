@@ -5,7 +5,7 @@
 1. **buildContextDTO**：组装 DTO，含 `avoidPhrasesLine`（常驻）、`constraintsBriefBlock`（`memory/constraints_brief.json` 或截断回退）、`userConstraintsFull`（要求+纠错+喜好全文，不含禁止用语）、`recentWindowForPlanner` 等。
 2. **runPromptPlanner**（可关）：前置 LLM 根据**当前用户消息 + 极短对话节选 + brief** 输出 JSON：`scenes`、`need_full_constraints`、`need_session_summary`、`need_related_associations`、`need_last_state`、`risk_level`。不用关键词硬编码。节选仅为减冗：主对话 system 仍含【当前会话最近几轮】全量（与 `handler` 拉取的 `recent` 一致），编排模型说明中已注明勿因节选较短而假定主模型看不到更早内容。
 3. **buildSystemPrompt(dto, plan)**：按 plan 拼接上下文块；`scenes` 决定注入哪些场景规则（查代码/记忆路径/重启）。
-4. **关闭 Planner**：`ARIS_PROMPT_PLANNER_ENABLED=false` 或 `behavior_config.json` 中 `prompt_planner_enabled: false` 时，使用 **LEGACY_PLAN**（全文约束 + 三场景 + 全块），与旧版体量接近。
+4. **Planner 默认关闭**；启用：`ARIS_PROMPT_PLANNER_ENABLED=true` 或 `behavior_config.json` 中 `prompt_planner_enabled: true`。未启用时使用 **LEGACY_PLAN**（全文约束 + 三场景 + 全块），与旧版体量接近。
 
 ## 双层约束
 

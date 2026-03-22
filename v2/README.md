@@ -10,9 +10,11 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 ## 配置
 
 - **用户可见配置**：打开应用后进入侧栏 **设置** 页，可查看**当前数据目录**及在此保存的所有配置（对话 API、网络访问、**显示思考过程**等）。配置保存在数据目录下的 `config.json`，无需编辑 .env 或环境变量。其中「显示思考过程」默认关闭（`SHOW_THINKING=false`），在设置中开启后对话中会展示「已思考」折叠块。
-- **开发/本地**：可复制 `.env.example` 为 `.env`，配置 `DEEPSEEK_API_KEY`、`OLLAMA_HOST` 等；外网偶发断连可调 `ARIS_LLM_MAX_RETRIES`（默认 5 次请求）、`ARIS_LLM_RETRY_BASE_MS`（重试间隔基数）；若出现「Planner 成功、主对话带 tools 失败」且与并发无关，可保持默认 `ARIS_LLM_HTTP_CLOSE`（为 LLM 请求加 `Connection: close`，减轻对端/代理对同一 keep-alive 连接上第二次大包 RST）；若需排查可设 `ARIS_LLM_HTTP_CLOSE=false`（见 `.env.example`）；若未设置，应用会使用设置页保存的 `config.json`（与打包版一致）。**单轮观测**（可选）：`ARIS_DIALOGUE_METRICS_LOG` 默认会写入数据目录下的 `dialogue_turn_metrics.jsonl`（含 Prompt Planner 耗时、工具轮次、文件类工具调用次数、向量 embed 耗时等）；不需要时设 `false`。**异步 Outbox**（默认开启）：`ARIS_ASYNC_OUTBOX` 为 `false` 时主对话后轮次改为**同步**向量 embed + 监控 + 指标；为 `true`（默认）时先入队 `async_outbox/pending.json`，后台执行并带重试、死信与启动补录，详见 [async_outbox.md](docs/async_outbox.md)。**QQ 官方桥接**（`npm run qq-bridge`）：`ARIS_QQ_BRIDGE_PORT`、`ARIS_QQ_BRIDGE_TOKEN`；开放平台凭证 `QQ_BOT_APP_ID`、`QQ_BOT_APP_SECRET`、`QQ_BOT_TOKEN`、`QQ_BOT_UIN`（见 `.env.example`，仅本机 `.env`），见 [qq_bot_official_integration.md](docs/qq_bot_official_integration.md)。**其它可选环境变量**：`ARIS_CHAT_TEMPERATURE`（主对话默认采样温度，默认约 0.62）、`ARIS_MAX_TOOL_ROUNDS`（单条用户消息内工具循环最大轮数，默认 25）、`ARIS_RECORD_ASYNC`（`emotion` / `expression_desire` / `self_note` 是否异步写入，默认异步；设 `false` 则同步落盘）。详见 `.env.example`。
+- **开发/本地**：可复制 `.env.example` 为 `.env`，配置 `DEEPSEEK_API_KEY`、`OLLAMA_HOST` 等；**调试 DeepSeek 请求体**（仅本机）：`ARIS_DEBUG_DEEPSEEK_REQUEST_BODY=true` 时在后端终端打印发往 `/v1/chat/completions` 的 JSON body（`chat`、`chatWithTools`、流式 `chatStream`；含 `messages`、`stream` 等；**`chatWithTools` 默认省略 `tools` 数组**以免刷屏，需要全文时另设 `ARIS_DEBUG_DEEPSEEK_TOOLS=true`；不含 `Authorization`）；外网偶发断连可调 `ARIS_LLM_MAX_RETRIES`（默认 5 次请求）、`ARIS_LLM_RETRY_BASE_MS`（重试间隔基数）；若出现「Planner 成功、主对话带 tools 失败」且与并发无关，可保持默认 `ARIS_LLM_HTTP_CLOSE`（为 LLM 请求加 `Connection: close`，减轻对端/代理对同一 keep-alive 连接上第二次大包 RST）；若需排查可设 `ARIS_LLM_HTTP_CLOSE=false`（见 `.env.example`）；若未设置，应用会使用设置页保存的 `config.json`（与打包版一致）。**单轮观测**（可选）：`ARIS_DIALOGUE_METRICS_LOG` 默认会写入数据目录下的 `dialogue_turn_metrics.jsonl`（含 Prompt Planner 耗时、工具轮次、文件类工具调用次数、向量 embed 耗时等）；不需要时设 `false`。**异步 Outbox**（默认开启）：`ARIS_ASYNC_OUTBOX` 为 `false` 时主对话后轮次改为**同步**向量 embed + 监控 + 指标；为 `true`（默认）时先入队 `async_outbox/pending.json`，后台执行并带重试、死信与启动补录，详见 [async_outbox.md](docs/async_outbox.md)。**QQ 官方桥接**（`npm run qq-bridge`）：`ARIS_QQ_BRIDGE_PORT`、`ARIS_QQ_BRIDGE_TOKEN`；开放平台凭证 `QQ_BOT_APP_ID`、`QQ_BOT_APP_SECRET`、`QQ_BOT_TOKEN`、`QQ_BOT_UIN`（见 `.env.example`，仅本机 `.env`），见 [qq_bot_official_integration.md](docs/qq_bot_official_integration.md)。**其它可选环境变量**：`ARIS_CHAT_TEMPERATURE`（主对话默认采样温度，默认约 0.62）、`ARIS_MAX_TOOL_ROUNDS`（单条用户消息内工具循环最大轮数，默认 25）、`ARIS_RECORD_ASYNC`（`emotion` / `expression_desire` / `self_note` 是否异步写入，默认异步；设 `false` 则同步落盘）。详见 `.env.example`。
+- **无 Electron、仅用浏览器**：在 `v2` 目录配置好 `.env`（至少 `DEEPSEEK_API_KEY`，建议 `ARIS_V2_DATA_DIR`），执行 `npm run web-chat`，浏览器打开 `http://127.0.0.1:8780`（端口见 `ARIS_WEB_CHAT_PORT`）。**页面与 Electron 使用同一份** `apps/renderer/index.html`（侧栏对话/历史/向量/用户与 Aris/记忆/监控/提示词预览/设置等），由 `aris-web-bridge.js` 将 `window.aris` 转到同源 `POST /api/dialogue/send`（NDJSON 流式）与 `POST /api/rpc`。**换机/备份**：在 **设置** 页可 **导入/导出 `.aris`**（与桌面版「文件 → 导入/导出全部数据」同格式）；HTTP 亦可直接调用 `GET /api/backup/export`、`POST /api/backup/import`（请求体为备份 JSON 原文，需与对话 API 相同的 Bearer）。若导入返回 `not_found`，多半是 **web-chat 进程仍是旧代码**：在运行 `npm run web-chat` 的终端 **Ctrl+C 停止后重新执行** 即可。可选 `ARIS_WEB_CHAT_TOKEN`：设置后请在浏览器控制台执行 `localStorage.setItem('aris_web_chat_bearer','你的token')` 再刷新。详见 `apps/web-chat/server.js`、`webApiHandlers.js`。
 - **打包分发**：无需 .env。安装后打开应用，在 **设置** 页填写 DeepSeek API Key、API 地址、网络访问开关等，点击「保存全部配置」即可；下次对话立即生效。
 - **Ollama**：对话不依赖 Ollama；仅需「语义记忆/向量检索」时可选安装 [Ollama](https://ollama.com) 并执行 `ollama pull nomic-embed-text`，设置页有说明。
+- **Electron 二进制（开发安装）**：`v2/package.json` 顶层 `config.electron_mirror`、`config.electron_custom_dir` 供 `@electron/get` 在 `npm install` 时拉取 Electron（默认 npmmirror）。也可在终端设置环境变量 `ELECTRON_MIRROR`、`ELECTRON_CUSTOM_DIR` 覆盖；若安装不完整见下方「Electron failed to install」常见问题。
 
 ### 可配置项一览（memory 与 JSON）
 
@@ -25,7 +27,7 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 | **session_summaries.json** | 各会话最新小结（自动生成，一般无需手改） | 按 session 存 `content`、`updated_at`、`round_index`。 |
 | **network_config.json** | 网络访问工具（fetch_url）开关与安全策略 | `enable_web_fetch`、`enable_web_fetch_js`（为 true 时允许 use_js 用 Puppeteer 抓取 JS 渲染页）、`allowed_hosts`、`blocked_hosts`、`timeout_ms`、`max_calls_per_minute`、`max_length`、`reject_unauthorized`。 |
 | **proactive_config.json** | 主动消息克制策略 | `proactive_conservative`（true 时仅用积累的表达欲望，不调用 LLM 生成主动句）、`recent_user_message_min_length`（最近一条用户消息低于该字数且非问句时本轮回不发主动，0 表示不限制）。缺省由代码首次使用时写入。 |
-| **behavior_config.json** | 自我分析/修改边界、情境、情感 | `self_analysis_boundary`、`context_aware_tone`：同上。`inject_recent_emotion`（boolean，默认 true）：为 true 时注入最近一条情感记录一句，便于情感连续性。**Prompt Planner**：`prompt_planner_enabled`（boolean，默认 true）：为 false 时主对话前不再调用编排 LLM，使用全文用户约束与全部场景规则（与旧版提示词体量接近）。`prompt_planner_log_metrics`（boolean）：为 true 时在数据目录追加 `prompt_planner_metrics.jsonl`。编排侧仅见**末尾短对话节选**；主对话 system 仍注入**完整近窗**，见 [prompt_packaging.md](docs/prompt_packaging.md)。 |
+| **behavior_config.json** | 自我分析/修改边界、情境、情感 | `self_analysis_boundary`、`context_aware_tone`：同上。`inject_recent_emotion`（boolean，默认 true）：为 true 时注入最近一条情感记录一句，便于情感连续性。**Prompt Planner**：默认**关闭**；`prompt_planner_enabled: true` 时主对话前多一轮编排 LLM；未启用时使用全文用户约束与全部场景规则（LEGACY）。`prompt_planner_log_metrics`（boolean）：为 true 时在数据目录追加 `prompt_planner_metrics.jsonl`。编排侧仅见**末尾短对话节选**；主对话含滑动历史，见 [prompt_packaging.md](docs/prompt_packaging.md)。 |
 | **constraints_brief.json** | 用户要求/纠错/喜好的「二次摘要」，专供主对话常驻注入 | 纠错/要求/喜好合并后会 **debounce 异步** 重建；**若磁盘上尚无有效摘要**（无文件、三块皆空等）而**已有约束长文**，则在每次组装对话上下文（`buildContextDTO`）时 **await 立即重建一版**（LLM 或截断回退），无需手点。文件名可由 `memory_files.json` 的 `constraints_brief` 覆盖。 |
 | **avoid_phrases.json** | 禁止用语列表（人工维护） | 格式 `{ "avoid_phrases": ["为您服务","有什么可以帮您"] }` 或直接数组。每轮在 system 中单独注入【禁止用语】块（与摘要/全文约束配合）。 |
 | **conversation_rules.md** | 情境与语气、检索与 record 等规则（可选） | 纯文本。若存在则替换代码中的**基础**默认规则；可选含 `## 场景特定规则` 与 `[SCENE:CODE_OPERATION]` 等标记覆盖查代码/记忆路径/重启说明，详见 [prompt_packaging.md](docs/prompt_packaging.md)。 |
@@ -80,7 +82,7 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 
 ```bash
 cd v2
-npm install   # 根目录安装即可，postinstall 会自动在 apps/renderer 安装前端依赖
+npm install   # 在 v2 目录执行；postinstall 会在 apps/renderer 安装前端依赖；Puppeteer 默认不在安装阶段下载浏览器（避免网络/镜像导致失败），运行 fetch_url（use_js）时用本机 Chrome，见下方常见问题与 `.env.example`
 # 可选：复制 .env 配置 DEEPSEEK_API_KEY 等；也可启动后在应用内「设置」页配置
 cp .env.example .env
 npm start
@@ -114,6 +116,26 @@ npm run build:linux # 产出 AppImage（Linux）
       ```bash
       npm start
       ```
+
+- **`npm start` 报错：`Electron failed to install correctly, please delete node_modules/electron...`**
+  - **原因**：`electron` 的 postinstall 未成功下载/解压平台二进制（`node_modules/electron` 里缺少 `path.txt` 与 `dist/`），常见于网络中断、杀毒占用文件或安装过程被强行打断。
+  - **解决方式**：
+    1. **关掉**正在运行的 Aris / Electron、以及可能锁定 `node_modules` 的终端或 IDE 预览（必要时退出编辑器后再操作）。
+    2. 在 `v2` 目录删除损坏目录后重装：
+       ```bash
+       cd v2
+       rm -rf node_modules/electron
+       npm install
+       ```
+       Windows 若提示占用，可在资源管理器结束相关进程后，用资源管理器删除 `v2\node_modules\electron`，再执行 `npm install`。
+    3. 仓库已在 `v2/package.json` 的 **`config.electron_mirror` / `config.electron_custom_dir`** 中配置国内镜像（npmmirror），安装脚本会通过 `npm_package_config_*` 拉取二进制；若你处在特殊网络，可在当前终端临时设置后再装：`ELECTRON_MIRROR=https://registry.npmmirror.com/-/binary/electron/`（与 `config` 中一致即可）。
+  - **仍报 `EBUSY` / 无法重命名 `electron` 文件夹**：先结束所有 `Electron`/`Aris` 进程与杀毒对该项目文件夹的实时扫描，或删除整个 `v2/node_modules` 后重新 `npm install`。
+
+- **`npm install` 在 `puppeteer` 步骤失败（Chrome / chrome-headless-shell 下载、ZIP 损坏等）**
+  - **原因**：安装脚本需从外网拉取浏览器二进制，网络或镜像不稳定时易失败。
+  - **默认策略**：`v2/package.json` 中已配置 `puppeteer.skipDownload`，安装阶段跳过下载；使用 **本机已安装的 Google Chrome** 作为无头浏览器。
+  - **若无 Chrome**：安装 Chrome，或设置 `PUPPETEER_BROWSER_CHANNEL=msedge`（本机 Edge），或在 `.env` 中设置 `PUPPETEER_EXECUTABLE_PATH` 指向浏览器可执行文件（示例见 `.env.example`）。
+  - **若需安装阶段内置浏览器**：从 `package.json` 移除 `"puppeteer".skipDownload` 后重跑 `npm install`，并保证能稳定访问官方下载源或正确配置镜像。
 
 ### Aris 如何了解自己
 

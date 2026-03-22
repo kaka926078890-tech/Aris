@@ -80,8 +80,8 @@ function formatRestartRecoveryInfo(recoveryInfo) {
 }
 
 /**
- * 供 Prompt Planner 的极短窗口：主对话 system 已含【当前会话最近几轮】全量，
- * 此处仅保留末尾若干条、单条截断，避免与主 prompt 重复堆叠。
+ * 供 Prompt Planner 的极短窗口：主对话在 API messages 中含滑动历史，
+ * 此处仅保留末尾若干条、单条截断，避免与 Planner 输入重复堆叠。
  */
 function formatRecentWindowForPlanner(recent) {
   if (!Array.isArray(recent) || !recent.length) return '';
@@ -111,13 +111,16 @@ async function buildContextDTO(sessionId, recent) {
   const userIdentity = id.name ? `用户名字：${id.name}` + (id.notes ? '\n' + id.notes : '') : '（无）';
   const avoidPhrasesLine = facade.getAvoidPhrasesForPrompt();
 
+  const constraintsRequirementsText = facade.getRequirementsSummary() || '（无）';
+  const constraintsCorrectionsText = facade.getCorrectionsFullSummary();
+  const constraintsPreferencesText = facade.getPreferencesSummaryForPrompt() || '（无）';
   const userConstraintsPartsNoAvoid = [
     '【用户要求】',
-    facade.getRequirementsSummary() || '（无）',
+    constraintsRequirementsText,
     '【纠错记录】',
-    facade.getCorrectionsFullSummary(),
+    constraintsCorrectionsText,
     '【用户喜好】',
-    facade.getPreferencesSummaryForPrompt() || '（无）',
+    constraintsPreferencesText,
   ];
   const userConstraintsFull = userConstraintsPartsNoAvoid.join('\n');
 
@@ -128,7 +131,11 @@ async function buildContextDTO(sessionId, recent) {
 
   await constraintsBrief.ensureBriefIfNeeded();
   const briefRecord = constraintsBrief.readBrief();
-  const constraintsBriefBlock = constraintsBrief.formatBriefForPrompt(briefRecord || constraintsBrief._fallbackBrief());
+  const br = briefRecord || constraintsBrief._fallbackBrief();
+  const constraintsBriefBlock = constraintsBrief.formatBriefForPrompt(br);
+  const constraintsBriefRequirements = String(br.requirements_brief || '').trim() || '（无）';
+  const constraintsBriefCorrections = String(br.corrections_brief || '').trim() || '（无）';
+  const constraintsBriefPreferences = String(br.preferences_brief || '').trim() || '（无）';
   const recentWindowForPlanner = formatRecentWindowForPlanner(recent);
 
   const contextWindow =
@@ -154,8 +161,14 @@ async function buildContextDTO(sessionId, recent) {
     /** @deprecated 使用 userConstraintsFull + avoidPhrasesLine；保留兼容旧日志 */
     userConstraints: userConstraintsLegacy,
     userConstraintsFull,
+    constraintsRequirementsText,
+    constraintsCorrectionsText,
+    constraintsPreferencesText,
     avoidPhrasesLine,
     constraintsBriefBlock,
+    constraintsBriefRequirements,
+    constraintsBriefCorrections,
+    constraintsBriefPreferences,
     recentWindowForPlanner,
     contextWindow,
     lastStateAndSubjectiveTime,

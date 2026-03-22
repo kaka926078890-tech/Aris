@@ -5,6 +5,8 @@ require('dotenv').config();
 
 const { getChatTemperature } = require('./temperature.js');
 const { postJsonWithRetry, isLikelyUserAbort } = require('./fetchRetry.js');
+const { logDeepSeekRequestBody } = require('./deepseekDebug.js');
+const { logDeepSeekUsageResponse } = require('./usageLog.js');
 
 const MAX_TOKENS_STREAM = Math.min(Number(process.env.ARIS_STREAM_MAX_TOKENS) || 8192, 32768);
 const MAX_TOKENS_TOOLS = Math.min(Number(process.env.ARIS_TOOL_MAX_TOKENS) || 8192, 32768);
@@ -34,6 +36,13 @@ async function chat(messages, options = {}) {
   try {
     const msgCount = Array.isArray(messages) ? messages.length : 0;
     console.info('[Aris v2] DeepSeek chat request: messages=', msgCount, 'url=', apiUrl);
+    const chatPayload = {
+      model: 'deepseek-chat',
+      messages,
+      max_tokens: maxTokensOverride != null ? maxTokensOverride : MAX_TOKENS_STREAM,
+      temperature: temperatureOverride != null ? temperatureOverride : getChatTemperature(),
+    };
+    logDeepSeekRequestBody('chat', chatPayload);
     const data = await postJsonWithRetry(
       `${apiUrl}/v1/chat/completions`,
       {
@@ -43,19 +52,14 @@ async function chat(messages, options = {}) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
-          model: 'deepseek-chat',
-          messages,
-          max_tokens: maxTokensOverride != null ? maxTokensOverride : MAX_TOKENS_STREAM,
-          temperature: temperatureOverride != null ? temperatureOverride : getChatTemperature(),
-        }),
+        body: JSON.stringify(chatPayload),
       },
       'chat',
     );
     const msg = data.choices?.[0]?.message ?? {};
     const usage = data.usage;
     const content = msg.content ?? '';
-    if (usage) console.info('[Aris v2] DeepSeek chat response: prompt_tokens=', usage.prompt_tokens, 'completion_tokens=', usage.completion_tokens);
+    if (usage) logDeepSeekUsageResponse('chat', usage);
     if (content) console.info('[Aris v2] DeepSeek chat 返回内容:', preview(content, LOG_PREVIEW_LEN));
     return { content, tool_calls: msg.tool_calls ?? null, error: false };
   } catch (e) {
@@ -74,6 +78,16 @@ async function chatWithTools(messages, tools, signal) {
   try {
     const toolCount = Array.isArray(tools) ? tools.length : 0;
     console.info('[Aris v2] DeepSeek chatWithTools request: messages=', messages?.length || 0, 'tools=', toolCount);
+    const toolsPayload = Array.isArray(tools) && tools.length > 0 ? tools : undefined;
+    const chatWithToolsPayload = {
+      model: 'deepseek-chat',
+      messages,
+      tools: toolsPayload,
+      stream: false,
+      max_tokens: MAX_TOKENS_TOOLS,
+      temperature: getChatTemperature(),
+    };
+    logDeepSeekRequestBody('chatWithTools', chatWithToolsPayload);
     const data = await postJsonWithRetry(
       `${apiUrl}/v1/chat/completions`,
       {
@@ -83,22 +97,18 @@ async function chatWithTools(messages, tools, signal) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
-          model: 'deepseek-chat',
-          messages,
-          tools: Array.isArray(tools) && tools.length > 0 ? tools : undefined,
-          stream: false,
-          max_tokens: MAX_TOKENS_TOOLS,
-          temperature: getChatTemperature(),
-        }),
+        body: JSON.stringify(chatWithToolsPayload),
       },
       'chatWithTools',
     );
     const msg = data.choices?.[0]?.message ?? {};
-    const usage = data.usage ? { prompt_tokens: data.usage.prompt_tokens ?? 0, completion_tokens: data.usage.completion_tokens ?? 0 } : null;
+    const rawUsage = data.usage;
+    if (rawUsage) logDeepSeekUsageResponse('chatWithTools', rawUsage);
+    const usage = rawUsage
+      ? { prompt_tokens: rawUsage.prompt_tokens ?? 0, completion_tokens: rawUsage.completion_tokens ?? 0 }
+      : null;
     const content = msg.content ?? '';
     const toolCalls = msg.tool_calls ?? null;
-    if (usage) console.info('[Aris v2] DeepSeek chatWithTools response: prompt_tokens=', usage.prompt_tokens, 'completion_tokens=', usage.completion_tokens);
     if (content) console.info('[Aris v2] DeepSeek chatWithTools 返回文本:', preview(content, LOG_PREVIEW_LEN));
     if (Array.isArray(toolCalls) && toolCalls.length > 0) {
       const names = toolCalls.map((tc) => tc.function?.name || '?').join(', ');

@@ -3,7 +3,7 @@
  */
 const store = require('../../store');
 const config = require('../../config');
-const { buildSystemPrompt } = require('./prompt.js');
+const { buildMainDialogueMessages, buildSystemPrompt } = require('./prompt.js');
 const { buildContextDTO } = require('./contextBuilder.js');
 const {
   readPromptPlannerConfig,
@@ -50,28 +50,27 @@ async function buildPromptContext(sessionId, recent, options = {}) {
     plan = plannerResult.plan;
   }
 
-  const systemPrompt = buildSystemPrompt(dto, plan, { enabled: plannerCfg.enabled });
+  const { messages, stableSystemPrompt } = buildMainDialogueMessages(dto, plan, { enabled: plannerCfg.enabled }, recent);
   if (plannerCfg.enabled && plannerCfg.log_metrics) {
     appendPlannerMetricLine({
       planner_error: plannerResult.error,
       plan,
-      system_chars: systemPrompt.length,
+      system_chars: stableSystemPrompt.length,
     });
   }
 
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: currentUserContent || '' },
-  ];
   const out = {
-    systemPrompt,
+    systemPrompt: stableSystemPrompt,
     messages,
     metrics: {
       planner_enabled: plannerCfg.enabled,
       planner_ms: plannerMs,
-      system_chars: systemPrompt.length,
+      system_chars: stableSystemPrompt.length,
     },
   };
+  if (options.includeLegacySystem) {
+    out.systemPromptLegacy = buildSystemPrompt(dto, plan, { enabled: plannerCfg.enabled });
+  }
   if (options.includePlannerInPreview) {
     if (plannerCfg.enabled) {
       out.plannerPreview = {
@@ -85,7 +84,7 @@ async function buildPromptContext(sessionId, recent, options = {}) {
         disabled: true,
         plan: LEGACY_PLAN,
         messages: [],
-        note: 'Prompt Planner 未启用（environment ARIS_PROMPT_PLANNER_ENABLED=false 或 memory/behavior_config.json 中 prompt_planner_enabled: false）。本回合固定使用 LEGACY_PLAN（全文约束 + 全场景）。',
+        note: 'Prompt Planner 未启用（默认关闭；需设置 ARIS_PROMPT_PLANNER_ENABLED=true 或 behavior_config.json 中 prompt_planner_enabled: true）。本回合固定使用 LEGACY_PLAN（全文约束 + 全场景）。',
       };
     }
   }
@@ -170,7 +169,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   const recent = await facade.getRecentConversation(sessionId, RECENT_ROUNDS * 2 + 2);
   const { messages, metrics: ctxMetrics } = await buildPromptContext(sessionId, recent, { signal });
   const sysLen = (messages[0] && messages[0].content) ? String(messages[0].content).length : 0;
-  console.info('[Aris v2] 本轮 prompt: system 约', sysLen, '字, 消息数', messages.length);
+  console.info('[Aris v2] 本轮 prompt: 稳定 system 约', sysLen, '字, API 消息数', messages.length);
 
   let currentMessages = messages;
   let reply = '';
@@ -478,7 +477,10 @@ async function getPromptPreview(userMessage) {
   const forBuild = typeof userMessage === 'string' && userMessage.trim()
     ? [...recent, { role: 'user', content: userMessage.trim() }]
     : recent;
-  const ctx = await buildPromptContext(sessionId, forBuild, { includePlannerInPreview: true });
+  const ctx = await buildPromptContext(sessionId, forBuild, {
+    includePlannerInPreview: true,
+    includeLegacySystem: true,
+  });
 
   let plannerSectionText = '';
   const pp = ctx.plannerPreview;
@@ -495,17 +497,18 @@ async function getPromptPreview(userMessage) {
     plannerSectionText = '（无 Planner 消息）';
   }
 
-  const mainSectionText =
-    '【system】\n' +
-    ctx.systemPrompt +
-    '\n\n【user】\n' +
-    (ctx.messages[1]?.content ?? '');
+  const mainSectionText = formatMessagesBlock(ctx.messages);
+  const legacyNote =
+    ctx.systemPromptLegacy != null
+      ? `\n\n---------- 对照：旧版单条 system（已拆分为上列多段 messages）----------\n约 ${ctx.systemPromptLegacy.length} 字\n${ctx.systemPromptLegacy.slice(0, 2000)}${ctx.systemPromptLegacy.length > 2000 ? '\n…（截断）' : ''}`
+      : '';
 
   const promptText =
     '========== ① Prompt Planner（编排 LLM）==========\n\n' +
     plannerSectionText +
-    '\n\n========== ② 主对话 ==========\n\n' +
-    mainSectionText;
+    '\n\n========== ② 主对话（多段 messages，利于 DeepSeek 前缀缓存）==========\n\n' +
+    mainSectionText +
+    legacyNote;
 
   return {
     systemPrompt: ctx.systemPrompt,

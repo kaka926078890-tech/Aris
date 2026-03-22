@@ -3,9 +3,14 @@
   "version": "0.2.0",
   "description": "Aris v2 - Full refactor, LLM-driven recording, separate backend/frontend",
   "private": true,
+  "config": {
+    "electron_mirror": "https://registry.npmmirror.com/-/binary/electron/",
+    "electron_custom_dir": "{{ version }}"
+  },
   "main": "apps/electron/main.js",
   "scripts": {
     "qq-bridge": "node apps/qq-bridge/index.js",
+    "web-chat": "node apps/web-chat/server.js",
     "start": "electron .",
     "postinstall": "node scripts/install-renderer.js",
     "dev:renderer": "node scripts/run-in-renderer.js dev",
@@ -22,6 +27,9 @@
   ],
   "author": "",
   "license": "MIT",
+  "puppeteer": {
+    "skipDownload": true
+  },
   "dependencies": {
     "@lancedb/lancedb": "^0.26.0",
     "cheerio": "^1.0.0",

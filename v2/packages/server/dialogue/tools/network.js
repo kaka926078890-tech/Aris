@@ -306,10 +306,16 @@ async function fetchWithPuppeteer(urlObj, timeoutMs) {
   let browser;
   try {
     const puppeteer = require('puppeteer');
-    browser = await puppeteer.launch({
+    const launchOpts = {
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-    });
+    };
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+      launchOpts.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    } else {
+      launchOpts.channel = process.env.PUPPETEER_BROWSER_CHANNEL || 'chrome';
+    }
+    browser = await puppeteer.launch(launchOpts);
     const page = await browser.newPage();
     await page.setDefaultNavigationTimeout(Math.min(timeoutMs, 45000));
     await page.setUserAgent(BROWSER_USER_AGENT);

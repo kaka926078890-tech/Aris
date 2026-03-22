@@ -306,6 +306,19 @@
         <p class="text-xs text-slate-500 mb-3">所有配置保存在上述目录下的 <code class="bg-slate-100 px-1 rounded">config.json</code>，无需编辑 .env。</p>
       </section>
       <section class="rounded-lg border border-slate-200 bg-white p-4">
+        <h2 class="text-sm font-medium text-slate-700 mb-1">备份与迁移（.aris）</h2>
+        <p class="text-xs text-slate-500 mb-3">与桌面版「文件 → 导出/导入全部数据」相同格式。在另一台电脑导出 <code class="bg-slate-100 px-1 rounded">.aris</code> 后，可在本页导入到<strong>当前数据目录</strong>（见上）。导入会覆盖对话、向量记忆、身份与 memory 配置等。</p>
+        <div id="settings-backup-web" class="hidden space-y-2">
+          <input type="file" id="settings-backup-file" accept=".aris,.json,application/json" class="hidden" />
+          <div class="flex flex-wrap gap-2 items-center">
+            <button type="button" id="settings-backup-import-btn" class="rounded border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50 text-slate-800">导入 .aris…</button>
+            <button type="button" id="settings-backup-export-btn" class="rounded bg-slate-700 text-white px-3 py-2 text-sm hover:bg-slate-800">导出备份</button>
+          </div>
+          <p id="settings-backup-msg" class="text-xs text-slate-500 min-h-[1rem]"></p>
+        </div>
+        <p id="settings-backup-desktop-hint" class="hidden text-xs text-slate-500">桌面版请使用菜单 <strong class="text-slate-700">文件</strong> → <strong class="text-slate-700">导入/导出全部数据</strong>。</p>
+      </section>
+      <section class="rounded-lg border border-slate-200 bg-white p-4">
         <h2 class="text-sm font-medium text-slate-700 mb-3">对话 API</h2>
         <div class="space-y-3 text-sm">
           <div>
@@ -1145,8 +1158,22 @@
       }
     }
 
+    function syncBackupSectionVisibility() {
+      const webEl = document.getElementById('settings-backup-web');
+      const hintEl = document.getElementById('settings-backup-desktop-hint');
+      if (!webEl || !hintEl) return;
+      if (window.aris && typeof window.aris.importArisBackup === 'function') {
+        webEl.classList.remove('hidden');
+        hintEl.classList.add('hidden');
+      } else {
+        webEl.classList.add('hidden');
+        hintEl.classList.remove('hidden');
+      }
+    }
+
     async function loadSettingsPanel() {
       if (!window.aris || !window.aris.getRuntimeConfig) return;
+      syncBackupSectionVisibility();
       try {
         const c = await window.aris.getRuntimeConfig();
         const id = (x) => document.getElementById(x);
@@ -1209,6 +1236,48 @@
         if (msgEl) { msgEl.classList.remove('hidden'); msgEl.textContent = '已保存，下次对话将使用新配置。'; msgEl.className = 'text-xs text-green-600'; }
       } catch (e) {
         if (msgEl) { msgEl.classList.remove('hidden'); msgEl.textContent = '保存失败：' + (e?.message || e); msgEl.className = 'text-xs text-red-600'; }
+      }
+    });
+
+    document.getElementById('settings-backup-import-btn')?.addEventListener('click', () => {
+      document.getElementById('settings-backup-file')?.click();
+    });
+    document.getElementById('settings-backup-file')?.addEventListener('change', async (ev) => {
+      const file = ev.target && ev.target.files && ev.target.files[0];
+      const msgEl = document.getElementById('settings-backup-msg');
+      if (msgEl) { msgEl.textContent = ''; msgEl.className = 'text-xs text-slate-500'; }
+      ev.target.value = '';
+      if (!file || !window.aris || typeof window.aris.importArisBackup !== 'function') return;
+      try {
+        if (msgEl) msgEl.textContent = '正在导入…';
+        await window.aris.importArisBackup(file);
+        if (msgEl) {
+          msgEl.textContent = '导入成功。建议刷新页面后再继续对话。';
+          msgEl.className = 'text-xs text-green-600';
+        }
+      } catch (e) {
+        if (msgEl) {
+          msgEl.textContent = '导入失败：' + (e && e.message ? e.message : e);
+          msgEl.className = 'text-xs text-red-600';
+        }
+      }
+    });
+    document.getElementById('settings-backup-export-btn')?.addEventListener('click', async () => {
+      const msgEl = document.getElementById('settings-backup-msg');
+      if (!window.aris || typeof window.aris.exportArisBackup !== 'function') return;
+      if (msgEl) { msgEl.textContent = ''; msgEl.className = 'text-xs text-slate-500'; }
+      try {
+        if (msgEl) msgEl.textContent = '正在生成备份…';
+        await window.aris.exportArisBackup();
+        if (msgEl) {
+          msgEl.textContent = '已开始下载 .aris 文件。';
+          msgEl.className = 'text-xs text-green-600';
+        }
+      } catch (e) {
+        if (msgEl) {
+          msgEl.textContent = '导出失败：' + (e && e.message ? e.message : e);
+          msgEl.className = 'text-xs text-red-600';
+        }
       }
     });
 

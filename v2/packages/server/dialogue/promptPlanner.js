@@ -36,7 +36,8 @@ const LEGACY_PLAN = {
 
 function readPromptPlannerConfig() {
   const defaults = {
-    enabled: process.env.ARIS_PROMPT_PLANNER_ENABLED !== 'false',
+    /** 默认关闭；需显式 ARIS_PROMPT_PLANNER_ENABLED=true 或 behavior_config prompt_planner_enabled: true */
+    enabled: process.env.ARIS_PROMPT_PLANNER_ENABLED === 'true',
     log_metrics: process.env.ARIS_PROMPT_PLANNER_LOG === 'true',
   };
   try {
@@ -44,8 +45,9 @@ function readPromptPlannerConfig() {
     if (!fs.existsSync(p)) return defaults;
     const data = JSON.parse(fs.readFileSync(p, 'utf8'));
     const out = { ...defaults };
-    if (data.prompt_planner_enabled === false) out.enabled = false;
-    if (data.prompt_planner_enabled === true) out.enabled = true;
+    if (Object.prototype.hasOwnProperty.call(data, 'prompt_planner_enabled')) {
+      out.enabled = data.prompt_planner_enabled === true;
+    }
     if (data.prompt_planner_log_metrics === true) out.log_metrics = true;
     return out;
   } catch (_) {}

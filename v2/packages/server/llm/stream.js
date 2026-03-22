@@ -5,6 +5,8 @@ require('dotenv').config();
 
 const { getChatTemperature } = require('./temperature.js');
 const { buildLlmFetchInit } = require('./fetchRetry.js');
+const { logDeepSeekRequestBody } = require('./deepseekDebug.js');
+const { logDeepSeekUsageResponse } = require('./usageLog.js');
 
 const MAX_TOKENS_STREAM = Math.min(Number(process.env.ARIS_STREAM_MAX_TOKENS) || 8192, 32768);
 
@@ -18,6 +20,15 @@ async function chatStream(messages, onChunk, signal) {
   }
   try {
     console.info('[Aris v2] DeepSeek chatStream request: messages=', messages?.length || 0);
+    const streamPayload = {
+      model: 'deepseek-chat',
+      messages,
+      max_tokens: MAX_TOKENS_STREAM,
+      temperature: getChatTemperature(),
+      stream: true,
+      stream_options: { include_usage: true },
+    };
+    logDeepSeekRequestBody('chatStream', streamPayload);
     const res = await fetch(
       `${apiUrl}/v1/chat/completions`,
       buildLlmFetchInit({
@@ -27,14 +38,7 @@ async function chatStream(messages, onChunk, signal) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
-          model: 'deepseek-chat',
-          messages,
-          max_tokens: MAX_TOKENS_STREAM,
-          temperature: getChatTemperature(),
-          stream: true,
-          stream_options: { include_usage: true },
-        }),
+        body: JSON.stringify(streamPayload),
       }),
     );
     if (!res.ok) throw new Error(`DeepSeek ${res.status}: ${await res.text()}`);
@@ -70,7 +74,7 @@ async function chatStream(messages, onChunk, signal) {
         }
       }
     }
-    if (usage) console.info('[Aris v2] DeepSeek chatStream done: prompt_tokens=', usage.prompt_tokens, 'completion_tokens=', usage.completion_tokens);
+    if (usage) logDeepSeekUsageResponse('chatStream', usage);
     const previewLen = 280;
     if (content && content.length > 0) {
       const p = content.length <= previewLen ? content : content.slice(0, previewLen) + '…';
