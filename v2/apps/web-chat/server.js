@@ -15,7 +15,7 @@ const { loadAndApplyRuntimeConfig } = require('../electron/runtimeConfig.js');
 loadAndApplyRuntimeConfig();
 
 const { runDialogueNdjson, abortDialogue, rpc } = require('./webApiHandlers.js');
-const { importFromParsedPayload, buildExportPayload } = require('../electron/backup.js');
+const { importFromParsedPayload, importMergeFromParsedPayload, buildExportPayload } = require('../electron/backup.js');
 
 const PORT = parseInt(process.env.ARIS_WEB_CHAT_PORT || '8780', 10) || 8780;
 const TOKEN = process.env.ARIS_WEB_CHAT_TOKEN || '';
@@ -165,6 +165,27 @@ const server = http.createServer(async (req, res) => {
         return json(res, 400, { error: 'invalid_backup_json', detail: msg });
       }
       console.error('[aris-web-chat] backup import', e);
+      return json(res, 500, { error: msg });
+    }
+  }
+
+  if (req.method === 'POST' && pathname === '/api/backup/merge_import') {
+    abortDialogue();
+    let raw;
+    try {
+      raw = await readBody(req);
+      if (!raw || !String(raw).trim()) {
+        return json(res, 400, { error: 'empty_body' });
+      }
+      const payload = JSON.parse(raw);
+      const r = await importMergeFromParsedPayload(payload, { label: 'web-upload-merge' });
+      return json(res, 200, { ok: true, version: payload.version || 1, ...r });
+    } catch (e) {
+      const msg = e && e.message ? e.message : String(e);
+      if (e instanceof SyntaxError) {
+        return json(res, 400, { error: 'invalid_backup_json', detail: msg });
+      }
+      console.error('[aris-web-chat] backup merge import', e);
       return json(res, 500, { error: msg });
     }
   }

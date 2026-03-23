@@ -8,8 +8,13 @@
  */
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const BACKUP_VERSION = 3;
+
+function sha256Hex(text) {
+  return crypto.createHash('sha256').update(String(text ?? '')).digest('hex');
+}
 
 function getStore() {
   return require('../../packages/store');
@@ -363,10 +368,111 @@ async function importFromParsedPayload(payload, meta = {}) {
   console.info('[Aris v2][backup] import', label, 'version=', version);
 }
 
+async function importMergeFromParsedPayload(payload, meta = {}) {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('备份格式无效：根对象缺失');
+  }
+  const store = getStore();
+  const config = getConfig();
+
+  const dataDir = config.getDataDir();
+  const memoryDir = config.getMemoryDir();
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+  if (!fs.existsSync(memoryDir)) fs.mkdirSync(memoryDir, { recursive: true });
+
+  let insertedConversations = 0;
+  let mergedMemory = 0;
+
+  if (payload.sqlite && typeof payload.sqlite === 'string') {
+    const initSqlJs = require('sql.js');
+    const SQL = await initSqlJs();
+    const backupBytes = Buffer.from(payload.sqlite, 'base64');
+    const backupDb = new SQL.Database(new Uint8Array(backupBytes));
+
+    const currentDb = await store.db.getDb();
+
+    // 预先把当前库的消息去重键建集合；这样不会触发逐条 SELECT。
+    const existingKeys = new Set();
+    {
+      const stmt = currentDb.prepare('SELECT session_id, role, created_at, content FROM conversations');
+      while (stmt.step()) {
+        const [session_id, role, created_at, content] = stmt.get();
+        const key = `${String(session_id)}|${String(role)}|${Number(created_at) || 0}|${sha256Hex(content)}`;
+        existingKeys.add(key);
+      }
+      stmt.free();
+    }
+
+    const selectStmt = backupDb.prepare('SELECT session_id, role, content, created_at FROM conversations');
+    while (selectStmt.step()) {
+      const [session_id, role, content, created_at] = selectStmt.get();
+      const key = `${String(session_id)}|${String(role)}|${Number(created_at) || 0}|${sha256Hex(content)}`;
+      if (existingKeys.has(key)) continue;
+
+      const ins = currentDb.prepare('INSERT INTO conversations (session_id, role, content, created_at) VALUES (?, ?, ?, ?)');
+      ins.bind([String(session_id), String(role), String(content), Number(created_at) || 0]);
+      ins.step();
+      ins.free();
+
+      existingKeys.add(key);
+      insertedConversations++;
+    }
+    selectStmt.free();
+    try { backupDb.close?.(); } catch (_) {}
+    store.db.persist();
+  }
+
+  if (payload.memory && Array.isArray(payload.memory) && payload.memory.length > 0 && store.vector) {
+    const desiredTypes = new Set(payload.memory.map((r) => String(r?.type ?? '')));
+    const existingMemory = await store.vector.exportAll();
+    const existingMemoryKeys = new Set();
+    for (const r of existingMemory) {
+      const type = String(r?.type ?? '');
+      if (!desiredTypes.has(type)) continue;
+      existingMemoryKeys.add(`${type}|${sha256Hex(r?.text ?? '')}`);
+    }
+
+    for (const r of payload.memory) {
+      const type = String(r?.type ?? '');
+      if (!desiredTypes.has(type)) desiredTypes.add(type);
+      if (!r || !Array.isArray(r.vector) || r.vector.length === 0) continue;
+      const text = String(r?.text ?? '');
+      const key = `${type}|${sha256Hex(text)}`;
+      if (existingMemoryKeys.has(key)) continue;
+
+      await store.vector.add({
+        text,
+        vector: r.vector,
+        type,
+        metadata: (r.metadata && typeof r.metadata === 'object') ? r.metadata : {},
+      });
+      existingMemoryKeys.add(key);
+      mergedMemory++;
+    }
+  }
+
+  const label = meta.label != null ? String(meta.label) : 'payload';
+  console.info('[Aris v2][backup] import_merge', label, 'insertedConversations=', insertedConversations, 'mergedMemory=', mergedMemory);
+  return { insertedConversations, mergedMemory };
+}
+
 async function importFromFile(filePath) {
   const raw = fs.readFileSync(filePath, 'utf8');
   const payload = JSON.parse(raw);
   await importFromParsedPayload(payload, { label: filePath });
 }
 
-module.exports = { exportToFile, importFromFile, buildExportPayload, importFromParsedPayload };
+async function importMergeFromFile(filePath) {
+  const raw = fs.readFileSync(filePath, 'utf8');
+  const payload = JSON.parse(raw);
+  return importMergeFromParsedPayload(payload, { label: filePath });
+}
+
+module.exports = {
+  exportToFile,
+  importFromFile,
+  importMergeFromFile,
+  buildExportPayload,
+  importFromParsedPayload,
+  importMergeFromParsedPayload,
+};

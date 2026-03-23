@@ -244,6 +244,32 @@
       return data;
     },
 
+    /**
+     * 合并导入另一台机器导出的 .aris：只 merge 向量记忆与历史对话，避免覆盖。
+     * @param {File} file
+     */
+    async importArisMergeBackup(file) {
+      if (!file || typeof file.text !== 'function') {
+        throw new Error('请选择有效的 .aris 文件');
+      }
+      const text = await file.text();
+      const url = httpOriginPrefix() + '/api/backup/merge_import';
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: text,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const parts = [data.error || data.detail || '合并导入失败 ' + res.status];
+        if (data.hint) parts.push(data.hint);
+        else if (res.status === 404)
+          parts.push('多为未重启 web-chat：请在运行 npm run web-chat 的终端 Ctrl+C 后重新启动。');
+        throw new Error(parts.filter(Boolean).join(' — '));
+      }
+      return data;
+    },
+
     /** 下载当前数据目录的完整备份为 .aris */
     async exportArisBackup() {
       const res = await fetch(httpOriginPrefix() + '/api/backup/export', { headers: authHeadersBare() });

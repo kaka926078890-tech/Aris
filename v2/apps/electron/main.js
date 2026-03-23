@@ -18,7 +18,7 @@ app.whenReady().then(() => {
   loadAndApplyRuntimeConfig();
 
   const { handleUserMessage, getPromptPreview, maybeProactiveMessage } = require('../../packages/server');
-  const { exportToFile, importFromFile } = require('./backup.js');
+  const { exportToFile, importFromFile, importMergeFromFile } = require('./backup.js');
   const store = require('../../packages/store');
   const { resolveRendererIndexPath, PRELOAD_SCRIPT } = require('./config.js');
   const { ensureOllamaStarted, getOllamaStatus } = require('./ollama.js');
@@ -141,6 +141,30 @@ app.whenReady().then(() => {
                   dialog.showMessageBox(mainWindow, { type: 'info', title: '导入成功', message: '对话、向量记忆、用户信息、状态与监控等已恢复。建议重启应用后查看。' });
                 } catch (e) {
                   dialog.showErrorBox('导入失败', e.message);
+                }
+              }
+            },
+          },
+          {
+            label: '合并导入全部数据（向量记忆+历史）',
+            click: async () => {
+              const { filePaths } = await dialog.showOpenDialog(mainWindow, {
+                properties: ['openFile'],
+                filters: [{ name: 'Aris 备份', extensions: ['aris'] }],
+              });
+              if (filePaths && filePaths[0]) {
+                try {
+                  const r = await importMergeFromFile(filePaths[0]);
+                  const parts = [];
+                  if (r?.insertedConversations != null) parts.push(`历史新增 ${r.insertedConversations} 条`);
+                  if (r?.mergedMemory != null) parts.push(`向量新增 ${r.mergedMemory} 条`);
+                  dialog.showMessageBox(mainWindow, {
+                    type: 'info',
+                    title: '合并导入成功',
+                    message: parts.length ? parts.join('，') : '对话、向量记忆已合并。',
+                  });
+                } catch (e) {
+                  dialog.showErrorBox('合并导入失败', e?.message || String(e));
                 }
               }
             },
