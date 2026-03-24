@@ -6,6 +6,8 @@ const path = require('path');
 const fs = require('fs');
 
 let memoryFiles = null;
+const DEFAULT_AGENT_PROFILE = 'legacy';
+const ALLOWED_AGENT_PROFILES = new Set(['legacy', 'collab']);
 function getMemoryFiles() {
   if (memoryFiles) return memoryFiles;
   try {
@@ -33,7 +35,17 @@ function getV2Root() {
   return path.join(__dirname, '..', '..');
 }
 
-function getDataDir() {
+function normalizeAgentProfile(raw) {
+  const val = String(raw || '').trim().toLowerCase();
+  if (ALLOWED_AGENT_PROFILES.has(val)) return val;
+  return DEFAULT_AGENT_PROFILE;
+}
+
+function getActiveAgentProfile() {
+  return normalizeAgentProfile(process.env.ARIS_AGENT_PROFILE);
+}
+
+function getBaseDataDir() {
   if (process.env.ARIS_V2_DATA_DIR) {
     return path.resolve(process.env.ARIS_V2_DATA_DIR);
   }
@@ -43,6 +55,16 @@ function getDataDir() {
   } catch (_) {
     return path.join(getV2Root(), 'data');
   }
+}
+
+function getDataDir() {
+  const root = getBaseDataDir();
+  const profile = getActiveAgentProfile();
+  const out = path.join(root, 'profiles', profile);
+  if (!fs.existsSync(out)) {
+    fs.mkdirSync(out, { recursive: true });
+  }
+  return out;
 }
 
 function getMemoryDir() {
@@ -175,7 +197,10 @@ function getConstraintsBriefPath() {
 
 module.exports = {
   getV2Root,
+  getBaseDataDir,
   getDataDir,
+  normalizeAgentProfile,
+  getActiveAgentProfile,
   getMemoryDir,
   getMemoryFiles,
   getIdentityPath,

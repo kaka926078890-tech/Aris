@@ -4,6 +4,7 @@
  */
 const path = require('path');
 const fs = require('fs');
+const { getBaseDataDir, normalizeAgentProfile } = require('../../packages/config/paths.js');
 
 const CONFIG_KEYS = [
   'DEEPSEEK_API_KEY',
@@ -16,6 +17,13 @@ const CONFIG_KEYS = [
   'WEB_FETCH_BLOCKED_HOSTS',
   'REJECT_UNAUTHORIZED',
   'SHOW_THINKING',
+  'ARIS_LOCAL_LLM_ENABLED',
+  'ARIS_LOCAL_LLM_BASE_URL',
+  'ARIS_LOCAL_LLM_MODEL',
+  'ARIS_LOCAL_LLM_TIMEOUT_MS',
+  'ARIS_COLLAB_SCORE_THRESHOLD',
+  'ARIS_COLLAB_POLISH_THRESHOLD',
+  'ARIS_COLLAB_MAX_ITERATIONS',
 ];
 
 const DEFAULTS = {
@@ -29,28 +37,81 @@ const DEFAULTS = {
   WEB_FETCH_BLOCKED_HOSTS: 'localhost,127.0.0.1',
   REJECT_UNAUTHORIZED: 'true',
   SHOW_THINKING: 'false',
+  ARIS_LOCAL_LLM_ENABLED: 'true',
+  ARIS_LOCAL_LLM_BASE_URL: 'http://127.0.0.1:11434',
+  ARIS_LOCAL_LLM_MODEL: 'qwen2.5:4b-instruct',
+  ARIS_LOCAL_LLM_TIMEOUT_MS: '20000',
+  ARIS_COLLAB_SCORE_THRESHOLD: '65',
+  ARIS_COLLAB_POLISH_THRESHOLD: '80',
+  ARIS_COLLAB_MAX_ITERATIONS: '2',
 };
 
-function getConfigPath() {
-  try {
-    const { getDataDir } = require('../../packages/config/paths.js');
-    return path.join(getDataDir(), 'config.json');
-  } catch (_) {
-    return path.join(__dirname, '..', '..', 'data', 'config.json');
-  }
-}
+const GLOBAL_CONFIG_DEFAULTS = {
+  ARIS_AGENT_PROFILE: 'legacy',
+};
 
-function getDataDir() {
+function getBaseDir() {
   try {
-    const { getDataDir: g } = require('../../packages/config/paths.js');
-    return g();
+    return getBaseDataDir();
   } catch (_) {
     return path.join(__dirname, '..', '..', 'data');
   }
 }
 
-function readConfig() {
-  const p = getConfigPath();
+function getGlobalConfigPath() {
+  return path.join(getBaseDir(), 'runtime_config.global.json');
+}
+
+function getConfigPath(profile) {
+  try {
+    const p = normalizeAgentProfile(profile || process.env.ARIS_AGENT_PROFILE);
+    return path.join(getBaseDir(), 'profiles', p, 'config.json');
+  } catch (_) {
+    const p = normalizeAgentProfile(profile || process.env.ARIS_AGENT_PROFILE);
+    return path.join(__dirname, '..', '..', 'data', 'profiles', p, 'config.json');
+  }
+}
+
+function getDataDir() {
+  try {
+    const p = normalizeAgentProfile(process.env.ARIS_AGENT_PROFILE);
+    return path.join(getBaseDir(), 'profiles', p);
+  } catch (_) {
+    const p = normalizeAgentProfile(process.env.ARIS_AGENT_PROFILE);
+    return path.join(__dirname, '..', '..', 'data', 'profiles', p);
+  }
+}
+
+function readGlobalConfig() {
+  const p = getGlobalConfigPath();
+  const out = { ...GLOBAL_CONFIG_DEFAULTS };
+  try {
+    if (fs.existsSync(p)) {
+      const raw = fs.readFileSync(p, 'utf8').trim();
+      if (raw) {
+        const data = JSON.parse(raw);
+        out.ARIS_AGENT_PROFILE = normalizeAgentProfile(data.ARIS_AGENT_PROFILE);
+      }
+    }
+  } catch (e) {
+    console.warn('[Aris v2] runtimeConfig global read failed', e?.message);
+  }
+  return out;
+}
+
+function writeGlobalConfig(obj) {
+  const p = getGlobalConfigPath();
+  const dir = path.dirname(p);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const data = {
+    ARIS_AGENT_PROFILE: normalizeAgentProfile(obj && obj.ARIS_AGENT_PROFILE),
+  };
+  fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf8');
+}
+
+function readConfig(profile) {
+  const selectedProfile = normalizeAgentProfile(profile || process.env.ARIS_AGENT_PROFILE || readGlobalConfig().ARIS_AGENT_PROFILE);
+  const p = getConfigPath(selectedProfile);
   const out = { ...DEFAULTS };
   try {
     if (fs.existsSync(p)) {
@@ -65,14 +126,22 @@ function readConfig() {
   } catch (e) {
     console.warn('[Aris v2] runtimeConfig read failed', e?.message);
   }
+  out.ARIS_AGENT_PROFILE = selectedProfile;
   return out;
 }
 
 function writeConfig(obj) {
-  const p = getConfigPath();
+  const targetProfile = normalizeAgentProfile(
+    obj && Object.prototype.hasOwnProperty.call(obj, 'ARIS_AGENT_PROFILE')
+      ? obj.ARIS_AGENT_PROFILE
+      : (process.env.ARIS_AGENT_PROFILE || readGlobalConfig().ARIS_AGENT_PROFILE),
+  );
+  writeGlobalConfig({ ARIS_AGENT_PROFILE: targetProfile });
+  process.env.ARIS_AGENT_PROFILE = targetProfile;
+  const p = getConfigPath(targetProfile);
   const dir = path.dirname(p);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const current = readConfig();
+  const current = readConfig(targetProfile);
   const data = {};
   CONFIG_KEYS.forEach((k) => {
     const v = obj[k];
@@ -80,10 +149,11 @@ function writeConfig(obj) {
   });
   fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf8');
   applyToProcessEnv(data); // 保存时应用全部键，供 network 等后续使用
+  process.env.ARIS_AGENT_PROFILE = targetProfile;
 }
 
 /** 仅这 2 个键在启动时写入 process.env，避免启动阶段改动过多导致 SIGBUS */
-const ENV_APPLY_AT_STARTUP = ['DEEPSEEK_API_KEY', 'DEEPSEEK_API_URL'];
+const ENV_APPLY_AT_STARTUP = ['DEEPSEEK_API_KEY', 'DEEPSEEK_API_URL', 'ARIS_LOCAL_LLM_BASE_URL', 'ARIS_LOCAL_LLM_MODEL'];
 
 function applyToProcessEnv(config, keys) {
   if (!config) return;
@@ -94,7 +164,9 @@ function applyToProcessEnv(config, keys) {
 }
 
 function loadAndApplyRuntimeConfig() {
-  const config = readConfig();
+  const globalConfig = readGlobalConfig();
+  process.env.ARIS_AGENT_PROFILE = normalizeAgentProfile(globalConfig.ARIS_AGENT_PROFILE);
+  const config = readConfig(process.env.ARIS_AGENT_PROFILE);
   applyToProcessEnv(config, ENV_APPLY_AT_STARTUP);
 }
 
@@ -104,4 +176,5 @@ module.exports = {
   applyToProcessEnv,
   loadAndApplyRuntimeConfig,
   getDataDir,
+  readGlobalConfig,
 };

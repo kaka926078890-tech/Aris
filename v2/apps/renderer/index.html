@@ -305,7 +305,15 @@
       <section class="rounded-lg border border-slate-200 bg-white p-4">
         <h2 class="text-sm font-medium text-slate-700 mb-1">当前配置与数据目录</h2>
         <p id="settings-data-dir" class="text-xs text-slate-500 mb-3 font-mono break-all">—</p>
-        <p class="text-xs text-slate-500 mb-3">所有配置保存在上述目录下的 <code class="bg-slate-100 px-1 rounded">config.json</code>，无需编辑 .env。</p>
+        <div class="mb-3">
+          <label class="text-slate-600 block mb-1 text-xs">链路 Profile（需重启生效）</label>
+          <select id="settings-agent-profile" class="w-full rounded border border-slate-300 px-3 py-2 text-sm">
+            <option value="legacy">legacy（旧链路）</option>
+            <option value="collab">collab（端云协同）</option>
+          </select>
+          <p class="text-xs text-amber-600 mt-1">切换后会使用独立数据空间（历史/向量/记忆/配置）。</p>
+        </div>
+        <p class="text-xs text-slate-500 mb-3">当前 profile 的配置保存在该目录下 <code class="bg-slate-100 px-1 rounded">config.json</code>，全局 profile 选择独立保存。</p>
       </section>
       <section class="rounded-lg border border-slate-200 bg-white p-4">
         <h2 class="text-sm font-medium text-slate-700 mb-1">备份与迁移（.aris）</h2>
@@ -1266,6 +1274,7 @@
         const c = await window.aris.getRuntimeConfig();
         const id = (x) => document.getElementById(x);
         if (id('settings-data-dir')) id('settings-data-dir').textContent = c && c.dataDir ? c.dataDir : '—';
+        if (id('settings-agent-profile')) id('settings-agent-profile').value = (c && c.ARIS_AGENT_PROFILE) ? c.ARIS_AGENT_PROFILE : 'legacy';
         if (id('settings-api-key')) id('settings-api-key').value = (c && c.DEEPSEEK_API_KEY) ? c.DEEPSEEK_API_KEY : '';
         if (id('settings-api-url')) id('settings-api-url').value = (c && c.DEEPSEEK_API_URL) ? c.DEEPSEEK_API_URL : 'https://api.deepseek.com';
         if (id('settings-enable-web-fetch')) id('settings-enable-web-fetch').checked = (c && c.ENABLE_WEB_FETCH !== undefined) ? (c.ENABLE_WEB_FETCH === 'true' || c.ENABLE_WEB_FETCH === true) : true;
@@ -1297,6 +1306,7 @@
     document.getElementById('settings-save')?.addEventListener('click', async () => {
       if (!window.aris || !window.aris.setRuntimeConfig) return;
       const id = (x) => document.getElementById(x);
+      const profile = (id('settings-agent-profile') && id('settings-agent-profile').value) ? id('settings-agent-profile').value.trim() : 'legacy';
       const key = (id('settings-api-key') && id('settings-api-key').value) ? id('settings-api-key').value.trim() : '';
       const url = (id('settings-api-url') && id('settings-api-url').value) ? id('settings-api-url').value.trim() : '';
       const enableWeb = id('settings-enable-web-fetch') ? id('settings-enable-web-fetch').checked : true;
@@ -1310,6 +1320,7 @@
       const msgEl = id('settings-save-msg');
       try {
         await window.aris.setRuntimeConfig({
+          ARIS_AGENT_PROFILE: profile,
           DEEPSEEK_API_KEY: key,
           DEEPSEEK_API_URL: url || 'https://api.deepseek.com',
           ENABLE_WEB_FETCH: enableWeb ? 'true' : 'false',
@@ -1321,7 +1332,11 @@
           REJECT_UNAUTHORIZED: rejectUnauthorized ? 'true' : 'false',
           SHOW_THINKING: showThinking ? 'true' : 'false',
         });
-        if (msgEl) { msgEl.classList.remove('hidden'); msgEl.textContent = '已保存，下次对话将使用新配置。'; msgEl.className = 'text-xs text-green-600'; }
+        if (msgEl) {
+          msgEl.classList.remove('hidden');
+          msgEl.textContent = '已保存。若切换了 Profile，请重启应用/服务后生效。';
+          msgEl.className = 'text-xs text-green-600';
+        }
       } catch (e) {
         if (msgEl) { msgEl.classList.remove('hidden'); msgEl.textContent = '保存失败：' + (e?.message || e); msgEl.className = 'text-xs text-red-600'; }
       }
