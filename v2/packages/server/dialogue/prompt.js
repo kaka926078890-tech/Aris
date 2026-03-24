@@ -26,7 +26,7 @@ const SCENE_RULES_DEFAULT = {
   code_operation:
     '【查代码/文件流程】需要定位实现时，可先 search_repo_text 按关键词找文件路径，再 get_dir_cache / get_read_file_cache；仅当缓存未命中或需最新全文时再 list_my_files / read_file（read_file 可 force_full），避免层层 list。',
   memory_operation:
-    '【记忆路径】凡存放或读取自己的记忆、配置等文件，必须用 write_file/read_file 且 relative_path 以 memory/ 开头（如 memory/xxx.md），会写入或读取实例 memory 目录；可先调用 get_my_context 查看「实例 memory 目录」路径。禁止在项目根下新建 memory 文件夹或使用非 memory/ 前缀的路径存自己的数据。',
+    '【记忆路径】凡存放或读取自己的记忆、配置等文件，必须用 write_file/read_file 且 relative_path 以 memory/ 开头（如 memory/xxx.md），会写入或读取实例 memory 目录；可先调用 get_my_context 查看「实例 memory 目录」路径。每日首次对话时先 read_file("memory/todo.md")：按“自然日”判断（例如 23 号到 24 号算新的一天，不按 24 小时滚动）。若 todo.md 里记录的最近执行日期不是今天，则先判断并执行应做任务；执行完成后用 write_file 更新 todo.md 中「最近执行日期：YYYY-MM-DD」。若用户消息涉及待办、任务、计划进度、完成/取消任务，也必须先 read_file("memory/todo.md") 再判断与回复。禁止在项目根下新建 memory 文件夹或使用非 memory/ 前缀的路径存自己的数据。',
   restart:
     '【重启】当用户明确提出“重启/重新启动/重新开始/让应用像重新 npm start 一样启动”时，调用 restart_application 工具。参数默认 { mode: "npm_start" }；若重启后还要继续做“未完成的工具动作”，则在参数里加入 resume_tools: [{ tool_name, args }]。触发后不要再继续调用其它工具，只回复一句“正在重启应用/已触发重启”。',
 };
