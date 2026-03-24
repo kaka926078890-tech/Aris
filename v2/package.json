@@ -35,6 +35,7 @@
     "cheerio": "^1.0.0",
     "dotenv": "^16.4.5",
     "jsonrepair": "^3.13.2",
+    "minisearch": "^7.2.0",
     "puppeteer": "^24.15.0",
     "sql.js": "^1.10.0"
   },
@@ -46,7 +47,9 @@
     "appId": "com.aris.v2",
     "productName": "Aris v2",
     "publish": null,
-    "directories": { "output": "dist" },
+    "directories": {
+      "output": "dist"
+    },
     "files": [
       "apps/**/*",
       "packages/**/*",
@@ -54,8 +57,23 @@
       "rules.md"
     ],
     "extraResources": [],
-    "mac": { "category": "public.app-category.utilities", "target": ["dmg", "zip"] },
-    "win": { "target": ["nsis", "portable"] },
-    "linux": { "target": ["AppImage"] }
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    }
   }
 }

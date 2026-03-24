@@ -12,7 +12,7 @@ const MEMORY_TOOLS = [
     type: 'function',
     function: {
       name: 'search_memories',
-      description: '按语义检索与 query 相关的记忆（对话、偏好等）。仅做语义匹配，不按时间过滤。用户要「检索某时刻附近的对话」时请用 get_conversation_near_time。',
+      description: '按语义+全文混合检索与 query 相关的记忆（对话、主动行为等；底层为向量与 MiniSearch 融合后再重排，见 ARIS_MEMORY_HYBRID）。不按时间过滤。用户要「检索某时刻附近的对话」时请用 get_conversation_near_time。',
       parameters: {
         type: 'object',
         properties: {

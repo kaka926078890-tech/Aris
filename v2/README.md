@@ -38,6 +38,8 @@ v2 为完整架构重构版本，与现网（项目根 `src/`）完全隔离。
 | **memory_files.json** | 各 memory 文件名映射 | 如 `identity`、`requirements`、`constraints_brief`、`quiet_phrases`、`retrieval_config`、`session_summaries`、`network_config`、`proactive_config`、`behavior_config`、`avoid_phrases`、`self_notes`、`aris_ideas` 等，值为实际文件名（如 `identity.json`、`constraints_brief.json`）。 |
 | **async_outbox/** | 主对话后轮次异步队列（非 memory） | `pending.json`、`retry_log.jsonl`、`dead_letter.jsonl`；环境变量见 [async_outbox.md](docs/async_outbox.md)。 |
 
+**向量记忆检索（环境变量，不写进 memory JSON）**：默认启用 **向量 ANN + MiniSearch 全文混合** → **候选池内余弦重排** → 时间衰减（依赖本机 Ollama embedding）。`ARIS_MEMORY_HYBRID=false` 时回退为纯向量 + 时间衰减。可调混合/重排候选条数与权重，见 **`v2/.env.example`**（`ARIS_HYBRID_*`、`ARIS_RERANK_*`）。
+
 **时间线**：所有记忆/状态类写入会同时追加到 `data/timeline.json`，用于按时刻回溯或审计。当前产品内暂无时间线展示页，数据可供排查或后续「修改历史」等能力使用。
 
 **静默/低功耗**：存在。触发方式两种：（1）用户发送安静词（如「歇会」「安静待会」，见 quiet_phrases.json）→ 立即进入低功耗，不再主动发话；（2）用户长时间不回复 → 主动消息逻辑多次触发仍无用户消息时（约 3 次，即最多约 2 条主动消息后）自动进入低功耗，不再主动发话。**恢复对话**：用户**在进入静默之后**发送新消息且非安静词时退出低功耗（由 handler 处理）；定时器检查时仅当「最近一条用户消息的时间晚于进入静默时间」才视为恢复，避免把静默前的旧消息误判为恢复。

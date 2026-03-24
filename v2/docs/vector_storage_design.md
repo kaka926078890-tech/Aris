@@ -21,6 +21,7 @@ v2 中**实际写入向量库**的只有两类：
 | **dialogue_turn** | 每轮对话结束后 | 最近 1 轮「User + Assistant」拼成一块 | session_id, related_entities（当前身份 + 最近若干 requirement id） |
 | **aris_behavior** | 主动消息发送后 | 「Aris 主动: …」或「Aris 主动（积累表达）: …」 | 可选 session_id 等 |
 
+- **检索（v2 实现）**：默认 **向量 ANN + MiniSearch 全文混合** → **Top-K 余弦重排** → 时间衰减；`ARIS_MEMORY_HYBRID=false` 回退纯向量。见 `v2/.env.example`、README「向量记忆检索」。
 - **不入向量的**：identity、requirements、preferences、corrections、emotions、expression_desires 等仅存 JSON，search_memories 只能搜到对话块与 aris_behavior；write_file 写入的文件（如自产报告）也未做摘要入向量。
 
 ---

@@ -105,7 +105,7 @@ sequenceDiagram
 | **B. 语义记忆（可检索经历）** | LanceDB 表 `memory` | 对话块、主动消息等 **嵌入向量**；通过 `search_memories` **按需召回**，避免全量进 prompt。 |
 | **C. 会话内上下文** | system 中的近窗 + 可选 session summary | **当前线程 coherence**；与长期记忆分工明确。 |
 
-**检索策略（现状）**：向量相似度 + **时间衰减** + **类型/配置权重** + **查询与记忆文本的字面重叠微调** + 可选 **按关联实体过滤**（`retrieval_config.json`）。**没有**独立的 BM25 混合检索或 cross-encoder 重排序 — 若引入，属于检索层增强，而非产品定义变更。
+**检索策略（现状）**：`packages/store/vector.js` 默认 **向量 ANN + MiniSearch（BM25 风格全文）混合召回**，在 **Top-K 候选池** 内用 **查询向量与文档向量的余弦** 再融合排序，最后叠加 **时间衰减**；`search_memories` 工具侧另有 **类型权重** 与 **字面重叠微调**（`memory.js`），以及可选 **按关联实体过滤**（`retrieval_config.json`）。环境变量 `ARIS_MEMORY_HYBRID=false` 时回退为纯向量 + 时间衰减。独立 **cross-encoder** 重排序（需额外模型）未接入；余弦重排为双塔空间内的二次精排。
 
 ---
 
