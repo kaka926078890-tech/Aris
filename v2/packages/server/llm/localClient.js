@@ -32,7 +32,7 @@ function getLocalLlmConfig() {
     enabled: process.env.ARIS_LOCAL_LLM_ENABLED !== 'false',
     baseUrl: String(process.env.ARIS_LOCAL_LLM_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, ''),
     model: String(process.env.ARIS_LOCAL_LLM_MODEL || DEFAULT_MODEL),
-    timeoutMs: Math.max(3000, Number(process.env.ARIS_LOCAL_LLM_TIMEOUT_MS) || 20000),
+    timeoutMs: Math.max(3000, Number(process.env.ARIS_LOCAL_LLM_TIMEOUT_MS) || 120000),
   };
 }
 
