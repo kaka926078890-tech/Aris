@@ -67,7 +67,7 @@ async function modelJudge({ userInput, response, contextText }) {
   const res = await chatLocal([
     { role: 'system', content: '你只输出严格 JSON。' },
     { role: 'user', content: prompt },
-  ], { temperature: 0.1 });
+  ], { temperature: 0.1, label: 'collab_judge' });
   if (!res.ok || !res.content) return null;
   const parsed = safeParseJson(res.content);
   if (!parsed || typeof parsed !== 'object') return null;
@@ -146,7 +146,7 @@ async function polishResponse({ userInput, response, review }) {
   const res = await chatLocal([
     { role: 'system', content: '你是回答润色助手。' },
     { role: 'user', content: prompt },
-  ], { temperature: 0.2 });
+  ], { temperature: 0.2, label: 'collab_polish' });
   if (!res.ok || !res.content) return response;
   return String(res.content).trim() || response;
 }
