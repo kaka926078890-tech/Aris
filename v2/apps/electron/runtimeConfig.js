@@ -165,9 +165,16 @@ function applyToProcessEnv(config, keys) {
 
 function loadAndApplyRuntimeConfig() {
   const globalConfig = readGlobalConfig();
-  process.env.ARIS_AGENT_PROFILE = normalizeAgentProfile(globalConfig.ARIS_AGENT_PROFILE);
+  // 若 .env 已显式设置 ARIS_AGENT_PROFILE，优先使用（避免被 runtime_config.global.json 默认 legacy 覆盖）
+  const envRaw = process.env.ARIS_AGENT_PROFILE;
+  if (envRaw != null && String(envRaw).trim() !== '') {
+    process.env.ARIS_AGENT_PROFILE = normalizeAgentProfile(envRaw);
+  } else {
+    process.env.ARIS_AGENT_PROFILE = normalizeAgentProfile(globalConfig.ARIS_AGENT_PROFILE);
+  }
   const config = readConfig(process.env.ARIS_AGENT_PROFILE);
   applyToProcessEnv(config, ENV_APPLY_AT_STARTUP);
+  console.info('[Aris v2] runtime profile:', process.env.ARIS_AGENT_PROFILE, 'dataDir=', getDataDir());
 }
 
 module.exports = {
