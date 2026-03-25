@@ -2,7 +2,7 @@
  * 本地 LLM 客户端（Ollama）：用于 collab 评分与润色。
  */
 const DEFAULT_BASE_URL = 'http://127.0.0.1:11434';
-const DEFAULT_MODEL = 'qwen2.5:4b-instruct';
+const DEFAULT_MODEL = 'qwen3-vl:4b';
 
 function getLocalLlmConfig() {
   return {
