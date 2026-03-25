@@ -60,6 +60,12 @@ function getBaseDataDir() {
 function getDataDir() {
   const root = getBaseDataDir();
   const profile = getActiveAgentProfile();
+  // legacy 与引入 profile 之前一致：直接使用数据根目录（v2/data 或 userData/aris-v2），
+  // 避免旧库仍在根目录、应用却读 profiles/legacy/ 新建空库导致「数据全没了」。
+  if (profile === 'legacy') {
+    if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
+    return root;
+  }
   const out = path.join(root, 'profiles', profile);
   if (!fs.existsSync(out)) {
     fs.mkdirSync(out, { recursive: true });

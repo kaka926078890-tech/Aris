@@ -63,21 +63,33 @@ function getGlobalConfigPath() {
 }
 
 function getConfigPath(profile) {
+  const p = normalizeAgentProfile(profile || process.env.ARIS_AGENT_PROFILE);
+  const base = getBaseDir();
   try {
-    const p = normalizeAgentProfile(profile || process.env.ARIS_AGENT_PROFILE);
-    return path.join(getBaseDir(), 'profiles', p, 'config.json');
+    if (p === 'legacy') {
+      return path.join(base, 'config.json');
+    }
+    return path.join(base, 'profiles', p, 'config.json');
   } catch (_) {
-    const p = normalizeAgentProfile(profile || process.env.ARIS_AGENT_PROFILE);
+    if (p === 'legacy') {
+      return path.join(__dirname, '..', '..', 'data', 'config.json');
+    }
     return path.join(__dirname, '..', '..', 'data', 'profiles', p, 'config.json');
   }
 }
 
 function getDataDir() {
+  const p = normalizeAgentProfile(process.env.ARIS_AGENT_PROFILE);
+  const base = getBaseDir();
   try {
-    const p = normalizeAgentProfile(process.env.ARIS_AGENT_PROFILE);
-    return path.join(getBaseDir(), 'profiles', p);
+    if (p === 'legacy') {
+      return base;
+    }
+    return path.join(base, 'profiles', p);
   } catch (_) {
-    const p = normalizeAgentProfile(process.env.ARIS_AGENT_PROFILE);
+    if (p === 'legacy') {
+      return path.join(__dirname, '..', '..', 'data');
+    }
     return path.join(__dirname, '..', '..', 'data', 'profiles', p);
   }
 }
