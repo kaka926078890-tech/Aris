@@ -229,7 +229,7 @@
     <div class="flex-shrink-0 p-3 space-y-2 border-b border-slate-200 bg-white">
       <div class="flex gap-2">
         <input type="text" id="vector-query" placeholder="语义检索…" class="flex-1 rounded border border-slate-300 px-2 py-1.5 text-sm" />
-        <input type="number" id="vector-limit" value="10" min="1" max="50" class="w-14 rounded border border-slate-300 px-2 py-1.5 text-sm" />
+        <input type="number" id="vector-limit" value="10" min="1" max="15" title="与 search_memories 一致，最多 15 条" class="w-14 rounded border border-slate-300 px-2 py-1.5 text-sm" />
         <button id="vector-search" class="icon-btn rounded bg-sky-600 text-white p-2 hover:bg-sky-700" title="检索"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg></button>
       </div>
       <div class="flex gap-2 flex-wrap">
@@ -276,21 +276,12 @@
   <div id="panel-prompt" class="panel hidden flex-1 flex flex-col min-h-0 overflow-hidden">
     <div class="flex-shrink-0 p-3 border-b border-slate-200 bg-white flex gap-2">
       <input type="text" id="prompt-preview-input" placeholder="可选：模拟用户输入" class="flex-1 rounded border border-slate-300 px-2 py-1.5 text-sm" />
-      <button id="prompt-preview-btn" class="icon-btn rounded bg-sky-600 text-white p-2 hover:bg-sky-700" title="获取预览（含 Planner + 主对话）"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg></button>
+      <button id="prompt-preview-btn" class="icon-btn rounded bg-sky-600 text-white p-2 hover:bg-sky-700" title="获取主对话预览（messages）"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg></button>
     </div>
     <div class="flex-1 flex flex-col min-h-0 gap-2 p-3 overflow-hidden">
       <div class="flex-1 flex flex-col min-h-0 border border-slate-200 rounded overflow-hidden bg-white">
         <div class="flex items-center justify-between gap-2 px-2 py-1.5 bg-slate-50 border-b border-slate-200 flex-shrink-0">
-          <span class="text-xs font-medium text-slate-600 truncate" title="主对话前会先调用编排 LLM">① Prompt Planner（编排）</span>
-          <button type="button" id="prompt-copy-planner" class="icon-btn p-1.5 rounded text-slate-500 hover:bg-slate-200 hover:text-slate-800 flex-shrink-0" title="复制本段" aria-label="复制 Prompt Planner 段">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
-          </button>
-        </div>
-        <pre id="prompt-planner-output" class="flex-1 overflow-auto p-2 text-xs bg-slate-50 whitespace-pre-wrap font-sans min-h-[100px]"></pre>
-      </div>
-      <div class="flex-1 flex flex-col min-h-0 border border-slate-200 rounded overflow-hidden bg-white">
-        <div class="flex items-center justify-between gap-2 px-2 py-1.5 bg-slate-50 border-b border-slate-200 flex-shrink-0">
-          <span class="text-xs font-medium text-slate-600 truncate">② 主对话</span>
+          <span class="text-xs font-medium text-slate-600 truncate">主对话 messages</span>
           <button type="button" id="prompt-copy-main" class="icon-btn p-1.5 rounded text-slate-500 hover:bg-slate-200 hover:text-slate-800 flex-shrink-0" title="复制本段" aria-label="复制主对话段">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
           </button>
@@ -305,15 +296,7 @@
       <section class="rounded-lg border border-slate-200 bg-white p-4">
         <h2 class="text-sm font-medium text-slate-700 mb-1">当前配置与数据目录</h2>
         <p id="settings-data-dir" class="text-xs text-slate-500 mb-3 font-mono break-all">—</p>
-        <div class="mb-3">
-          <label class="text-slate-600 block mb-1 text-xs">链路 Profile（需重启生效）</label>
-          <select id="settings-agent-profile" class="w-full rounded border border-slate-300 px-3 py-2 text-sm">
-            <option value="legacy">legacy（旧链路）</option>
-            <option value="collab">collab（端云协同）</option>
-          </select>
-          <p class="text-xs text-amber-600 mt-1">切换后会使用独立数据空间（历史/向量/记忆/配置）。</p>
-        </div>
-        <p class="text-xs text-slate-500 mb-3">当前 profile 的配置保存在该目录下 <code class="bg-slate-100 px-1 rounded">config.json</code>，全局 profile 选择独立保存。</p>
+        <p class="text-xs text-slate-500 mb-3">对话与 API 配置保存在该目录下 <code class="bg-slate-100 px-1 rounded">config.json</code>。</p>
       </section>
       <section class="rounded-lg border border-slate-200 bg-white p-4">
         <h2 class="text-sm font-medium text-slate-700 mb-1">备份与迁移（.aris）</h2>
@@ -340,43 +323,6 @@
             <label class="text-slate-600 block mb-1">API 地址（可选）</label>
             <input type="text" id="settings-api-url" placeholder="https://api.deepseek.com" class="w-full rounded border border-slate-300 px-3 py-2 text-sm" />
           </div>
-        </div>
-      </section>
-      <section class="rounded-lg border border-slate-200 bg-white p-4">
-        <h2 class="text-sm font-medium text-slate-700 mb-2">网络访问（fetch_url）</h2>
-        <p class="text-xs text-slate-500 mb-3">允许 Aris 在对话中抓取网页正文。关闭后不暴露该工具。</p>
-        <div class="space-y-3 text-sm">
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" id="settings-enable-web-fetch" class="rounded border-slate-300" checked />
-            <span class="text-slate-700">启用网络访问</span>
-          </label>
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="text-slate-600 block mb-1">超时(ms)</label>
-              <input type="number" id="settings-web-timeout" min="5000" max="60000" step="1000" class="w-full rounded border border-slate-300 px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label class="text-slate-600 block mb-1">每分钟最多调用</label>
-              <input type="number" id="settings-web-rate" min="1" max="60" class="w-full rounded border border-slate-300 px-3 py-2 text-sm" />
-            </div>
-          </div>
-          <div>
-            <label class="text-slate-600 block mb-1">返回正文最大长度(字)</label>
-            <input type="number" id="settings-web-max-length" min="1000" max="100000" step="1000" class="w-full rounded border border-slate-300 px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label class="text-slate-600 block mb-1">允许的域名（逗号分隔，留空=不限制）</label>
-            <input type="text" id="settings-web-allowed" placeholder="example.com,api.example.com" class="w-full rounded border border-slate-300 px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label class="text-slate-600 block mb-1">禁止的域名（逗号分隔）</label>
-            <input type="text" id="settings-web-blocked" placeholder="localhost,127.0.0.1" class="w-full rounded border border-slate-300 px-3 py-2 text-sm" />
-          </div>
-          <label class="flex items-center gap-2 cursor-pointer mt-2">
-            <input type="checkbox" id="settings-reject-unauthorized" class="rounded border-slate-300" />
-            <span class="text-slate-700 text-sm">不验证 HTTPS 证书</span>
-          </label>
-          <p class="text-xs text-slate-500">仅当出现「unable to get local issuer certificate」时勾选，可恢复 HTTPS 访问；会降低安全性。</p>
         </div>
       </section>
       <section class="rounded-lg border border-slate-200 bg-white p-4">
@@ -835,17 +781,62 @@
       }
     });
 
-    const VECTOR_EMPTY_HINT = '无结果。请确认：1) 已进行过对话（每轮会自动写入）；2) 语义检索需 Ollama 已启动并执行 ollama pull nomic-embed-text。';
+    const VECTOR_EMPTY_HINT = '无结果。请确认：1) 已进行过对话（每轮会自动写入）；2) 语义检索需 Ollama 已启动并执行 ollama pull nomic-embed-text。本页检索与对话工具 search_memories 相同（智能 query、类型权重、关键词加成；可选分层记忆实体过滤）。';
+    function appendVectorMetaBlock(container, meta) {
+      if (!meta || typeof meta !== 'object') return;
+      const details = document.createElement('details');
+      details.className = 'mb-3 rounded border border-slate-200 bg-slate-50 p-2 text-xs';
+      details.open = true;
+      const sum = document.createElement('summary');
+      sum.className = 'cursor-pointer font-medium text-slate-700 select-none';
+      sum.textContent = '检索元数据（提示词说明、retrieval_config、记忆类型权重、分层过滤、打分说明）';
+      details.appendChild(sum);
+      const pre = document.createElement('pre');
+      pre.className = 'mt-2 whitespace-pre-wrap break-words text-slate-600 max-h-80 overflow-y-auto font-mono leading-relaxed';
+      pre.textContent = JSON.stringify(meta, null, 2);
+      details.appendChild(pre);
+      container.appendChild(details);
+    }
     document.getElementById('vector-search').addEventListener('click', async () => {
       const query = document.getElementById('vector-query').value.trim();
       const limit = parseInt(document.getElementById('vector-limit').value, 10) || 10;
       if (!window.aris || !query) return;
-      const results = await window.aris.vectorSearch(query, limit);
+      const payload = await window.aris.vectorSearch(query, limit);
       const el = document.getElementById('vector-results');
       el.innerHTML = '';
+      const results = payload && Array.isArray(payload.results) ? payload.results : (Array.isArray(payload) ? payload : []);
+      const meta = payload && payload.meta ? payload.meta : null;
+      const smartQ = payload && typeof payload.smartQuery === 'string' ? payload.smartQuery : (meta && meta.query ? meta.query.smart : '');
+      const origQ = payload && typeof payload.originalQuery === 'string' ? payload.originalQuery : (meta && meta.query ? meta.query.original : query);
+      const filterAssoc = payload && payload.filterByAssociation === true;
+      if (meta) {
+        const qbox = document.createElement('div');
+        qbox.className = 'mb-2 space-y-1 text-xs text-slate-600';
+        const p0 = document.createElement('p');
+        p0.textContent = '原文：' + (origQ || '');
+        qbox.appendChild(p0);
+        const p1 = document.createElement('p');
+        p1.textContent = '智能 query：' + (smartQ || '（空）') + (smartQ && smartQ !== origQ ? '' : '（与原文一致或未改写）');
+        qbox.appendChild(p1);
+        el.appendChild(qbox);
+        appendVectorMetaBlock(el, meta);
+      } else {
+        if (smartQ && smartQ !== origQ) {
+          const metaLine = document.createElement('p');
+          metaLine.className = 'text-xs text-slate-600 mb-2';
+          metaLine.textContent = '智能 query：' + smartQ;
+          el.appendChild(metaLine);
+        }
+        if (filterAssoc) {
+          const badge = document.createElement('p');
+          badge.className = 'text-xs text-amber-700 mb-2';
+          badge.textContent = '已启用分层记忆（仅与当前身份/要求相关的经历）';
+          el.appendChild(badge);
+        }
+      }
       if (!results || results.length === 0) {
         const p = document.createElement('p');
-        p.className = 'text-slate-500 text-sm';
+        p.className = 'text-slate-500 text-sm mt-2';
         p.textContent = VECTOR_EMPTY_HINT;
         el.appendChild(p);
         return;
@@ -853,7 +844,23 @@
       results.forEach((r) => {
         const div = document.createElement('div');
         div.className = 'p-2 rounded bg-white border border-slate-200';
-        div.innerHTML = '<span class="text-slate-500 text-xs">' + (r.type || '') + '</span><br/><span class="break-words">' + (r.text || '').slice(0, 300) + (r.text && r.text.length > 300 ? '…' : '') + '</span>';
+        const score = r._score != null ? Number(r._score).toFixed(4) : '';
+        const kb = r._keyword_boost != null ? Number(r._keyword_boost).toFixed(3) : '';
+        const vls = r._vector_layer_score != null ? Number(r._vector_layer_score).toFixed(4) : '';
+        const tw = r._memory_type_weight != null ? Number(r._memory_type_weight).toFixed(3) : '';
+        const td = r._time_decay_factor != null ? Number(r._time_decay_factor).toFixed(3) : '';
+        const sat = r._score_after_type_time != null ? Number(r._score_after_type_time).toFixed(4) : '';
+        const breakdown = [];
+        if (vls !== '') breakdown.push('向量层=' + vls);
+        if (tw !== '') breakdown.push('类型×' + tw);
+        if (td !== '') breakdown.push('时间×' + td);
+        if (sat !== '') breakdown.push('类型·时间后=' + sat);
+        if (kb !== '') breakdown.push('关键词加成=' + kb);
+        if (score !== '') breakdown.push('最终_score=' + score);
+        const scoreLine = breakdown.length
+          ? '<span class="text-slate-500 text-xs leading-relaxed">' + breakdown.join(' · ') + '</span><br/>'
+          : '';
+        div.innerHTML = '<span class="text-slate-500 text-xs font-medium">' + (r.type || '') + '</span> <span class="text-slate-400 text-xs">（记忆类型）</span><br/>' + scoreLine + '<span class="break-words">' + (r.text || '').slice(0, 300) + (r.text && r.text.length > 300 ? '…' : '') + '</span>';
         el.appendChild(div);
       });
     });
@@ -1274,16 +1281,8 @@
         const c = await window.aris.getRuntimeConfig();
         const id = (x) => document.getElementById(x);
         if (id('settings-data-dir')) id('settings-data-dir').textContent = c && c.dataDir ? c.dataDir : '—';
-        if (id('settings-agent-profile')) id('settings-agent-profile').value = (c && c.ARIS_AGENT_PROFILE) ? c.ARIS_AGENT_PROFILE : 'legacy';
         if (id('settings-api-key')) id('settings-api-key').value = (c && c.DEEPSEEK_API_KEY) ? c.DEEPSEEK_API_KEY : '';
         if (id('settings-api-url')) id('settings-api-url').value = (c && c.DEEPSEEK_API_URL) ? c.DEEPSEEK_API_URL : 'https://api.deepseek.com';
-        if (id('settings-enable-web-fetch')) id('settings-enable-web-fetch').checked = (c && c.ENABLE_WEB_FETCH !== undefined) ? (c.ENABLE_WEB_FETCH === 'true' || c.ENABLE_WEB_FETCH === true) : true;
-        if (id('settings-web-timeout')) id('settings-web-timeout').value = (c && c.WEB_FETCH_TIMEOUT_MS) ? c.WEB_FETCH_TIMEOUT_MS : '15000';
-        if (id('settings-web-rate')) id('settings-web-rate').value = (c && c.WEB_FETCH_MAX_CALLS_PER_MINUTE) ? c.WEB_FETCH_MAX_CALLS_PER_MINUTE : '10';
-        if (id('settings-web-max-length')) id('settings-web-max-length').value = (c && c.WEB_FETCH_MAX_LENGTH) ? c.WEB_FETCH_MAX_LENGTH : '8000';
-        if (id('settings-web-allowed')) id('settings-web-allowed').value = (c && c.WEB_FETCH_ALLOWED_HOSTS) ? c.WEB_FETCH_ALLOWED_HOSTS : '';
-        if (id('settings-web-blocked')) id('settings-web-blocked').value = (c && c.WEB_FETCH_BLOCKED_HOSTS) ? c.WEB_FETCH_BLOCKED_HOSTS : 'localhost,127.0.0.1';
-        if (id('settings-reject-unauthorized')) id('settings-reject-unauthorized').checked = (c && (c.REJECT_UNAUTHORIZED === 'false' || c.REJECT_UNAUTHORIZED === false));
         if (id('settings-show-thinking')) id('settings-show-thinking').checked = (c && c.SHOW_THINKING !== undefined && c.SHOW_THINKING !== null) ? (c.SHOW_THINKING === 'true' || c.SHOW_THINKING === true) : false;
         const msgEl = id('settings-save-msg');
         if (msgEl) { msgEl.classList.add('hidden'); msgEl.textContent = ''; }
@@ -1306,35 +1305,19 @@
     document.getElementById('settings-save')?.addEventListener('click', async () => {
       if (!window.aris || !window.aris.setRuntimeConfig) return;
       const id = (x) => document.getElementById(x);
-      const profile = (id('settings-agent-profile') && id('settings-agent-profile').value) ? id('settings-agent-profile').value.trim() : 'legacy';
       const key = (id('settings-api-key') && id('settings-api-key').value) ? id('settings-api-key').value.trim() : '';
       const url = (id('settings-api-url') && id('settings-api-url').value) ? id('settings-api-url').value.trim() : '';
-      const enableWeb = id('settings-enable-web-fetch') ? id('settings-enable-web-fetch').checked : true;
-      const timeout = (id('settings-web-timeout') && id('settings-web-timeout').value) ? String(id('settings-web-timeout').value).trim() : '15000';
-      const rate = (id('settings-web-rate') && id('settings-web-rate').value) ? String(id('settings-web-rate').value).trim() : '10';
-      const maxLen = (id('settings-web-max-length') && id('settings-web-max-length').value) ? String(id('settings-web-max-length').value).trim() : '8000';
-      const allowed = (id('settings-web-allowed') && id('settings-web-allowed').value) ? id('settings-web-allowed').value.trim() : '';
-      const blocked = (id('settings-web-blocked') && id('settings-web-blocked').value) ? id('settings-web-blocked').value.trim() : 'localhost,127.0.0.1';
-      const rejectUnauthorized = id('settings-reject-unauthorized') ? !id('settings-reject-unauthorized').checked : true;
       const showThinking = id('settings-show-thinking') ? id('settings-show-thinking').checked : false;
       const msgEl = id('settings-save-msg');
       try {
         await window.aris.setRuntimeConfig({
-          ARIS_AGENT_PROFILE: profile,
           DEEPSEEK_API_KEY: key,
           DEEPSEEK_API_URL: url || 'https://api.deepseek.com',
-          ENABLE_WEB_FETCH: enableWeb ? 'true' : 'false',
-          WEB_FETCH_TIMEOUT_MS: timeout,
-          WEB_FETCH_MAX_CALLS_PER_MINUTE: rate,
-          WEB_FETCH_MAX_LENGTH: maxLen,
-          WEB_FETCH_ALLOWED_HOSTS: allowed,
-          WEB_FETCH_BLOCKED_HOSTS: blocked,
-          REJECT_UNAUTHORIZED: rejectUnauthorized ? 'true' : 'false',
           SHOW_THINKING: showThinking ? 'true' : 'false',
         });
         if (msgEl) {
           msgEl.classList.remove('hidden');
-          msgEl.textContent = '已保存。若切换了 Profile，请重启应用/服务后生效。';
+          msgEl.textContent = '已保存。';
           msgEl.className = 'text-xs text-green-600';
         }
       } catch (e) {
@@ -1396,7 +1379,6 @@
       }
     });
 
-    let promptPreviewPlannerText = '';
     let promptPreviewMainText = '';
     async function copyToClipboard(text) {
       const t = String(text || '');
@@ -1419,22 +1401,16 @@
     document.getElementById('prompt-preview-btn').addEventListener('click', async () => {
       const input = document.getElementById('prompt-preview-input').value.trim();
       if (!window.aris) return;
-      const plannerPre = document.getElementById('prompt-planner-output');
       const mainPre = document.getElementById('prompt-main-output');
-      plannerPre.textContent = '加载中…';
       mainPre.textContent = '加载中…';
       try {
         const data = await window.aris.getPromptPreview(input || undefined);
-        promptPreviewPlannerText = (data && data.plannerSectionText) || '';
         promptPreviewMainText = (data && data.mainSectionText) || '';
-        plannerPre.textContent = promptPreviewPlannerText || (data ? JSON.stringify(data.plannerPreview, null, 2) : '无数据');
         mainPre.textContent = promptPreviewMainText || (data && data.systemPrompt ? '【system】\n' + data.systemPrompt : '无数据');
       } catch (e) {
-        plannerPre.textContent = '请求失败：' + (e && e.message ? e.message : e);
-        mainPre.textContent = '';
+        mainPre.textContent = '请求失败：' + (e && e.message ? e.message : e);
       }
     });
-    document.getElementById('prompt-copy-planner').addEventListener('click', () => copyToClipboard(promptPreviewPlannerText));
     document.getElementById('prompt-copy-main').addEventListener('click', () => copyToClipboard(promptPreviewMainText));
   </script>
 </body>

@@ -1,6 +1,5 @@
 /**
- * 方案 A：人设 + 基础对话规则常驻；场景规则由 Prompt Planner（前置 LLM）按需注入。
- * 用户约束：禁止用语 + brief 常驻；全文仅在 planner 判定 need_full_constraints 或关闭 planner 时注入。
+ * 人设 + 基础对话规则常驻；场景与约束块由固定「上下文计划」决定（全文约束 + 全场景等）。
  */
 const path = require('path');
 const fs = require('fs');
@@ -160,7 +159,7 @@ function isEmpty(v) {
   return v == null || EMPTY.includes(String(v).trim());
 }
 
-/** 人设 + 能力边界说明；不随会话轮次变化（仅随 persona/behavior/网络开关等部署级配置变）。 */
+/** 人设 + 能力边界说明；不随会话轮次变化（仅随 persona/behavior 等部署级配置变）。 */
 function buildStableSystemPrompt() {
   let system = PERSONA;
   const behavior = readBehaviorConfig();
@@ -169,23 +168,20 @@ function buildStableSystemPrompt() {
   } else {
     system += '\n你可以通过 read_file 阅读自己的代码与配置以理解行为与局限，但不得修改核心逻辑与安全相关配置；若用户要求「改自己的代码」需提醒并交由用户操作。';
   }
-  try {
-    const { isNetworkFetchEnabled } = require('./tools/network.js');
-    if (isNetworkFetchEnabled()) {
-      system += '\n需要了解外界信息时可调用 fetch_url。';
-    }
-  } catch (_) {}
   system += '\n需要了解自身运行环境与能力边界时可调用 get_my_context。';
   return system;
 }
 
-/**
- * 规则类 user/assistant 对：顺序固定，便于 DeepSeek 前缀缓存（见 v2/docs/data.md）。
- * @param {object} dto
- * @param {object} plan
- * @param {{ enabled?: boolean }} plannerMeta
- * @returns {Array<{ role: string, content: string }>}
- */
+/** 与旧版「全文约束 + 三场景 + 全上下文块」对齐的固定计划（无前置编排 LLM）。 */
+const CHATBOT_CONTEXT_PLAN = {
+  scenes: ['code_operation', 'memory_operation', 'restart'],
+  need_full_constraints: true,
+  need_session_summary: true,
+  need_related_associations: true,
+  need_last_state: true,
+  risk_level: 'medium',
+};
+
 function normConstraintText(x) {
   return x != null && String(x).trim() ? String(x).trim() : '（无）';
 }
@@ -199,7 +195,7 @@ function pushRuleAckPair(pairs, userTitleBody) {
  * 用户要求 / 纠错 / 喜好 分三条 user/assistant，避免改一项整段失效（利于 DeepSeek 前缀缓存）。
  * 顺序：要求 → 纠错 → 喜好（相对少变 → 相对多变）。
  */
-function buildConstraintRulePairs(dto, plan, plannerMeta = {}) {
+function buildConstraintRulePairs(dto, plan) {
   const p = plan || {};
   const pairs = [];
   if (!isEmpty(dto.userIdentity)) {
@@ -208,7 +204,7 @@ function buildConstraintRulePairs(dto, plan, plannerMeta = {}) {
   if (!isEmpty(dto.avoidPhrasesLine) && !String(dto.avoidPhrasesLine).includes('（未配置')) {
     pushRuleAckPair(pairs, '【禁止用语】\n\n' + dto.avoidPhrasesLine);
   }
-  const useFull = p.need_full_constraints === true || plannerMeta.enabled === false;
+  const useFull = p.need_full_constraints === true;
   if (useFull) {
     pushRuleAckPair(pairs, '【用户要求】\n\n' + normConstraintText(dto.constraintsRequirementsText));
     pushRuleAckPair(pairs, '【纠错记录】\n\n' + normConstraintText(dto.constraintsCorrectionsText));
@@ -295,12 +291,11 @@ function buildHistoryMessages(recent) {
  * 主对话 messages：短 system + 规则对 + 本轮参考对 + 滑动窗口历史 + 当前用户（对齐 v2/docs/data.md 思路）。
  * @param {object} dto
  * @param {object} plan
- * @param {{ enabled?: boolean }} plannerMeta
  * @param {Array<{ role: string, content?: string }>} recent 须含本轮用户消息在最后
  */
-function buildMainDialogueMessages(dto, plan, plannerMeta, recent) {
+function buildMainDialogueMessages(dto, plan, recent) {
   const stableSystem = buildStableSystemPrompt();
-  const rulePairs = buildConstraintRulePairs(dto, plan, plannerMeta);
+  const rulePairs = buildConstraintRulePairs(dto, plan);
   const volatilePairs = buildVolatileContextPairs(dto, plan);
   const history = buildHistoryMessages(recent);
   const last = recent && recent.length ? recent[recent.length - 1] : null;
@@ -311,10 +306,9 @@ function buildMainDialogueMessages(dto, plan, plannerMeta, recent) {
 
 /**
  * @param {object} dto - contextBuilder 输出；须含 avoidPhrasesLine, userConstraintsFull, constraintsBriefBlock, …
- * @param {object} plan - promptPlanner 输出
- * @param {{ enabled?: boolean }} plannerMeta - enabled=false 时 plan 应为 legacy（全文+全场景）
+ * @param {object} plan - 上下文计划（与 buildMainDialogueMessages 一致）
  */
-function buildSystemPrompt(dto, plan, plannerMeta = {}) {
+function buildSystemPrompt(dto, plan) {
   const p = plan || {};
   const blocks = [];
 
@@ -324,7 +318,7 @@ function buildSystemPrompt(dto, plan, plannerMeta = {}) {
     blocks.push('【禁止用语】\n\n' + dto.avoidPhrasesLine);
   }
 
-  const useFull = p.need_full_constraints === true || plannerMeta.enabled === false;
+  const useFull = p.need_full_constraints === true;
   if (useFull) {
     blocks.push('【用户要求】\n\n' + normConstraintText(dto.constraintsRequirementsText));
     blocks.push('【纠错记录】\n\n' + normConstraintText(dto.constraintsCorrectionsText));
@@ -388,6 +382,7 @@ function buildStatePrompt(contextSummary) {
 }
 
 module.exports = {
+  CHATBOT_CONTEXT_PLAN,
   buildSystemPrompt,
   buildStableSystemPrompt,
   buildMainDialogueMessages,

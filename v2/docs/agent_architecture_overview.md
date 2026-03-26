@@ -77,17 +77,15 @@ sequenceDiagram
   H-->>Main: 返回内容
 ```
 
-### 3.1 前置：Prompt Planner（编排 LLM）
+### 3.1 上下文计划（固定，无前置编排 LLM）
 
-- **作用**：在**主对话**之前，再调用一次 **DeepSeek**（非本地小模型），输出结构化 **plan**：`scenes`（`code_operation` / `memory_operation` / `restart`）、`need_full_constraints`、`need_session_summary`、`need_related_associations`、`risk_level` 等。  
-- **目的**：控制 **system prompt 体积** — 按需注入「场景规则块」、全文约束 vs 仅摘要、是否注入关联实体行等。  
-- **关闭时**：使用 `LEGACY_PLAN`（全文约束 + 三场景全开），接近旧版体量。  
-- **产品含义**：这是 **「上下文预算管理器」**，不是独立「业务意图中台」；场景集合在代码层仍锚定在三个标签（可理解为 **UI/安全/操作类** 维度）。
+- **作用**：`prompt.js` 中 `CHATBOT_CONTEXT_PLAN` 固定为 **全文约束 + 三场景全开 + 注入小结/关联/状态** 等与旧版接近的体量。  
+- **主对话**：`buildMainDialogueMessages` 将人设与规则拆成多段 `messages`（利于前缀缓存），见 `prompt_packaging.md`。
 
 ### 3.2 主对话：工具循环
 
-- **入口消息**：当前实现里，主模型上下文多为 **system（长）+ user（当前句）**；近期多轮内容在 system 的「当前会话最近几轮」块中（具体见 `prompt.js` / `contextBuilder`）。  
-- **工具**：`getTools()` 动态组装（含网络工具是否启用）；`chatWithTools` 非流式返回，直到无 `tool_calls` 或达到上限。  
+- **入口消息**：当前实现里，主模型上下文为 **多段 messages**（短 system + 规则对与易变对 + 滑动历史 + 当前用户）；近期多轮亦出现在历史段中（具体见 `prompt.js` / `contextBuilder`）。  
+- **工具**：`getTools()` 返回内置工具列表；`chatWithTools` 非流式返回，直到无 `tool_calls` 或达到上限。  
 - **无自然语言回复时的补救**：若仅有工具调用而无可用正文，会再调 **流式** 生成一句总结（避免用户只看到空白）。  
 
 ### 3.3 后置：向量写入与会话小结
@@ -105,7 +103,7 @@ sequenceDiagram
 | **B. 语义记忆（可检索经历）** | LanceDB 表 `memory` | 对话块、主动消息等 **嵌入向量**；通过 `search_memories` **按需召回**，避免全量进 prompt。 |
 | **C. 会话内上下文** | system 中的近窗 + 可选 session summary | **当前线程 coherence**；与长期记忆分工明确。 |
 
-**检索策略（现状）**：`packages/store/vector.js` 默认 **向量 ANN + MiniSearch（BM25 风格全文）混合召回**，在 **Top-K 候选池** 内用 **查询向量与文档向量的余弦** 再融合排序，最后叠加 **时间衰减**；`search_memories` 工具侧另有 **类型权重** 与 **字面重叠微调**（`memory.js`），以及可选 **按关联实体过滤**（`retrieval_config.json`）。环境变量 `ARIS_MEMORY_HYBRID=false` 时回退为纯向量 + 时间衰减。独立 **cross-encoder** 重排序（需额外模型）未接入；余弦重排为双塔空间内的二次精排。
+**检索策略（现状）**：`packages/store/vector.js` 默认 **向量 ANN + MiniSearch（BM25 风格全文）混合召回**，在 **Top-K 候选池** 内 **余弦融合** 后进入第二阶段 **RRF（倒数排名融合）+ 查询字面覆盖**（`memoryRerankStage2.js`），再乘 **相似度/时间** 权重（**默认时间权重为 0**，相关性优先）。`search_memories` 工具侧另有 **类型权重** 与 **字面重叠微调**（`memory.js`），以及可选 **按关联实体过滤** 与 **`memory_row_time_decay`**（默认关）。`ARIS_MEMORY_HYBRID=false` 时回退为纯向量 + 可选时间项；`ARIS_MEMORY_FINAL_STAGE2=false` 时回退旧「混合余弦 + 时间」排序。
 
 ---
 

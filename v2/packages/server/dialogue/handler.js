@@ -3,23 +3,14 @@
  */
 const store = require('../../store');
 const config = require('../../config');
-const { buildMainDialogueMessages, buildSystemPrompt } = require('./prompt.js');
+const { buildMainDialogueMessages, buildSystemPrompt, CHATBOT_CONTEXT_PLAN } = require('./prompt.js');
 const { buildContextDTO } = require('./contextBuilder.js');
-const {
-  readPromptPlannerConfig,
-  runPromptPlanner,
-  appendPlannerMetricLine,
-  LEGACY_PLAN,
-} = require('./promptPlanner.js');
 const { getCurrentRelatedEntityIds } = require('./associationContext.js');
 const { maybeGenerateSummary } = require('./summaryGeneration.js');
 const { getTools, runTool } = require('./tools/index.js');
-const { chat, chatWithTools } = require('../llm/client.js');
+const { chatWithTools } = require('../llm/client.js');
 const { chatStream } = require('../llm/stream.js');
 const { extractUsageCacheMetrics } = require('../llm/usageLog.js');
-const { getActiveAgentProfile } = require('../../config/paths.js');
-const { reviewResponse, polishResponse, buildRegenerateFeedback, getReviewConfig } = require('./localReview.js');
-const { appendQualityJudgment, appendIterationTrace } = require('./collabTrace.js');
 const {
   DIALOGUE_CHUNK_PREV_ROUNDS,
   getFileToolMaxPerUserTurn,
@@ -92,63 +83,17 @@ async function recordMonitorEstimatedTurnRow(sessionId, inputTokens, outputToken
 
 async function buildPromptContext(sessionId, recent, options = {}) {
   const dto = await buildContextDTO(sessionId, recent);
-  const lastMsg = recent.length ? recent[recent.length - 1] : null;
-  const currentUserContent = lastMsg && lastMsg.role === 'user' ? lastMsg.content : (lastMsg ? lastMsg.content : '');
-
-  const plannerCfg = readPromptPlannerConfig();
-  let plan = LEGACY_PLAN;
-  let plannerResult = { plan, error: 'planner_disabled', plannerMessages: null };
-  let plannerMs = null;
-  if (plannerCfg.enabled) {
-    const tPlanner = performance.now();
-    plannerResult = await runPromptPlanner({
-      lastUserMessage: currentUserContent || '',
-      recentWindowText: dto.recentWindowForPlanner || '',
-      constraintsBriefText: dto.constraintsBriefBlock || '',
-      signal: options.signal,
-    });
-    plannerMs = Math.round(performance.now() - tPlanner);
-    plan = plannerResult.plan;
-  }
-
-  const { messages, stableSystemPrompt } = buildMainDialogueMessages(dto, plan, { enabled: plannerCfg.enabled }, recent);
-  if (plannerCfg.enabled && plannerCfg.log_metrics) {
-    appendPlannerMetricLine({
-      planner_error: plannerResult.error,
-      plan,
-      system_chars: stableSystemPrompt.length,
-    });
-  }
-
+  const plan = CHATBOT_CONTEXT_PLAN;
+  const { messages, stableSystemPrompt } = buildMainDialogueMessages(dto, plan, recent);
   const out = {
     systemPrompt: stableSystemPrompt,
     messages,
     metrics: {
-      planner_enabled: plannerCfg.enabled,
-      planner_ms: plannerMs,
       system_chars: stableSystemPrompt.length,
-      planner_usage: plannerCfg.enabled ? plannerResult.usage || null : null,
     },
   };
   if (options.includeLegacySystem) {
-    out.systemPromptLegacy = buildSystemPrompt(dto, plan, { enabled: plannerCfg.enabled });
-  }
-  if (options.includePlannerInPreview) {
-    if (plannerCfg.enabled) {
-      out.plannerPreview = {
-        messages: plannerResult.plannerMessages || [],
-        responseRaw: plannerResult.raw,
-        plan: plannerResult.plan,
-        error: plannerResult.error,
-      };
-    } else {
-      out.plannerPreview = {
-        disabled: true,
-        plan: LEGACY_PLAN,
-        messages: [],
-        note: 'Prompt Planner 未启用（默认关闭；需设置 ARIS_PROMPT_PLANNER_ENABLED=true 或 behavior_config.json 中 prompt_planner_enabled: true）。本回合固定使用 LEGACY_PLAN（全文约束 + 全场景）。',
-      };
-    }
+    out.systemPromptLegacy = buildSystemPrompt(dto, plan);
   }
   return out;
 }
@@ -183,10 +128,6 @@ function sanitizeExternalSessionId(raw) {
   return s;
 }
 
-function isCollabProfile() {
-  return getActiveAgentProfile() === 'collab';
-}
-
 /**
  * @param {{ sessionId?: string }} options
  */
@@ -196,103 +137,12 @@ async function resolveSessionIdForTurn(options) {
   return facade.getCurrentSessionId();
 }
 
-async function runCollabPostProcess(params) {
-  const {
-    sessionId,
-    userContent,
-    initialReply,
-    currentMessages,
-    signal,
-    totalInputTokensRef,
-    totalOutputTokensRef,
-    hasOfficialUsageRef,
-  } = params;
-  let reply = String(initialReply || '');
-  const reviewCfg = getReviewConfig();
-  let lastReview = null;
-  for (let i = 0; i <= reviewCfg.maxIterations; i++) {
-    if (signal && signal.aborted) break;
-    const review = await reviewResponse({
-      userInput: userContent,
-      response: reply,
-      contextText: currentMessages.map((m) => `${m.role}: ${String(m.content || '').slice(0, 400)}`).join('\n'),
-    });
-    lastReview = review;
-    appendQualityJudgment({
-      session_id: sessionId,
-      iteration: i,
-      score: review.score,
-      decision: review.decision,
-      dimensions: review.dimensions,
-      blocking_issues: review.blocking_issues,
-      rewrite_suggestions: review.rewrite_suggestions,
-    });
-    appendIterationTrace({
-      session_id: sessionId,
-      iteration: i,
-      stage: 'review',
-      score: review.score,
-      decision: review.decision,
-      response_preview: String(reply || '').slice(0, 300),
-    });
-    if (review.decision === 'return') break;
-    if (review.decision === 'polish') {
-      reply = await polishResponse({ userInput: userContent, response: reply, review });
-      appendIterationTrace({
-        session_id: sessionId,
-        iteration: i,
-        stage: 'polish',
-        response_preview: String(reply || '').slice(0, 300),
-      });
-      break;
-    }
-    if (i >= reviewCfg.maxIterations) {
-      reply = await polishResponse({ userInput: userContent, response: reply, review });
-      appendIterationTrace({
-        session_id: sessionId,
-        iteration: i,
-        stage: 'polish_after_max_iterations',
-        response_preview: String(reply || '').slice(0, 300),
-      });
-      break;
-    }
-    const feedback = buildRegenerateFeedback(review);
-    const reviseMessages = [
-      ...currentMessages,
-      { role: 'assistant', content: reply },
-      {
-        role: 'user',
-        content: `请根据以下审校意见重写上一个回答，直接给出改写后的最终答复：\n${feedback}`,
-      },
-    ];
-    const regenerated = await chat(reviseMessages, { signal, temperature: 0.3 });
-    if (regenerated.aborted) break;
-    if (regenerated.usage) {
-      totalInputTokensRef.value += Number(regenerated.usage.prompt_tokens) || 0;
-      totalOutputTokensRef.value += Number(regenerated.usage.completion_tokens) || 0;
-      hasOfficialUsageRef.value = true;
-      await recordMonitorLlmRow(sessionId, 'collab_regenerate', i, regenerated.usage);
-    }
-    if (regenerated.content && typeof regenerated.content === 'string') {
-      reply = regenerated.content;
-    }
-    appendIterationTrace({
-      session_id: sessionId,
-      iteration: i,
-      stage: 'cloud_regenerate',
-      feedback,
-      response_preview: String(reply || '').slice(0, 300),
-    });
-  }
-  return { reply, review: lastReview };
-}
-
 /**
  * @param {string} userContent
  * @param {(chunk: string) => void} sendChunk
  * @param {(actions: unknown) => void} sendAgentActions
  * @param {AbortSignal} [signal]
- * @param {{ sessionId?: string }} [options] — 若传 `sessionId`（如 `qq:private:xxx`），本回合使用该会话，不读写桌面当前会话；供官方 QQ 桥接等多路隔离。
+ * @param {{ sessionId?: string }} [options] — 若传 `sessionId`，本回合使用该会话，不读写桌面当前会话（多路隔离）。
  */
 async function handleUserMessage(userContent, sendChunk, sendAgentActions, signal, options = {}) {
   const sessionId = await resolveSessionIdForTurn(options);
@@ -325,15 +175,9 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   const tTurnStart = performance.now();
   const recent = await facade.getRecentConversation(sessionId, RECENT_ROUNDS * 2 + 2);
   let hasOfficialUsage = false;
-  const collabMode = isCollabProfile();
   const { messages, metrics: ctxMetrics } = await buildPromptContext(sessionId, recent, { signal });
   const sysLen = (messages[0] && messages[0].content) ? String(messages[0].content).length : 0;
   console.info('[Aris v2] 本轮 prompt: 稳定 system 约', sysLen, '字, API 消息数', messages.length);
-
-  if (ctxMetrics.planner_usage) {
-    await recordMonitorLlmRow(sessionId, 'prompt_planner', null, ctxMetrics.planner_usage);
-    hasOfficialUsage = true;
-  }
 
   let currentMessages = messages;
   let reply = '';
@@ -432,7 +276,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   if (hadToolCalls && currentMessages.length > 0) {
     const hasUsableReply = reply && String(reply).trim() && !isDsmlOrToolMarkup(reply);
     if (hasUsableReply) {
-      if (sendChunk && !collabMode) {
+      if (sendChunk) {
         const contentForStream = filterReplyForDisplay(reply);
         for (let i = 0; i < contentForStream.length; i += 2) {
           if (signal && signal.aborted) break;
@@ -468,9 +312,9 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
         }
         if (isDsmlOrToolMarkup(fullContent)) {
           const msg = '（上轮为工具调用，未生成自然语言回复，可继续发消息）';
-          if (sendChunk && !collabMode) { streamedContent += msg; sendChunk(msg); }
+          if (sendChunk) { streamedContent += msg; sendChunk(msg); }
           reply = '';
-        } else if (sendChunk && fullContent && !collabMode) {
+        } else if (sendChunk && fullContent) {
           for (let i = 0; i < fullContent.length; i += 2) {
             if (signal && signal.aborted) break;
             const slice = fullContent.slice(i, i + 2);
@@ -492,28 +336,9 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
       }
     }
   }
-  if (collabMode && reply && !isDsmlOrToolMarkup(reply)) {
-    const tokenInRef = { value: totalInputTokens };
-    const tokenOutRef = { value: totalOutputTokens };
-    const usageRef = { value: hasOfficialUsage };
-    const collabOut = await runCollabPostProcess({
-      sessionId,
-      userContent,
-      initialReply: reply,
-      currentMessages,
-      signal,
-      totalInputTokensRef: tokenInRef,
-      totalOutputTokensRef: tokenOutRef,
-      hasOfficialUsageRef: usageRef,
-    });
-    reply = collabOut.reply || reply;
-    totalInputTokens = tokenInRef.value;
-    totalOutputTokens = tokenOutRef.value;
-    hasOfficialUsage = usageRef.value;
-  }
   if (reply && isDsmlOrToolMarkup(reply)) reply = '';
   let contentForFrontend = filterReplyForDisplay(reply);
-  if (sendChunk && contentForFrontend && (!hadToolCalls || collabMode)) {
+  if (sendChunk && contentForFrontend && !hadToolCalls) {
     for (let i = 0; i < contentForFrontend.length; i += 2) {
       if (signal && signal.aborted) break;
       const slice = contentForFrontend.slice(i, i + 2);
@@ -605,9 +430,6 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
 
   const metricLine = {
     session_id: sessionId,
-    profile: collabMode ? 'collab' : 'legacy',
-    planner_ms: ctxMetrics && ctxMetrics.planner_ms != null ? ctxMetrics.planner_ms : null,
-    planner_enabled: !!(ctxMetrics && ctxMetrics.planner_enabled),
     system_chars: ctxMetrics && ctxMetrics.system_chars != null ? ctxMetrics.system_chars : sysLen,
     tool_rounds: toolRoundsDetail.length,
     tool_rounds_detail: toolRoundsDetail,
@@ -648,24 +470,8 @@ async function getPromptPreview(userMessage) {
     ? [...recent, { role: 'user', content: userMessage.trim() }]
     : recent;
   const ctx = await buildPromptContext(sessionId, forBuild, {
-    includePlannerInPreview: true,
     includeLegacySystem: true,
   });
-
-  let plannerSectionText = '';
-  const pp = ctx.plannerPreview;
-  if (pp?.disabled) {
-    plannerSectionText = `${pp.note}\n\n生效 plan（JSON）：\n${JSON.stringify(pp.plan, null, 2)}`;
-  } else if (pp?.messages?.length) {
-    plannerSectionText =
-      formatMessagesBlock(pp.messages) +
-      '\n\n---\n\n【assistant 返回（原始）】\n' +
-      (pp.responseRaw || '（无）');
-    if (pp.error) plannerSectionText += `\n\n（状态：${pp.error}）`;
-    plannerSectionText += `\n\n生效 plan（JSON）：\n${JSON.stringify(pp.plan, null, 2)}`;
-  } else {
-    plannerSectionText = '（无 Planner 消息）';
-  }
 
   const mainSectionText = formatMessagesBlock(ctx.messages);
   const legacyNote =
@@ -674,17 +480,13 @@ async function getPromptPreview(userMessage) {
       : '';
 
   const promptText =
-    '========== ① Prompt Planner（编排 LLM）==========\n\n' +
-    plannerSectionText +
-    '\n\n========== ② 主对话（多段 messages，利于 DeepSeek 前缀缓存）==========\n\n' +
+    '========== 主对话（多段 messages，利于 DeepSeek 前缀缓存）==========\n\n' +
     mainSectionText +
     legacyNote;
 
   return {
     systemPrompt: ctx.systemPrompt,
     messages: ctx.messages,
-    plannerPreview: ctx.plannerPreview,
-    plannerSectionText,
     mainSectionText,
     promptText,
   };

@@ -162,68 +162,195 @@ function calculateDynamicWeights(context, config) {
 
 /**
  * 应用记忆类型权重调整得分
+ * @param {boolean} [withDebug] - 为 true 时附加分项字段，供 UI / 调试（不影响 _score 计算）
  */
-function applyMemoryTypeWeights(rows, config, context) {
+function applyMemoryTypeWeights(rows, config, context, withDebug = false) {
   if (!rows || !rows.length) return rows;
-  
+
   const weights = calculateDynamicWeights(context, config);
-  
-  return rows.map(row => {
+
+  return rows.map((row) => {
     const type = row.type || 'dialogue_turn';
     const weight = weights[type] || 1.0;
-    const adjustedScore = (row._score || 0) * weight;
-    
-    // 时间衰减：越近的记忆权重越高
+    const vectorLayerScore = row._score || 0;
+    const adjustedScore = vectorLayerScore * weight;
+
     const now = Date.now();
     const memoryTime = row.created_at ? Number(row.created_at) : now;
     const timeDiffHours = (now - memoryTime) / (1000 * 60 * 60);
-    const timeWeight = Math.max(0.5, Math.exp(-timeDiffHours / 24)); // 24小时衰减
-    
-    return { ...row, _score: adjustedScore * timeWeight };
+    const rowTimeDecayOn = config.memory_row_time_decay === true;
+    const timeWeight = rowTimeDecayOn ? Math.max(0.5, Math.exp(-timeDiffHours / 24)) : 1;
+
+    const out = { ...row, _score: adjustedScore * timeWeight };
+    if (withDebug) {
+      out._vector_layer_score = vectorLayerScore;
+      out._memory_type_weight = weight;
+      out._time_decay_factor = timeWeight;
+      out._score_after_type_time = adjustedScore * timeWeight;
+    }
+    return out;
   });
 }
 
+function getBaseMemoryTypeWeights(config) {
+  return (
+    (config && config.memory_type_weights) || {
+      dialogue_turn: 1.0,
+      user_preference: 1.2,
+      requirement: 1.5,
+      identity: 1.8,
+    }
+  );
+}
+
 /**
- * 判断是否需要检索记忆：基于对话上下文智能决策
+ * 供向量调试页展示的元数据（与 search_memories 管线一致）。
  */
-function shouldRetrieveMemory(userMessage, recentConversation, config) {
-  if (!config.dynamic_retrieval_enabled) return true;
-  
-  const message = userMessage.toLowerCase();
-  
-  // 明确需要检索的关键词
-  const retrievalKeywords = [
-    '记得', '之前', '以前', '上次', '记忆',
-    '偏好', '习惯', '喜欢', '讨厌', '要求',
-    '身份', '名字', '称呼', '系统', '代码',
-    '配置', '问题', '改进', '方案', '讨论'
-  ];
-  
-  // 明确不需要检索的关键词（简单问候等）
-  const noRetrievalKeywords = [
-    '你好', '在吗', 'hi', 'hello', '早上好', '晚上好',
-    '谢谢', '拜拜', '再见', 'ok', '好的', '嗯'
-  ];
-  
-  // 检查是否需要检索
-  const hasRetrievalKeyword = retrievalKeywords.some(keyword => message.includes(keyword));
-  const hasNoRetrievalKeyword = noRetrievalKeywords.some(keyword => message.includes(keyword));
-  
-  // 如果是复杂问题或长消息，倾向于检索
-  const isComplexMessage = message.length > 30 || message.includes('?') || message.includes('？');
-  
-  // 如果最近对话中提到过相关话题，倾向于检索
-  const recentContext = recentConversation.slice(-3).join(' ').toLowerCase();
-  const hasRecentContext = retrievalKeywords.some(keyword => recentContext.includes(keyword));
-  
-  // 决策逻辑
-  if (hasRetrievalKeyword) return true;
-  if (hasNoRetrievalKeyword) return false;
-  if (isComplexMessage) return true;
-  if (hasRecentContext) return true;
-  
-  // 无明确信号时不随机检索（避免行为抖动）
-  return false;
+function buildSearchMemoriesMeta(
+  config,
+  originalQuery,
+  smartQuery,
+  context,
+  filterByEntities,
+  effectiveWeights,
+  fetchLimit,
+  finalTopK,
+) {
+  const cfg = config || readRetrievalConfig();
+  const ctx = context || { userMessage: String(originalQuery || ''), recentTopics: [] };
+  const eff = effectiveWeights || calculateDynamicWeights(ctx, cfg);
+  return {
+    prompts: {
+      tool_search_memories:
+        '按语义+全文混合检索与 query 相关的记忆（对话、主动行为等）；底层为向量与 MiniSearch 融合后再重排（ARIS_MEMORY_HYBRID）；不按时间过滤；时刻附近对话用 get_conversation_near_time（memory.js）',
+      base_conversation_rules:
+        '上下文已给出的可直接答；须核对事实、纠错、文件/记忆读写、或本回合未覆盖的早期记录时主动调用 search_memories（prompt.js BASE_CONVERSATION_RULES）',
+      memory_operation_scene:
+        'memory_operation 场景含 search_memories / 向量检索（prompt.js 场景块 + 本工具）',
+    },
+    query: {
+      original: String(originalQuery || ''),
+      smart: String(smartQuery || ''),
+      note: 'generateSmartQuery：短句原样返回；长句/问句抽取关键词或截断至 50 字',
+    },
+    retrieval_config: {
+      filter_experience_by_association: Boolean(cfg.filter_experience_by_association),
+      max_experience_results:
+        cfg.max_experience_results != null ? cfg.max_experience_results : 10,
+      context_aware_weights: Boolean(cfg.context_aware_weights),
+      memory_row_time_decay: cfg.memory_row_time_decay === true,
+      memory_type_weights_base: getBaseMemoryTypeWeights(cfg),
+      memory_type_weights_effective: eff,
+      source_types: Array.isArray(cfg.source_types) ? cfg.source_types : [],
+      requirement_id_max: cfg.requirement_id_max != null ? cfg.requirement_id_max : 5,
+    },
+    layered_filter: {
+      applied: Boolean(filterByEntities && filterByEntities.length > 0),
+      entities:
+        filterByEntities && filterByEntities.length
+          ? filterByEntities.map((e) => ({ type: String(e.type), id: String(e.id) }))
+          : [],
+    },
+    scoring: {
+      vector_layer_then:
+        'Lance 混合召回 → 余弦融合 →（默认）RRF+字面覆盖（packages/store/memoryRerankStage2.js）；再 × ARIS_VECTOR_SIM/ TIME；× 类型权重 × (1 + keywordOverlapBoost)',
+      memory_row_time:
+        cfg.memory_row_time_decay === true ? '行级 24h 衰减已开启（memory_row_time_decay）' : '行级时间不衰减（默认）',
+      keyword_overlap_note: '字面短语与分词重叠加成，见 memory.js keywordOverlapBoost',
+    },
+    fetch: {
+      vector_search_fetch_limit: fetchLimit,
+      final_top_k: finalTopK,
+    },
+  };
+}
+
+/**
+ * 与 search_memories 工具相同的检索管线（智能 query、可选实体过滤、类型权重、字面加成）。
+ * 返回行已去掉 vector，便于 IPC / 页面传输。
+ * @param {string} rawQuery
+ * @param {number} [limitArg]
+ * @returns {Promise<{ rows: object[], smartQuery: string, originalQuery: string, filterByAssociation: boolean }>}
+ */
+async function runSearchMemoriesPipeline(rawQuery, limitArg) {
+  const originalQuery = String(rawQuery || '');
+  if (!store.vector) {
+    const cfgEmpty = readRetrievalConfig();
+    const ctxEmpty = { userMessage: originalQuery, recentTopics: [] };
+    return {
+      rows: [],
+      smartQuery: '',
+      originalQuery,
+      filterByAssociation: false,
+      meta: buildSearchMemoriesMeta(
+        cfgEmpty,
+        originalQuery,
+        '',
+        ctxEmpty,
+        null,
+        calculateDynamicWeights(ctxEmpty, cfgEmpty),
+        0,
+        0,
+      ),
+    };
+  }
+  const config = readRetrievalConfig();
+  const limit = Math.min(Math.max(Number(limitArg) || 5, 1), 15);
+  const maxExp = Math.min(Math.max(Number(config.max_experience_results) || 10, 1), 20);
+  const useLimit = config.filter_experience_by_association ? maxExp : limit;
+  const filterByEntities = config.filter_experience_by_association ? getCurrentRelatedEntityIds() : undefined;
+  const searchOptions = filterByEntities && filterByEntities.length > 0 ? { filterByEntities } : undefined;
+
+  const smartQuery = generateSmartQuery(originalQuery);
+  console.info('[Aris v2] 原始query:', originalQuery.slice(0, 40), '智能query:', smartQuery.slice(0, 40));
+
+  const fetchLimit = useLimit * 2;
+  const rows = await store.vector.search(smartQuery, fetchLimit, searchOptions);
+
+  const context = {
+    userMessage: originalQuery,
+    recentTopics: [],
+  };
+
+  let weightedRows = applyMemoryTypeWeights(rows, config, context, true);
+  weightedRows = weightedRows.map((row) => {
+    const boost = keywordOverlapBoost(smartQuery, row.text);
+    const { vector: _v, ...rest } = row;
+    const afterTypeTime = row._score_after_type_time != null ? row._score_after_type_time : row._score || 0;
+    return {
+      ...rest,
+      _score: afterTypeTime * (1 + boost),
+      _keyword_boost: boost,
+    };
+  });
+
+  weightedRows.sort((a, b) => (b._score || 0) - (a._score || 0));
+  const finalRows = weightedRows.slice(0, limit);
+
+  console.info(
+    '[Aris v2] 召回:',
+    finalRows.length,
+    '条, smart_query=',
+    smartQuery.slice(0, 40),
+    filterByEntities && filterByEntities.length ? ', filterByEntity' : '',
+  );
+  const effectiveWeights = calculateDynamicWeights(context, config);
+  return {
+    rows: finalRows,
+    smartQuery,
+    originalQuery,
+    filterByAssociation: Boolean(filterByEntities && filterByEntities.length > 0),
+    meta: buildSearchMemoriesMeta(
+      config,
+      originalQuery,
+      smartQuery,
+      context,
+      filterByEntities,
+      effectiveWeights,
+      fetchLimit,
+      limit,
+    ),
+  };
 }
 
 async function runMemoryTool(name, args) {
@@ -234,43 +361,12 @@ async function runMemoryTool(name, args) {
         console.info('[Aris v2] 召回: 向量库未就绪');
         return { ok: true, memories: [], text: '（向量库未就绪）' };
       }
-      const config = readRetrievalConfig();
-      const limit = Math.min(Math.max(Number(a.limit) || 5, 1), 15);
-      const maxExp = Math.min(Math.max(Number(config.max_experience_results) || 10, 1), 20);
-      const useLimit = config.filter_experience_by_association ? maxExp : limit;
-      const filterByEntities = config.filter_experience_by_association ? getCurrentRelatedEntityIds() : undefined;
-      const searchOptions = filterByEntities && filterByEntities.length > 0 ? { filterByEntities } : undefined;
-      
-      // 智能生成检索query
-      const smartQuery = generateSmartQuery(a.query || '');
-      console.info('[Aris v2] 原始query:', (a.query || '').slice(0, 40), '智能query:', smartQuery.slice(0, 40));
-      
-      const rows = await store.vector.search(smartQuery, useLimit * 2, searchOptions); // 获取更多结果用于权重调整
-      
-      // 构建上下文用于动态权重计算
-      const context = {
-        userMessage: a.query || '',
-        recentTopics: []
-      };
-      
-      // 应用动态记忆类型权重 + 字面重叠微调
-      let weightedRows = applyMemoryTypeWeights(rows, config, context);
-      weightedRows = weightedRows.map((row) => {
-        const boost = keywordOverlapBoost(smartQuery, row.text);
-        return { ...row, _score: (row._score || 0) * (1 + boost) };
-      });
+      const { rows: finalRows, smartQuery } = await runSearchMemoriesPipeline(a.query, a.limit);
 
-      // 重新排序
-      weightedRows.sort((a, b) => (b._score || 0) - (a._score || 0));
-      
-      // 取前limit个结果
-      const finalRows = weightedRows.slice(0, limit);
-      
       const texts = finalRows.map((r) => r.text).filter(Boolean);
       const summaryLine = texts.length
         ? '根据检索，与当前话题相关的有：' + texts.slice(0, 2).map((t) => (t || '').trim().slice(0, 40)).filter(Boolean).join('；') + (texts.length > 2 ? '…' : '')
         : '';
-      console.info('[Aris v2] 召回:', texts.length, '条, smart_query=', smartQuery.slice(0, 40), filterByEntities ? ', filterByEntity' : '');
       return {
         ok: true,
         memories: texts,
@@ -414,4 +510,9 @@ async function runMemoryTool(name, args) {
   return { ok: false, error: 'Unknown tool' };
 }
 
-module.exports = { MEMORY_TOOLS, runMemoryTool, shouldRetrieveMemory, generateSmartQuery };
+module.exports = {
+  MEMORY_TOOLS,
+  runMemoryTool,
+  generateSmartQuery,
+  runSearchMemoriesPipeline,
+};

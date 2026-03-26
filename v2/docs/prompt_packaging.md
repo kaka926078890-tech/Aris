@@ -1,11 +1,11 @@
-# 提示词分层与 Prompt Planner（最终方案）
+# 提示词分层与 messages 组装（最终方案）
 
 ## 流程
 
-1. **buildContextDTO**：组装 DTO，含 `avoidPhrasesLine`（常驻）、`constraintsBriefBlock`（`memory/constraints_brief.json` 或截断回退）、`userConstraintsFull`（要求+纠错+喜好全文，不含禁止用语）、`recentWindowForPlanner` 等。
-2. **runPromptPlanner**（可关）：前置 LLM 根据**当前用户消息 + 极短对话节选 + brief** 输出 JSON：`scenes`、`need_full_constraints`、`need_session_summary`、`need_related_associations`、`need_last_state`、`risk_level`。不用关键词硬编码。节选仅为减冗：主对话 system 仍含【当前会话最近几轮】全量（与 `handler` 拉取的 `recent` 一致），编排模型说明中已注明勿因节选较短而假定主模型看不到更早内容。
-3. **buildSystemPrompt(dto, plan)**：按 plan 拼接上下文块；`scenes` 决定注入哪些场景规则（查代码/记忆路径/重启）。
-4. **Planner 默认关闭**；启用：`ARIS_PROMPT_PLANNER_ENABLED=true` 或 `behavior_config.json` 中 `prompt_planner_enabled: true`。未启用时使用 **LEGACY_PLAN**（全文约束 + 三场景 + 全块），与旧版体量接近。
+1. **buildContextDTO**：组装 DTO，含 `avoidPhrasesLine`（常驻）、`constraintsBriefBlock`（`memory/constraints_brief.json` 或截断回退）、`userConstraintsFull`（要求+纠错+喜好全文，不含禁止用语）等。
+2. **固定上下文计划**：`prompt.js` 导出 `CHATBOT_CONTEXT_PLAN`（全文用户约束 + 三场景 + 会话小结/关联/状态等块），与旧版「全量注入」体量一致；**无前置编排 LLM**。
+3. **buildMainDialogueMessages(dto, plan, recent)**：短 `system`（人设与能力边界）+ 规则类 user/assistant 对 + 本轮易变对 + 滑动历史 + 当前用户。
+4. **buildSystemPrompt(dto, plan)**：仍可用于调试「单条大 system」对照（提示词预览中的 legacy 对照区）。
 
 ## 双层约束
 
@@ -35,10 +35,6 @@
 
 **注意**：`memory/conversation_rules.md` 常位于实例 `data/` 下（多被 `.gitignore` 排除）。若你本地有该文件，它会**覆盖**代码中的 `BASE_CONVERSATION_RULES`；升级后若仍保留旧版「先检查缓存」等措辞，可能与当前默认（工具在事实/纠错/文件场景须主动调用）不一致，可按需对照 `v2/packages/server/dialogue/prompt.js` 中的默认段自行合并。
 
-## 评估
-
-- 设置 `ARIS_PROMPT_PLANNER_LOG=true` 或 `behavior_config.json` 中 `prompt_planner_log_metrics: true`，会在数据目录写入 `prompt_planner_metrics.jsonl`（每行含 `plan`、`planner_error`、`system_chars`）。
-
 ## 应用内预览
 
-侧栏 **提示词预览** 会拉取 `getPromptPreview`：分两块展示 **① Prompt Planner（编排 LLM）**（发给编排模型的 system/user、assistant 原始返回、生效 plan）与 **② 主对话**（主模型 system + user）。每块标题栏有复制图标，可单独拷贝。
+侧栏 **提示词预览** 会拉取 `getPromptPreview`：展示主对话 **messages**（多段利于前缀缓存），并可选附「单条大 system」对照截断。

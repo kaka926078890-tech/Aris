@@ -1,6 +1,6 @@
-/** 向量检索：相似度与时间权重 */
-const VECTOR_SIMILARITY_WEIGHT = 0.7;
-const VECTOR_TIME_WEIGHT = 0.3;
+/** 向量检索：相似度与时间权重（最终排序默认「相关性优先」：时间权重为 0；可用环境变量覆盖） */
+const VECTOR_SIMILARITY_WEIGHT = 1;
+const VECTOR_TIME_WEIGHT = 0;
 
 /** nomic-embed-text 前缀 */
 const SEARCH_DOCUMENT_PREFIX = 'search_document: ';

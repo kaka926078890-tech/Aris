@@ -2,7 +2,7 @@
  * v2 全量备份/恢复：对话(SQLite)、向量库、用户身份、状态、要求、情感、纠错、表达欲望、监控等，
  * 以及 memory/ 与 data/ 下所有已知配置文件（timeline、associations、quiet_phrases、
  * retrieval_config、session_summaries、preferences、network_config、aris_ideas 等）。
- * v3 起额外包含：data 根目录观测/配置（dialogue_turn_metrics、prompt_planner_metrics、config.json）、
+ * v3 起额外包含：data 根目录观测/配置（dialogue_turn_metrics、config.json）、
  * async_outbox/ 全量、以及 constraints_brief / exploration_notes / action_cache / work_state / conversation_rules.md。
  * 单文件 .aris，支持一键导出/导入，便于公司↔家里或换机迁移。
  */
@@ -68,7 +68,6 @@ function isSafeFlatFileName(name) {
 /** data 根目录下需随迁移带走的文本文件（观测、应用配置） */
 const DATA_ROOT_TEXT_FILES = [
   'dialogue_turn_metrics.jsonl',
-  'prompt_planner_metrics.jsonl',
   'config.json',
 ];
 

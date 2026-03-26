@@ -1,7 +1,8 @@
 /**
  * 向量库封装：LanceDB + embedding。与 v1 一致，路径为 v2 独立路径。
- * 检索最终方案（默认）：向量 ANN + MiniSearch(BM25 风格全文) 混合召回 → Top-K 池内余弦重排 → 时间衰减。
- * 关闭混合：ARIS_MEMORY_HYBRID=false 时回退为纯向量 + 时间衰减。
+ * 检索最终方案（默认）：混合召回 → 池内余弦融合 → RRF + 字面覆盖 第二阶段（memoryRerankStage2.js）→ 再乘向量层 sim/time 权重（默认时间权重 0）。
+ * 关闭混合：ARIS_MEMORY_HYBRID=false 时回退为纯向量 + 可选时间项。
+ * 回退旧排序：ARIS_MEMORY_FINAL_STAGE2=false 时为「混合+余弦+时间衰减」旧行为。
  */
 const fs = require('fs');
 const MiniSearch = require('minisearch');
@@ -15,6 +16,7 @@ const {
   VECTOR_SIMILARITY_WEIGHT,
   VECTOR_TIME_WEIGHT,
 } = require('../config/constants.js');
+const { computeRrfAndLexical } = require('./memoryRerankStage2.js');
 
 const OLLAMA_EMBED_URL = (process.env.OLLAMA_HOST || 'http://127.0.0.1:11434').replace('localhost', '127.0.0.1');
 const EMBED_MODEL = process.env.ARIS_EMBED_MODEL || 'nomic-embed-text';
@@ -217,6 +219,21 @@ function isHybridEnabled() {
   return true;
 }
 
+/** 第二阶段 RRF+字面+可选 HTTP rerank；false 时回退旧「仅混合余弦+时间」 */
+function isFinalStage2Enabled() {
+  const v = process.env.ARIS_MEMORY_FINAL_STAGE2;
+  if (v === 'false' || v === '0') return false;
+  return true;
+}
+
+function vectorSimWeight() {
+  return parseFloatEnv('ARIS_VECTOR_SIMILARITY_WEIGHT', VECTOR_SIMILARITY_WEIGHT);
+}
+
+function vectorTimeWeight() {
+  return parseFloatEnv('ARIS_VECTOR_TIME_WEIGHT', VECTOR_TIME_WEIGHT);
+}
+
 async function loadAllRowsRaw() {
   await getLance();
   if (!table) return [];
@@ -260,11 +277,13 @@ async function searchVectorOnly(queryText, limit, options) {
     raw = raw.filter((r) => rowMatchesEntities(r, filterByEntities));
   }
   if (!raw.length) return [];
+  const sw = vectorSimWeight();
+  const tw = vectorTimeWeight();
   const withScore = raw.map((r) => {
     const dist = r._distance != null ? r._distance : (r.distance != null ? r.distance : 0);
     const sim = 1 / (1 + dist);
     const decay = timeDecayFactor(r.created_at);
-    const score = VECTOR_SIMILARITY_WEIGHT * sim + VECTOR_TIME_WEIGHT * decay;
+    const score = sw * sim + tw * decay;
     return { ...r, _score: score };
   });
   withScore.sort((a, b) => (b._score || 0) - (a._score || 0));
@@ -347,10 +366,39 @@ async function searchHybridRerank(queryText, limit, options) {
   const wh = hSum > 1e-9 ? wHybrid / hSum : 0.5;
   const wc = hSum > 1e-9 ? wCos / hSum : 0.5;
 
+  const combined = pool.map((_, i) => wh * nHybrid[i] + wc * nCos[i]);
+
+  const sw = vectorSimWeight();
+  const tw = vectorTimeWeight();
+
+  if (!isFinalStage2Enabled()) {
+    const rerankedLegacy = pool.map((p, i) => {
+      const decay = timeDecayFactor(p.row.created_at);
+      const score = sw * combined[i] + tw * decay;
+      return { ...p.row, _score: score };
+    });
+    rerankedLegacy.sort((a, b) => (b._score || 0) - (a._score || 0));
+    return rerankedLegacy.slice(0, limit);
+  }
+
+  const kRrf = Math.max(1, Math.floor(parseFloatEnv('ARIS_RRF_K', 60)));
+  const { rrf, lexical } = computeRrfAndLexical(queryText, pool, vecById, bm25ById, cosScores, {
+    kRrf,
+  });
+  const nRrf = minMaxNormalize(rrf);
+  const nLex = minMaxNormalize(lexical);
+  const wR = parseFloatEnv('ARIS_RRF_FUSION_WEIGHT', 0.45);
+  const wC = parseFloatEnv('ARIS_HYBRID_COS_RESIDUAL_WEIGHT', 0.35);
+  const wL = parseFloatEnv('ARIS_LEXICAL_FUSION_WEIGHT', 0.2);
+  const sumW = wR + wC + wL;
+
+  const relevance = pool.map((_, i) =>
+    sumW > 1e-12 ? (wR * nRrf[i] + wC * combined[i] + wL * nLex[i]) / sumW : combined[i],
+  );
+
   const reranked = pool.map((p, i) => {
-    const combined = wh * nHybrid[i] + wc * nCos[i];
     const decay = timeDecayFactor(p.row.created_at);
-    const score = VECTOR_SIMILARITY_WEIGHT * combined + VECTOR_TIME_WEIGHT * decay;
+    const score = sw * relevance[i] + tw * decay;
     return { ...p.row, _score: score };
   });
   reranked.sort((a, b) => (b._score || 0) - (a._score || 0));

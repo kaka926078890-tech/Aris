@@ -1,5 +1,5 @@
 /**
- * 单轮对话观测：写入 dialogue_turn_metrics.jsonl（与 prompt_planner_metrics 并列）。
+ * 单轮对话观测：写入 dialogue_turn_metrics.jsonl。
  * 默认开启；设置 ARIS_DIALOGUE_METRICS_LOG=false 可关闭。
  */
 const fs = require('fs');

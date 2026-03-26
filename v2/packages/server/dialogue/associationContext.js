@@ -14,6 +14,8 @@ const DEFAULT_CONFIG = {
   summary_rounds_interval: 10,
   filter_experience_by_association: true,
   max_experience_results: 10,
+  /** search_memories 工具侧：是否对每条记忆再乘 24h 行级时间衰减；默认 false（相关性优先） */
+  memory_row_time_decay: false,
 };
 
 function getRetrievalConfigPath() {

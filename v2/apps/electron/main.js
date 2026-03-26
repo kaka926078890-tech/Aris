@@ -20,6 +20,7 @@ app.whenReady().then(() => {
   const { handleUserMessage, getPromptPreview, maybeProactiveMessage } = require('../../packages/server');
   const { exportToFile, importFromFile, importMergeFromFile } = require('./backup.js');
   const store = require('../../packages/store');
+  const { runSearchMemoriesPipeline } = require('../../packages/server/dialogue/tools/memory.js');
   const { resolveRendererIndexPath, PRELOAD_SCRIPT } = require('./config.js');
   const { ensureOllamaStarted, getOllamaStatus } = require('./ollama.js');
 
@@ -266,9 +267,22 @@ app.whenReady().then(() => {
     });
 
     ipcMain.handle('vector:search', async (_, query, limit) => {
-      if (!store.vector) return [];
-      const rows = await store.vector.search(String(query || ''), Number(limit) || 10);
-      return rows.map((r) => ({ ...serializeVectorRow(r), _score: Number(r._score) || 0 }));
+      const out = await runSearchMemoriesPipeline(String(query || ''), Number(limit) || 10);
+      return {
+        results: out.rows.map((r) => ({
+          ...serializeVectorRow(r),
+          _score: Number(r._score) || 0,
+          _keyword_boost: typeof r._keyword_boost === 'number' ? r._keyword_boost : 0,
+          _vector_layer_score: r._vector_layer_score != null ? Number(r._vector_layer_score) : undefined,
+          _memory_type_weight: r._memory_type_weight != null ? Number(r._memory_type_weight) : undefined,
+          _time_decay_factor: r._time_decay_factor != null ? Number(r._time_decay_factor) : undefined,
+          _score_after_type_time: r._score_after_type_time != null ? Number(r._score_after_type_time) : undefined,
+        })),
+        smartQuery: out.smartQuery,
+        originalQuery: out.originalQuery,
+        filterByAssociation: out.filterByAssociation,
+        meta: out.meta || null,
+      };
     });
 
     ipcMain.handle('vector:getRecent', async (_, type, limit) => {
@@ -368,10 +382,6 @@ app.whenReady().then(() => {
     ipcMain.handle('config:get', () => ({ ...readConfig(), dataDir: getDataDir() }));
     ipcMain.handle('config:set', (_, data) => {
       writeConfig(data || {});
-      try {
-        const net = require('../../packages/server/dialogue/tools/network.js');
-        if (net.clearNetworkConfigCache) net.clearNetworkConfigCache();
-      } catch (_) {}
       return { ok: true };
     });
 
