@@ -1,174 +1,107 @@
 # Aris v3 Backend Architecture
 
-## Goal from first principles
+## Design principle
 
-The core product value is not "many features", but stable, high-quality conversation with memory continuity.
-So the architecture should optimize for:
+The core product value is stable, high-quality conversation with memory continuity.
+Architecture optimises for: reliable answer quality → explainable prompt assembly → low-friction feature growth.
 
-1. reliable answer quality,
-2. explainable prompt assembly,
-3. low-friction feature growth.
+## Language & framework
 
-## Backend language decision
+**TypeScript + Node.js + Fastify**
 
-### MVP
-
-- **TypeScript + Node.js + Fastify**
-- **Reason**: fastest path to deliver because current Aris stack and team context already fit JS/Node.
-
-### Final
-
-- Keep TypeScript unless throughput and cost profiling prove a hard bottleneck.
-- If bottleneck appears, move only hot paths (embedding batch jobs / retrieval workers) to Rust or Go as isolated services, not full rewrite.
-
-## Capacity boundaries (current baseline)
-
-Only two required abilities:
-
-1. chat through API,
-2. local storage of conversation + vector data.
-
-Everything else should be optional plugins, not hardwired into the chat loop.
+- Current Aris stack is Node; lowest migration cost.
+- The hard problem is prompt orchestration and memory recall, not raw throughput.
+- If profiling reveals a hot path, move only that slice (embedding batch worker) to Rust/Go as an isolated service.
 
 ## Layered architecture
 
-### 1) API Layer
+```
+┌──────────────────────────────────────┐
+│  API Layer  (Fastify routes)         │  ← HTTP, validation, error shaping
+├──────────────────────────────────────┤
+│  Application Layer                   │  ← ChatService, PromptBuilder,
+│  (orchestration, no I/O details)     │    RetrievalService, EmbeddingQueue
+├──────────────────────────────────────┤
+│  Domain Types & Policies             │  ← Entities, token budgets, policy config
+├──────────────────────────────────────┤
+│  Infrastructure Layer                │  ← LLM client, embedding client,
+│  (adapters, swappable)               │    SQLite DB, local vector store
+└──────────────────────────────────────┘
+```
 
-- `POST /chat`: receive user input and return assistant output.
-- `GET /conversations/:id/messages`: read local message history.
-- `POST /conversations/:id/reindex`: rebuild vectors for old messages.
+## Prompt pipeline (per turn)
 
-Responsibility: request validation, auth (if needed later), response shaping.
+1. **Input** — user message arrives via `POST /chat`.
+2. **Memory recall** — recent N turns (short-term) + top-K semantic hits from vector store (long-term).
+3. **Policy composition** — persona baseline + boundary constraints + retrieval context, governed by `PromptPolicyConfig`.
+4. **Prompt packaging** — `PromptBuilder` assembles system/memory/user blocks within token budget.
+5. **LLM call** — OpenAI-compatible API via `ILLMClient` adapter.
+6. **Persistence** — user + assistant messages stored in SQLite; embeddings enqueued asynchronously.
 
-### 2) Application Layer (Orchestration)
-
-- `ChatService`: one-turn orchestration.
-- `PromptBuilder`: compose system + policy + memory snippets.
-- `MemoryService`: store/retrieve structured conversation records.
-- `RetrievalService`: semantic recall by vector search.
-
-Responsibility: business flow, no storage engine details.
-
-### 3) Domain Layer
-
-- Entities: `Conversation`, `Message`, `MemoryChunk`, `EmbeddingVector`.
-- Value objects: `Role`, `TokenBudget`, `PromptPackage`.
-- Policies: truncation rules, retrieval thresholds, dedupe rules.
-
-Responsibility: pure rules and invariants.
-
-### 4) Infrastructure Layer
-
-- LLM client adapter (OpenAI-compatible API).
-- Embedding adapter.
-- Local DB adapter.
-- Local vector index adapter.
-
-Responsibility: external I/O and concrete implementation.
-
-## Prompt pipeline decomposition (explicit and inspectable)
-
-For each turn:
-
-1. **Input normalization**: sanitize role/content metadata.
-2. **Memory recall**:
-   - recent N turns (short-term),
-   - top-K semantic hits (long-term vectors).
-3. **Policy composition**:
-   - persona baseline,
-   - boundary/risk constraints,
-   - optional runtime flags.
-4. **Prompt packaging**:
-   - system block,
-   - memory block (trimmed by token budget),
-   - user block.
-5. **LLM call**.
-6. **Persistence**:
-   - append conversation messages,
-   - embed and index new text asynchronously (or sync in MVP).
-
-This keeps prompt behavior debuggable and prevents hidden coupling.
+The entire prompt payload is inspectable via `includeTrace: true` in the chat request.
 
 ## Storage design
 
-### MVP (simple + local-first)
+**SQLite (local-first, single file)**
 
-- SQLite file for structured data.
-- One local vector store implementation:
-  - preferred: SQLite + vector extension,
-  - fallback: lightweight file-based index with cosine search.
-
-Tables (minimum):
-
+Tables:
 - `conversations(id, title, created_at, updated_at)`
 - `messages(id, conversation_id, role, content, created_at, token_count, metadata_json)`
-- `message_embeddings(message_id, model, dimension, vector_blob, created_at)`
+- `embeddings(id, message_id, model, dimension, vector_json, created_at)`
 
-### Final (scalable)
+Vectors stored as JSON arrays in SQLite. In-memory cache loaded on first query for cosine similarity search.
 
-- Keep data interfaces stable.
-- Allow adapter swap:
-  - SQLite -> Postgres,
-  - local vector index -> pgvector / Qdrant / Milvus.
-- Add migration + backfill workers.
+**Adapter swap path**: keep `IConversationRepo`, `IMessageRepo`, `IVectorStore` interfaces stable → swap SQLite → Postgres, local vectors → pgvector/Qdrant, with zero app-layer changes.
 
-## Suggested folder split
+## Async embedding queue
 
-```txt
-v3/serve/
-  src/
-    api/
-      routes/
-      schemas/
-    app/
-      chat/
-      memory/
-      retrieval/
-      prompt/
-    domain/
-      entities/
-      policies/
-      types/
-    infra/
-      llm/
-      embedding/
-      db/
-      vector/
-    shared/
-      config/
-      logger/
-      errors/
-  docs/
-    adr/
+`EmbeddingQueue` processes embeddings in background after each turn:
+- Configurable concurrency and retry policy.
+- Does not block the chat response.
+- Swap to Bull/BullMQ for multi-worker production setups.
+
+## Implemented modules
+
+```
+src/
+  index.ts              — entry, wires all layers
+  config.ts             — typed env config with defaults
+  logger.ts             — pino logger
+  errors.ts             — AppError, NotFoundError, LLMError, EmbeddingError
+  types.ts              — all domain types + adapter interfaces
+
+  infra/
+    database.ts         — SQLite + migration runner (WAL mode, foreign keys)
+    conversationRepo.ts — IConversationRepo impl
+    messageRepo.ts      — IMessageRepo impl
+    llmClient.ts        — OpenAI-compatible ILLMClient
+    embeddingClient.ts  — OpenAI-compatible IEmbeddingClient
+    vectorStore.ts      — IVectorStore with in-memory cosine search
+    embeddingQueue.ts   — async background embedding with retries
+
+  app/
+    chatService.ts      — main orchestrator (1 turn = retrieve → build → call → persist → embed)
+    promptBuilder.ts    — token-budgeted prompt assembly
+    promptPolicy.ts     — policy config + token estimator
+    retrievalService.ts — embed query → vector search → hydrate messages
+
+  api/
+    server.ts           — Fastify setup, CORS, error handler
+    chatRoute.ts        — POST /chat
+    conversationRoute.ts— conversation CRUD + message listing
 ```
 
-## MVP delivery plan
+## Evolution roadmap
 
-1. Build `POST /chat` end-to-end with plain prompt + API call.
-2. Persist messages in local SQLite.
-3. Add embedding generation for assistant/user messages.
-4. Add top-K retrieval and inject into prompt.
-5. Add trace log for prompt package and retrieval hits.
+1. **Configurable prompt policy engine** — load persona/template from file or DB, hot-reload.
+2. **Memory compaction** — summarise old turns to fit more history in budget.
+3. **Multi-model routing** — fast model for simple turns, reasoning model for complex ones.
+4. **Observability** — latency, token, retrieval quality dashboards.
+5. **Plugin surface** — tool/function-call registration for extensibility.
+6. **Storage scaling** — swap SQLite → Postgres + pgvector when data outgrows single-node.
 
-Exit criteria:
+## Non-goals (current phase)
 
-- Can start/reopen conversations.
-- New turn can recall semantically related old content.
-- Prompt payload is inspectable for debugging.
-
-## Final architecture evolution
-
-1. asynchronous embedding queue (reduce latency),
-2. configurable prompt policy engine,
-3. memory compaction and summarization pipeline,
-4. multi-model routing (reasoning vs fast model),
-5. observability: latency, token, retrieval quality dashboards,
-6. plugin surface for tools and function calls.
-
-## Non-goals (for now)
-
-- no multi-tenant distributed architecture in phase 1,
-- no premature microservice split,
-- no giant static rule lists inside system prompt.
-
-Keep the core loop small, inspectable, and replaceable.
+- No multi-tenant / distributed architecture.
+- No premature microservice split.
+- No giant static rule lists in system prompt.
