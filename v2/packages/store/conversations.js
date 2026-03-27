@@ -41,7 +41,7 @@ async function append(sessionId, role, content) {
 async function getRecent(sessionId, limit = 20) {
   const db = await getDb();
   const stmt = db.prepare(
-    'SELECT role, content, created_at FROM conversations WHERE session_id = ? ORDER BY created_at DESC LIMIT ?'
+    'SELECT role, content, created_at FROM conversations WHERE session_id = ? ORDER BY created_at DESC, id DESC LIMIT ?'
   );
   stmt.bind([sessionId, limit]);
   const rows = [];
@@ -53,7 +53,7 @@ async function getRecent(sessionId, limit = 20) {
 async function getAllForSession(sessionId) {
   const db = await getDb();
   const stmt = db.prepare(
-    'SELECT role, content, created_at FROM conversations WHERE session_id = ? ORDER BY created_at ASC'
+    'SELECT role, content, created_at FROM conversations WHERE session_id = ? ORDER BY created_at ASC, id ASC'
   );
   stmt.bind([sessionId]);
   const rows = [];
@@ -65,12 +65,12 @@ async function getAllForSession(sessionId) {
 async function getAllSessions() {
   const db = await getDb();
   const stmt = db.prepare(
-    'SELECT session_id, MAX(created_at) AS last_at FROM conversations GROUP BY session_id ORDER BY last_at DESC'
+    'SELECT session_id, MAX(id) AS last_id, MAX(created_at) AS last_at FROM conversations GROUP BY session_id ORDER BY last_at DESC, last_id DESC'
   );
   const rows = [];
   while (stmt.step()) rows.push(stmt.get());
   stmt.free();
-  return rows.map(([session_id, last_at]) => ({ session_id, last_at }));
+  return rows.map(([session_id, _last_id, last_at]) => ({ session_id, last_at }));
 }
 
 async function clearAllConversations() {
@@ -84,7 +84,7 @@ async function clearAllConversations() {
 async function getRecentFromOtherSessions(currentSessionId, limit = 40) {
   const db = await getDb();
   const stmt = db.prepare(
-    'SELECT role, content, created_at FROM conversations WHERE session_id != ? ORDER BY created_at DESC LIMIT ?'
+    'SELECT role, content, created_at FROM conversations WHERE session_id != ? ORDER BY created_at DESC, id DESC LIMIT ?'
   );
   stmt.bind([currentSessionId, limit]);
   const rows = [];
@@ -113,7 +113,7 @@ async function getConversationAroundTime(sessionId, aroundTimeIso, windowSeconds
   const hi = t + windowSeconds;
   const db = await getDb();
   const stmt = db.prepare(
-    'SELECT role, content, created_at FROM conversations WHERE session_id = ? AND created_at >= ? AND created_at <= ? ORDER BY created_at ASC'
+    'SELECT role, content, created_at FROM conversations WHERE session_id = ? AND created_at >= ? AND created_at <= ? ORDER BY created_at ASC, id ASC'
   );
   stmt.bind([sessionId, lo, hi]);
   const rows = [];

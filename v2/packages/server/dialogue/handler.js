@@ -19,6 +19,7 @@ const {
 } = require('../../config/constants.js');
 const { shouldBeQuiet, isResumingDialogue } = require('./quietResume.js');
 const { appendDialogueTurnMetricLine } = require('./dialogueMetrics.js');
+const { buildTurnControl, finalizeLedger } = require('./turnControl.js');
 const asyncOutbox = require('../../store/async_outbox.js');
 const crypto = require('crypto');
 
@@ -82,14 +83,18 @@ async function recordMonitorEstimatedTurnRow(sessionId, inputTokens, outputToken
 }
 
 async function buildPromptContext(sessionId, recent, options = {}) {
-  const dto = await buildContextDTO(sessionId, recent);
+  const dto = await buildContextDTO(sessionId, recent, options);
   const plan = CHATBOT_CONTEXT_PLAN;
   const { messages, stableSystemPrompt } = buildMainDialogueMessages(dto, plan, recent);
+  const trace = dto && dto.resolvedPolicy && dto.resolvedPolicy.trace ? dto.resolvedPolicy.trace : null;
   const out = {
     systemPrompt: stableSystemPrompt,
     messages,
+    resolvedPolicy: dto ? dto.resolvedPolicy : null,
     metrics: {
       system_chars: stableSystemPrompt.length,
+      policy_conflicts: trace && Array.isArray(trace.conflicts) ? trace.conflicts.length : 0,
+      policy_decisions: trace && Array.isArray(trace.decisions) ? trace.decisions.length : 0,
     },
   };
   if (options.includeLegacySystem) {
@@ -174,10 +179,21 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
 
   const tTurnStart = performance.now();
   const recent = await facade.getRecentConversation(sessionId, RECENT_ROUNDS * 2 + 2);
+  const prevState = facade.getState() || {};
+  const turnControl = buildTurnControl({
+    userContent,
+    prevLedger: prevState.task_ledger || null,
+    recent,
+  });
+  facade.writeState({ task_ledger: turnControl.ledgerAtTurnStart });
   let hasOfficialUsage = false;
-  const { messages, metrics: ctxMetrics } = await buildPromptContext(sessionId, recent, { signal });
+  const { messages, metrics: ctxMetrics } = await buildPromptContext(sessionId, recent, {
+    signal,
+    turnControl,
+  });
   const sysLen = (messages[0] && messages[0].content) ? String(messages[0].content).length : 0;
   console.info('[Aris v2] 本轮 prompt: 稳定 system 约', sysLen, '字, API 消息数', messages.length);
+  console.info('[Aris v2] 本轮意图:', turnControl.intentType, '工具门控=', turnControl.toolGate.allowTools ? 'allow' : 'deny', '原因=', turnControl.toolGate.reason);
 
   let currentMessages = messages;
   let reply = '';
@@ -189,6 +205,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   let totalOutputTokens = 0;
   let embedMs = null;
   const MAX_TOOL_ROUNDS = getMaxToolRounds();
+  const maxToolRoundsThisTurn = turnControl.toolGate.allowTools ? MAX_TOOL_ROUNDS : 1;
   const fileToolMaxPerTurn = getFileToolMaxPerUserTurn();
   const allAgentActions = [];
   const toolRoundsDetail = [];
@@ -196,9 +213,10 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   const fileToolLimitMsg =
     `本回合文件类工具调用已达上限（${fileToolMaxPerTurn}），请直接说明目标路径或换种方式描述需求。`;
 
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+  const toolsForTurn = turnControl.toolGate.allowTools ? getTools() : [];
+  for (let round = 0; round < maxToolRoundsThisTurn; round++) {
     if (signal && signal.aborted) break;
-    const res = await chatWithTools(currentMessages, getTools(), signal);
+    const res = await chatWithTools(currentMessages, toolsForTurn, signal);
     if (res.aborted) break;
     reply = res.content || '';
     err = res.error;
@@ -219,7 +237,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
       content: assistantContent || null,
       tool_calls: res.tool_calls,
     };
-    const toolContext = { sessionId, recent, toolNames: getTools().map((t) => t.function.name) };
+    const toolContext = { sessionId, recent, toolNames: toolsForTurn.map((t) => t.function.name) };
     const toolResults = [];
     for (const tc of res.tool_calls) {
       const name = tc.function?.name;
@@ -269,6 +287,19 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   if (signal && signal.aborted) {
     const partial = (streamedContent || reply || '').trim() || '[已停止]';
     await facade.appendConversation(sessionId, 'assistant', partial);
+    const ledgerAfterAbort = finalizeLedger({
+      startLedger: turnControl.ledgerAtTurnStart,
+      intentType: turnControl.intentType,
+      userContent,
+      mergedUserText: turnControl.mergedUserText,
+      hadToolCalls,
+      toolRoundsDetail,
+      allAgentActions,
+      reply: partial,
+      err: false,
+      toolGate: turnControl.toolGate,
+    });
+    facade.writeState({ task_ledger: ledgerAfterAbort });
     return { content: partial, error: false, sessionId, aborted: true };
   }
 
@@ -288,6 +319,19 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
         if (signal && signal.aborted) {
           const partial = (streamedContent || reply || '').trim() || '[已停止]';
           await facade.appendConversation(sessionId, 'assistant', partial);
+          const ledgerAfterAbort = finalizeLedger({
+            startLedger: turnControl.ledgerAtTurnStart,
+            intentType: turnControl.intentType,
+            userContent,
+            mergedUserText: turnControl.mergedUserText,
+            hadToolCalls,
+            toolRoundsDetail,
+            allAgentActions,
+            reply: partial,
+            err: false,
+            toolGate: turnControl.toolGate,
+          });
+          facade.writeState({ task_ledger: ledgerAfterAbort });
           return { content: partial, error: false, sessionId, aborted: true };
         }
       }
@@ -325,6 +369,19 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
           if (signal && signal.aborted) {
             const partial = (streamedContent || reply || '').trim() || '[已停止]';
             await facade.appendConversation(sessionId, 'assistant', partial);
+            const ledgerAfterAbort = finalizeLedger({
+              startLedger: turnControl.ledgerAtTurnStart,
+              intentType: turnControl.intentType,
+              userContent,
+              mergedUserText: turnControl.mergedUserText,
+              hadToolCalls,
+              toolRoundsDetail,
+              allAgentActions,
+              reply: partial,
+              err: false,
+              toolGate: turnControl.toolGate,
+            });
+            facade.writeState({ task_ledger: ledgerAfterAbort });
             return { content: partial, error: false, sessionId, aborted: true };
           }
         }
@@ -349,11 +406,36 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     if (signal && signal.aborted) {
       const partial = (streamedContent || reply || '').trim() || '[已停止]';
       await facade.appendConversation(sessionId, 'assistant', partial);
+      const ledgerAfterAbort = finalizeLedger({
+        startLedger: turnControl.ledgerAtTurnStart,
+        intentType: turnControl.intentType,
+        userContent,
+        mergedUserText: turnControl.mergedUserText,
+        hadToolCalls,
+        toolRoundsDetail,
+        allAgentActions,
+        reply: partial,
+        err: false,
+        toolGate: turnControl.toolGate,
+      });
+      facade.writeState({ task_ledger: ledgerAfterAbort });
       return { content: partial, error: false, sessionId, aborted: true };
     }
   }
 
   await facade.appendConversation(sessionId, 'assistant', reply);
+  const finalLedger = finalizeLedger({
+    startLedger: turnControl.ledgerAtTurnStart,
+    intentType: turnControl.intentType,
+    userContent,
+    mergedUserText: turnControl.mergedUserText,
+    hadToolCalls,
+    toolRoundsDetail,
+    allAgentActions,
+    reply,
+    err,
+    toolGate: turnControl.toolGate,
+  });
 
   try {
     const prevRecent = await facade.getRecentConversation(sessionId, (DIALOGUE_CHUNK_PREV_ROUNDS + 1) * 2 + 2);
@@ -365,7 +447,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     if (asyncOutbox.isEnabled()) {
       facade.writeState({
         last_active_time: new Date().toISOString(),
-        last_mental_state: reply ? reply.slice(0, 300) : null,
+        task_ledger: finalLedger,
       });
       const enqueues = [];
       if (blockText) {
@@ -410,7 +492,7 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
 
       facade.writeState({
         last_active_time: new Date().toISOString(),
-        last_mental_state: reply ? reply.slice(0, 300) : null,
+        task_ledger: finalLedger,
       });
 
       if (store.monitor && store.monitor.recordTokenUsage && !hasOfficialUsage) {
@@ -431,6 +513,8 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
   const metricLine = {
     session_id: sessionId,
     system_chars: ctxMetrics && ctxMetrics.system_chars != null ? ctxMetrics.system_chars : sysLen,
+    policy_conflicts: ctxMetrics && ctxMetrics.policy_conflicts != null ? ctxMetrics.policy_conflicts : 0,
+    policy_decisions: ctxMetrics && ctxMetrics.policy_decisions != null ? ctxMetrics.policy_decisions : 0,
     tool_rounds: toolRoundsDetail.length,
     tool_rounds_detail: toolRoundsDetail,
     file_tool_calls: fileToolCount,
@@ -440,6 +524,11 @@ async function handleUserMessage(userContent, sendChunk, sendAgentActions, signa
     total_input_tokens: totalInputTokens,
     total_output_tokens: totalOutputTokens,
     had_tool_calls: hadToolCalls,
+    intent_type: turnControl.intentType,
+    tool_gate_allow: turnControl.toolGate.allowTools,
+    tool_gate_reason: turnControl.toolGate.reason,
+    interrupted_by_intent: turnControl.intentType === 'cancel' || turnControl.intentType === 'replace',
+    merged_user_inputs: turnControl.mergedUserCount,
   };
   if (asyncOutbox.isEnabled()) {
     try {
@@ -487,6 +576,7 @@ async function getPromptPreview(userMessage) {
   return {
     systemPrompt: ctx.systemPrompt,
     messages: ctx.messages,
+    resolvedPolicy: ctx.resolvedPolicy,
     mainSectionText,
     promptText,
   };

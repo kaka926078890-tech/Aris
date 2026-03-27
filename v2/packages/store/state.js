@@ -18,6 +18,7 @@ function readState() {
     return {
       last_active_time: data.last_active_time || null,
       last_mental_state: data.last_mental_state || null,
+      task_ledger: data.task_ledger && typeof data.task_ledger === 'object' ? data.task_ledger : null,
     };
   } catch (_) {
     return null;
@@ -30,6 +31,7 @@ function writeState(updates) {
     const data = {
       last_active_time: updates.last_active_time !== undefined ? updates.last_active_time : current.last_active_time,
       last_mental_state: updates.last_mental_state !== undefined ? updates.last_mental_state : current.last_mental_state,
+      task_ledger: updates.task_ledger !== undefined ? updates.task_ledger : current.task_ledger,
     };
     const dir = getDataDir();
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });

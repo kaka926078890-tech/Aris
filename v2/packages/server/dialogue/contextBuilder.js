@@ -5,7 +5,14 @@
 const store = require('../../store');
 const constraintsBrief = require('../../store/constraints_brief.js');
 const { getRelatedAssociationsLines } = require('./associationContext.js');
-const { readBehaviorConfig } = require('./prompt.js');
+const {
+  readBehaviorConfig,
+  CHATBOT_CONTEXT_PLAN,
+  SCENE_RULES_MAP,
+  SCENE_VOLATILE_ORDER,
+  SCENE_VOLATILE_TITLE,
+} = require('./prompt.js');
+const { resolvePromptPolicy } = require('./resolvedPolicy.js');
 
 const RECENT_ROUNDS = 3;
 
@@ -101,7 +108,7 @@ function formatRecentWindowForPlanner(recent) {
  * @param {string} sessionId
  * @param {Array} recent - 最近消息 [{ role, content, created_at }, ...]
  */
-async function buildContextDTO(sessionId, recent) {
+async function buildContextDTO(sessionId, recent, options = {}) {
   const facade = store.facade;
 
   const restartRecoveryInfo = facade.checkAndGetRestartRecovery();
@@ -148,15 +155,27 @@ async function buildContextDTO(sessionId, recent) {
       .join('\n') || '（暂无）';
   const state = facade.getState();
   const timeDesc = getSubjectiveTimeDescription(state?.last_active_time ?? null);
-  const rawState = state?.last_mental_state || '';
-  const lastStateLine = rawState ? `你上一次的状态/想法是：${rawState}` : '';
-  const lastStateAndSubjectiveTime = [timeDesc, lastStateLine].filter(Boolean).join('\n') || '（无）';
+  // 仅注入时间感，不把上一条 assistant 话术再次喂回主对话，避免形成回声式复述。
+  const lastStateAndSubjectiveTime = timeDesc || '（无）';
   const relatedAssociations = await getRelatedAssociationsLines(sessionId, recent);
   const recentSummary = facade.getSessionSummary(sessionId) || '（无）';
   const behavior = readBehaviorConfig();
   const emotionLine = behavior.inject_recent_emotion ? getRecentEmotionLine(facade.getRecentEmotions(1)) : '';
   const recentMessages = recent.slice(-(RECENT_ROUNDS * 2));
-  return {
+  const turnControl = options.turnControl && typeof options.turnControl === 'object' ? options.turnControl : null;
+  const taskLedgerSummary =
+    turnControl && turnControl.taskLedgerSummary
+      ? String(turnControl.taskLedgerSummary).trim()
+      : (state && state.task_ledger ? String(state.task_ledger.evidence_summary || '').trim() : '');
+  const currentTurnIntentBlock =
+    turnControl && turnControl.intentBlock
+      ? String(turnControl.intentBlock).trim()
+      : '意图分类：chitchat\n分类原因：fallback\n本轮用户消息：（空）';
+  const toolGateLine =
+    turnControl && turnControl.toolGate
+      ? `allow_tools=${turnControl.toolGate.allowTools ? 'true' : 'false'}; reason=${turnControl.toolGate.reason || 'unknown'}`
+      : 'allow_tools=true; reason=default';
+  const dto = {
     userIdentity,
     /** @deprecated 使用 userConstraintsFull + avoidPhrasesLine；保留兼容旧日志 */
     userConstraints: userConstraintsLegacy,
@@ -177,7 +196,16 @@ async function buildContextDTO(sessionId, recent) {
     emotionLine,
     recentMessages,
     restartRecoveryLine,
+    currentTurnIntentBlock,
+    taskLedgerSummary: taskLedgerSummary || '（无）',
+    toolGateLine,
   };
+  dto.resolvedPolicy = resolvePromptPolicy(dto, CHATBOT_CONTEXT_PLAN, {
+    sceneRulesMap: SCENE_RULES_MAP,
+    sceneOrder: SCENE_VOLATILE_ORDER,
+    sceneTitleMap: SCENE_VOLATILE_TITLE,
+  });
+  return dto;
 }
 
 module.exports = { buildContextDTO, formatMessageTime, getSubjectiveTimeDescription };

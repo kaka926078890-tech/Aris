@@ -4,6 +4,7 @@
 const path = require('path');
 const fs = require('fs');
 const { getBehaviorConfigPath, getMemoryDir } = require('../../config/paths.js');
+const { resolvePromptPolicy } = require('./resolvedPolicy.js');
 
 const PERSONA_PATH = path.join(__dirname, '..', '..', '..', 'persona.md');
 const RULES_PATH = path.join(__dirname, '..', '..', '..', 'rules.md');
@@ -23,9 +24,9 @@ const SCENE_MARKERS = {
 
 const SCENE_RULES_DEFAULT = {
   code_operation:
-    '【查代码/文件流程】需要定位实现时，可先 search_repo_text 按关键词找文件路径，再 get_dir_cache / get_read_file_cache；仅当缓存未命中或需最新全文时再 list_my_files / read_file（read_file 可 force_full），避免层层 list。',
+    '【查代码/文件流程】当需要查看项目内代码、定位文件或列目录时，必须先调用 get_dir_cache（查目录）或 get_read_file_cache（查已读文件摘要）；仅当缓存未命中或需要最新内容时再 list_my_files / read_file，避免重复探索。',
   memory_operation:
-    '【记忆路径】凡存放或读取自己的记忆、配置等文件，必须用 write_file/read_file 且 relative_path 以 memory/ 开头（如 memory/xxx.md），会写入或读取实例 memory 目录；可先调用 get_my_context 查看「实例 memory 目录」路径。每日首次对话时先 read_file("memory/todo.md")：按“自然日”判断（例如 23 号到 24 号算新的一天，不按 24 小时滚动）。若 todo.md 里记录的最近执行日期不是今天，则先判断并执行应做任务；执行完成后用 write_file 更新 todo.md 中「最近执行日期：YYYY-MM-DD」。若用户消息涉及待办、任务、计划进度、完成/取消任务，也必须先 read_file("memory/todo.md") 再判断与回复。禁止在项目根下新建 memory 文件夹或使用非 memory/ 前缀的路径存自己的数据。',
+    '【记忆路径】凡存放或读取自己的记忆、配置等文件，必须用 write_file/read_file 且 relative_path 以 memory/ 开头（如 memory/xxx.md），会写入或读取实例 memory 目录；可先调用 get_my_context 查看「实例 memory 目录」路径。禁止在项目根下新建 memory 文件夹或使用非 memory/ 前缀的路径存自己的数据。',
   restart:
     '【重启】当用户明确提出“重启/重新启动/重新开始/让应用像重新 npm start 一样启动”时，调用 restart_application 工具。参数默认 { mode: "npm_start" }；若重启后还要继续做“未完成的工具动作”，则在参数里加入 resume_tools: [{ tool_name, args }]。触发后不要再继续调用其它工具，只回复一句“正在重启应用/已触发重启”。',
 };
@@ -169,6 +170,7 @@ function buildStableSystemPrompt() {
     system += '\n你可以通过 read_file 阅读自己的代码与配置以理解行为与局限，但不得修改核心逻辑与安全相关配置；若用户要求「改自己的代码」需提醒并交由用户操作。';
   }
   system += '\n需要了解自身运行环境与能力边界时可调用 get_my_context。';
+  system += '\n当用户本轮明确提出新指令时，以本轮用户消息为最高优先级（安全边界除外）；其余上下文按系统注入顺序作为参考。';
   return system;
 }
 
@@ -188,7 +190,28 @@ function normConstraintText(x) {
 
 function pushRuleAckPair(pairs, userTitleBody) {
   pairs.push({ role: 'user', content: userTitleBody });
-  pairs.push({ role: 'assistant', content: '已记录。' });
+}
+
+function buildTurnControlPairs(dto) {
+  const pairs = [];
+  const push = (title, body) => {
+    const text = body != null && String(body).trim() ? String(body).trim() : '（无）';
+    pairs.push({ role: 'user', content: `${title}\n\n${text}` });
+    // 不再自动添加「已知悉」回复，让对话更自然
+  };
+  push('【本轮用户意图】', dto.currentTurnIntentBlock || '（无）');
+  push('【任务账本摘要】', dto.taskLedgerSummary || '（无）');
+  push('【工具门控】', dto.toolGateLine || 'allow_tools=true; reason=default');
+  return pairs;
+}
+
+function getResolvedPolicy(dto, plan) {
+  if (dto && dto.resolvedPolicy && typeof dto.resolvedPolicy === 'object') return dto.resolvedPolicy;
+  return resolvePromptPolicy(dto || {}, plan || {}, {
+    sceneRulesMap: SCENE_RULES_MAP,
+    sceneOrder: SCENE_VOLATILE_ORDER,
+    sceneTitleMap: SCENE_VOLATILE_TITLE,
+  });
 }
 
 /**
@@ -196,27 +219,12 @@ function pushRuleAckPair(pairs, userTitleBody) {
  * 顺序：要求 → 纠错 → 喜好（相对少变 → 相对多变）。
  */
 function buildConstraintRulePairs(dto, plan) {
-  const p = plan || {};
+  const policy = getResolvedPolicy(dto, plan);
   const pairs = [];
-  if (!isEmpty(dto.userIdentity)) {
-    pushRuleAckPair(pairs, '【用户身份】\n\n' + dto.userIdentity);
-  }
-  if (!isEmpty(dto.avoidPhrasesLine) && !String(dto.avoidPhrasesLine).includes('（未配置')) {
-    pushRuleAckPair(pairs, '【禁止用语】\n\n' + dto.avoidPhrasesLine);
-  }
-  const useFull = p.need_full_constraints === true;
-  if (useFull) {
-    pushRuleAckPair(pairs, '【用户要求】\n\n' + normConstraintText(dto.constraintsRequirementsText));
-    pushRuleAckPair(pairs, '【纠错记录】\n\n' + normConstraintText(dto.constraintsCorrectionsText));
-    pushRuleAckPair(pairs, '【用户喜好】\n\n' + normConstraintText(dto.constraintsPreferencesText));
-  } else if (dto.constraintsBriefRequirements != null || dto.constraintsBriefCorrections != null || dto.constraintsBriefPreferences != null) {
-    pushRuleAckPair(pairs, '【用户要求·摘要】\n\n' + normConstraintText(dto.constraintsBriefRequirements));
-    pushRuleAckPair(pairs, '【纠错·摘要】\n\n' + normConstraintText(dto.constraintsBriefCorrections));
-    pushRuleAckPair(pairs, '【用户喜好·摘要】\n\n' + normConstraintText(dto.constraintsBriefPreferences));
-  } else if (dto.constraintsBriefBlock && String(dto.constraintsBriefBlock).trim()) {
-    pushRuleAckPair(pairs, '【用户约束摘要】\n\n' + dto.constraintsBriefBlock);
-  } else if (!isEmpty(dto.userConstraintsFull)) {
-    pushRuleAckPair(pairs, '【用户约束】\n\n' + dto.userConstraintsFull);
+  for (const block of policy.constraintBlocks || []) {
+    const title = block && block.title ? String(block.title).trim() : '【用户约束】';
+    const body = normConstraintText(block ? block.body : '');
+    pushRuleAckPair(pairs, title + '\n\n' + body);
   }
   return pairs;
 }
@@ -227,46 +235,16 @@ function buildConstraintRulePairs(dto, plan) {
  * @returns {Array<{ role: string, content: string }>}
  */
 function buildVolatileContextPairs(dto, plan) {
-  const p = plan || {};
+  const policy = getResolvedPolicy(dto, plan);
   const pairs = [];
   const pushVol = (title, body) => {
     const b = body != null && String(body).trim() !== '' ? String(body).trim() : '（无）';
     pairs.push({ role: 'user', content: title + '\n\n' + b });
-    pairs.push({ role: 'assistant', content: '已知悉。' });
   };
-
-  const activeScenes = new Set(Array.isArray(p.scenes) ? p.scenes : []);
-  for (const key of SCENE_VOLATILE_ORDER) {
-    const text =
-      activeScenes.has(key) && SCENE_RULES_MAP[key] ? SCENE_RULES_MAP[key] : '（本回合未注入此场景）';
-    pushVol(SCENE_VOLATILE_TITLE[key] || '【场景】', text);
-  }
-
-  pushVol(
-    '【重启恢复信息】',
-    dto.restartRecoveryLine && String(dto.restartRecoveryLine).trim() ? dto.restartRecoveryLine : '（无）',
-  );
-
-  let relatedBody;
-  if (!p.need_related_associations) relatedBody = '（本回合未注入关联上下文）';
-  else if (!isEmpty(dto.relatedAssociations)) relatedBody = dto.relatedAssociations;
-  else relatedBody = '（无）';
-  pushVol('【相关关联】', relatedBody);
-
-  let summaryBody;
-  if (!p.need_session_summary) summaryBody = '（本回合未注入会话小结）';
-  else if (!isEmpty(dto.recentSummary)) summaryBody = dto.recentSummary;
-  else summaryBody = '（无）';
-  pushVol('【近期小结】（本会话中更早对话的摘要）', summaryBody);
-
-  const emo =
-    dto.emotionLine && String(dto.emotionLine).trim() ? String(dto.emotionLine).trim() : '（无）';
-  pushVol('【近期情感参考】', emo);
-
-  if (p.need_last_state !== false) {
-    pushVol('【状态与时间感】', normConstraintText(dto.lastStateAndSubjectiveTime));
-  } else {
-    pushVol('【状态与时间感】', '（本回合未注入）');
+  for (const block of policy.volatileBlocks || []) {
+    const title = block && block.title ? String(block.title).trim() : '【上下文】';
+    const body = normConstraintText(block ? block.body : '');
+    pushVol(title, body);
   }
 
   return pairs;
@@ -295,12 +273,20 @@ function buildHistoryMessages(recent) {
  */
 function buildMainDialogueMessages(dto, plan, recent) {
   const stableSystem = buildStableSystemPrompt();
+  const turnControlPairs = buildTurnControlPairs(dto);
   const rulePairs = buildConstraintRulePairs(dto, plan);
   const volatilePairs = buildVolatileContextPairs(dto, plan);
   const history = buildHistoryMessages(recent);
   const last = recent && recent.length ? recent[recent.length - 1] : null;
   const currentUser = { role: 'user', content: last ? String(last.content || '') : '' };
-  const messages = [{ role: 'system', content: stableSystem }, ...rulePairs, ...volatilePairs, ...history, currentUser];
+  const messages = [
+    { role: 'system', content: stableSystem },
+    ...turnControlPairs,
+    ...history,
+    ...rulePairs,
+    ...volatilePairs,
+    currentUser,
+  ];
   return { messages, stableSystemPrompt: stableSystem };
 }
 
@@ -309,65 +295,20 @@ function buildMainDialogueMessages(dto, plan, recent) {
  * @param {object} plan - 上下文计划（与 buildMainDialogueMessages 一致）
  */
 function buildSystemPrompt(dto, plan) {
-  const p = plan || {};
+  const policy = getResolvedPolicy(dto, plan);
   const blocks = [];
-
-  if (!isEmpty(dto.userIdentity)) blocks.push('【用户身份】\n\n' + dto.userIdentity);
-
-  if (!isEmpty(dto.avoidPhrasesLine) && !String(dto.avoidPhrasesLine).includes('（未配置')) {
-    blocks.push('【禁止用语】\n\n' + dto.avoidPhrasesLine);
+  for (const block of policy.constraintBlocks || []) {
+    const title = block && block.title ? String(block.title).trim() : '【用户约束】';
+    const body = normConstraintText(block ? block.body : '');
+    blocks.push(title + '\n\n' + body);
   }
-
-  const useFull = p.need_full_constraints === true;
-  if (useFull) {
-    blocks.push('【用户要求】\n\n' + normConstraintText(dto.constraintsRequirementsText));
-    blocks.push('【纠错记录】\n\n' + normConstraintText(dto.constraintsCorrectionsText));
-    blocks.push('【用户喜好】\n\n' + normConstraintText(dto.constraintsPreferencesText));
-  } else if (dto.constraintsBriefRequirements != null || dto.constraintsBriefCorrections != null || dto.constraintsBriefPreferences != null) {
-    blocks.push('【用户要求·摘要】\n\n' + normConstraintText(dto.constraintsBriefRequirements));
-    blocks.push('【纠错·摘要】\n\n' + normConstraintText(dto.constraintsBriefCorrections));
-    blocks.push('【用户喜好·摘要】\n\n' + normConstraintText(dto.constraintsBriefPreferences));
-  } else if (dto.constraintsBriefBlock && String(dto.constraintsBriefBlock).trim()) {
-    blocks.push('【用户约束摘要】\n\n' + dto.constraintsBriefBlock);
-  } else if (!isEmpty(dto.userConstraintsFull)) {
-    blocks.push('【用户约束】\n\n' + dto.userConstraintsFull);
-  }
-
-  const activeScenes = new Set(Array.isArray(p.scenes) ? p.scenes : []);
-  for (const key of SCENE_VOLATILE_ORDER) {
-    const text =
-      activeScenes.has(key) && SCENE_RULES_MAP[key] ? SCENE_RULES_MAP[key] : '（本回合未注入此场景）';
-    blocks.push((SCENE_VOLATILE_TITLE[key] || '【场景】') + '\n\n' + text);
-  }
-  blocks.push(
-    '【重启恢复信息】\n\n' +
-      (dto.restartRecoveryLine && String(dto.restartRecoveryLine).trim() ? dto.restartRecoveryLine : '（无）'),
-  );
-  if (!p.need_related_associations) {
-    blocks.push('【相关关联】\n\n（本回合未注入关联上下文）');
-  } else if (!isEmpty(dto.relatedAssociations)) {
-    blocks.push('【相关关联】\n\n' + dto.relatedAssociations);
-  } else {
-    blocks.push('【相关关联】\n\n（无）');
-  }
-  if (!p.need_session_summary) {
-    blocks.push('【近期小结】（本会话中更早对话的摘要）\n\n（本回合未注入会话小结）');
-  } else if (!isEmpty(dto.recentSummary)) {
-    blocks.push('【近期小结】（本会话中更早对话的摘要）\n\n' + dto.recentSummary);
-  } else {
-    blocks.push('【近期小结】（本会话中更早对话的摘要）\n\n（无）');
+  for (const block of policy.volatileBlocks || []) {
+    const title = block && block.title ? String(block.title).trim() : '【上下文】';
+    const body = normConstraintText(block ? block.body : '');
+    blocks.push(title + '\n\n' + body);
   }
   if (!isEmpty(dto.contextWindow)) blocks.push('【当前会话最近几轮】\n\n' + dto.contextWindow);
   if (!isEmpty(dto.behavioralRules)) blocks.push('【行为规则】\n\n' + dto.behavioralRules);
-  blocks.push(
-    '【近期情感参考】\n\n' +
-      (dto.emotionLine && String(dto.emotionLine).trim() ? dto.emotionLine.trim() : '（无）'),
-  );
-  if (p.need_last_state !== false) {
-    blocks.push('【状态与时间感】\n\n' + normConstraintText(dto.lastStateAndSubjectiveTime));
-  } else {
-    blocks.push('【状态与时间感】\n\n（本回合未注入）');
-  }
 
   return buildStableSystemPrompt() + '\n\n以下是你需要参考的上下文：\n\n' + blocks.join('\n\n');
 }
@@ -391,5 +332,7 @@ module.exports = {
   loadRules,
   readBehaviorConfig,
   SCENE_RULES_MAP,
+  SCENE_VOLATILE_ORDER,
+  SCENE_VOLATILE_TITLE,
   BASE_CONVERSATION_RULES,
 };
