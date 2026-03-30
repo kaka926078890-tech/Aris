@@ -1,94 +1,133 @@
-# Aris v3 Serve
+# aris_v3_serve
 
-TypeScript + Fastify backend for Aris — chat with LLM API, persist conversation history and vector embeddings locally.
+一个最小后端，只做三件事：
 
-## Quick start
+1. 固定中文人设；
+2. 调用 llm_api 对话；
+3. 本地保存聊天记录和向量数据。
+
+## 快速启动
 
 ```bash
 cd v3/serve
-cp .env.example .env        # fill in LLM_API_KEY at minimum
+cp .env.example .env
 npm install
-npm run dev                  # starts on http://localhost:3000
+npm run dev
 ```
 
-## API endpoints
+最少只需要配置 `DEEPSEEK_API_KEY`。
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | Health check |
-| POST | `/chat` | Send a message, get assistant reply |
-| GET | `/conversations` | List conversations |
-| GET | `/conversations/:id` | Get conversation detail |
-| GET | `/conversations/:id/messages` | Get message history |
-| DELETE | `/conversations/:id` | Delete conversation |
+## 接口
 
-### POST /chat
+- `GET /health`
+- `POST /chat`
+- `POST /chat/preview`（仅预览提示词，不落库、不调用对话模型）
+- `GET /conversations`
+- `GET /conversations/current`
+- `PUT /conversations/current`
+- `GET /conversations/:id`
+- `GET /conversations/:id/messages`
+- `DELETE /conversations/:id`
+- `DELETE /conversations`
+
+### post_/chat 请求体（snake_case）
 
 ```json
 {
-  "message": "hello",
-  "conversationId": "optional-existing-id",
-  "model": "optional-model-override",
-  "includeTrace": true
+  "message": "你好",
+  "conversation_id": "可选_已有会话_id",
+  "model": "可选_模型名",
+  "include_trace": false
 }
 ```
 
-Response includes `conversationId`, `message`, `model`, and optional `trace` (prompt package with token usage and retrieval hits for debugging).
+### 记忆检索（最终方案）
 
-## Architecture
+- 每轮会对两类内容做向量化并落库：
+  - 单条消息：`user` / `assistant` 各一条
+  - 对话片段：`用户+回复` 组合成一条 turn 片段
+- 每次对话会先做语义检索，再把召回记忆与最近轮历史一起打包进 prompt。
+- 默认不检索当前会话（避免与 recent history 重复），仅从历史会话召回，并按「片段优先 + 消息补充」融合。
+- 注入前会与 recent history 做归一化去重，避免重复文本二次注入。
+- Prompt 注入优先级：
+  1) 结构化长期记忆（身份/偏好/纠错）  
+  2) 语义召回记忆（跨会话）  
+  3) 最近聊天历史（较早历史自动降权为截断文本）
+- 这样可在不牺牲“长期记忆能力”的前提下，降低旧闲聊对当前语境的干扰。
 
-See `ARCHITECTURE.md` for full design rationale.
+### 聊天工具层（对齐 v2 最小聊天能力）
 
+`/chat` 已接入 function tools（自动工具调用，最多 3 轮）：
+
+- `record`
+  - `identity`：写用户信息（name/notes）
+  - `preference`：写喜好（topic/summary/source/tags）
+  - `correction`：写纠错（previous/correction）
+- `get_record`
+  - `identity` / `preferences` / `corrections`
+- `search_memories`
+  - 语义检索历史记忆（跨会话）
+- `get_current_time`
+  - 返回当前时间
+
+### 历史接口补充
+
+- `GET /conversations` 额外返回：
+  - `message_count`: 会话消息数
+  - `last_message_preview`: 最近一条消息预览
+  - `is_current`: 是否当前会话
+- `GET /conversations/:id/messages` 支持 `newest_first=true`（按最新优先返回）
+- `GET /conversations/current` 返回当前会话 id（可为 null）
+- `PUT /conversations/current` 请求体：
+
+```json
+{
+  "conversation_id": "会话_id_或_null"
+}
 ```
+
+## 当前结构
+
+```txt
 src/
-  index.ts              ← entry point, wires all layers
-  config.ts             ← typed env config
-  logger.ts             ← pino logger
-  errors.ts             ← structured error classes
-  types.ts              ← all domain types & adapter interfaces
-
-  infra/                ← external I/O adapters
-    database.ts         ← SQLite + migration runner
-    conversationRepo.ts ← conversation CRUD
-    messageRepo.ts      ← message CRUD
-    llmClient.ts        ← OpenAI-compatible chat
-    embeddingClient.ts  ← OpenAI-compatible embeddings
-    vectorStore.ts      ← local cosine similarity search
-    embeddingQueue.ts   ← async background embedding
-
-  app/                  ← business logic
-    chatService.ts      ← main orchestrator
-    promptBuilder.ts    ← prompt assembly
-    promptPolicy.ts     ← configurable policies
-    retrievalService.ts ← semantic recall
-
-  api/                  ← HTTP layer
-    server.ts           ← Fastify setup
-    chatRoute.ts        ← POST /chat
-    conversationRoute.ts ← conversation CRUD
+  index.ts
+  config.ts
+  logger.ts
+  errors.ts
+  types.ts
+  app/
+    promptPolicy.ts
+    promptBuilder.ts
+    chatService.ts
+    chatTools.ts
+  infra/
+    database.ts
+    conversationRepo.ts
+    messageRepo.ts
+    recordRepo.ts
+    llmClient.ts
+    embeddingClient.ts
+    vectorStore.ts
+  api/
+    server.ts
+    chatRoute.ts
+    conversationRoute.ts
 ```
 
-## Configuration
+## 配置项
 
-All configurable via environment variables. See `.env.example` for full list with defaults.
+以 `.env.example` 为准，文档与实现已同步。  
+重点配置：
 
-Key settings:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LLM_API_KEY` | (required) | API key for chat completions |
-| `LLM_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible endpoint |
-| `LLM_DEFAULT_MODEL` | `gpt-4o-mini` | Default chat model |
-| `EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model |
-| `ARIS_DATA_DIR` | `./data` | SQLite + data storage path |
-| `RETRIEVAL_ENABLED` | `true` | Enable semantic memory recall |
-| `PROMPT_RECENT_TURNS` | `10` | Recent turns to include in prompt |
-
-## Scripts
-
-```bash
-npm run dev        # dev server with hot reload (tsx watch)
-npm run build      # compile to dist/
-npm run start      # run compiled output
-npm run typecheck  # type-only check, no emit
-```
+- `DEEPSEEK_API_KEY`
+- `DEEPSEEK_API_URL`
+- `LLM_DEFAULT_MODEL`
+- `OLLAMA_HOST`
+- `ARIS_EMBED_MODEL`
+- `ARIS_V2_DATA_DIR`
+- `PROMPT_RECENT_TURNS`
+- `PROMPT_RETRIEVAL_ENABLED`
+- `PROMPT_RETRIEVAL_TOP_K_TURN`
+- `PROMPT_RETRIEVAL_TOP_K_MESSAGE`
+- `PROMPT_RETRIEVAL_SCORE_THRESHOLD`
+- `PROMPT_RETRIEVAL_EXCLUDE_CURRENT_CONVERSATION`

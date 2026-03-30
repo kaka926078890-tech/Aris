@@ -1,0 +1,5 @@
+{
+  "name": "Aris v2 AI Chat Console",
+  "description": "A comprehensive AI chat console with vector database, memory management, and monitoring features.",
+  "requestFramePermissions": []
+}

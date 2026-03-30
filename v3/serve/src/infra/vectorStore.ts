@@ -13,6 +13,8 @@ interface EmbeddingRow {
   vector_json: string;
   message_id: string;
   conversation_id: string;
+  source_kind: 'message' | 'turn';
+  source_text: string;
 }
 
 /**
@@ -29,7 +31,13 @@ export class LocalVectorStore implements IVectorStore {
     const db = getDatabase();
     const rows = db
       .prepare(
-        `SELECT e.id, e.vector_json, e.message_id, m.conversation_id
+        `SELECT
+          e.id,
+          e.vector_json,
+          e.message_id,
+          m.conversation_id,
+          e.source_kind,
+          e.source_text
          FROM embeddings e
          JOIN messages m ON m.id = e.message_id`,
       )
@@ -40,8 +48,10 @@ export class LocalVectorStore implements IVectorStore {
         id: row.id,
         vector: JSON.parse(row.vector_json),
         metadata: {
-          messageId: row.message_id,
-          conversationId: row.conversation_id,
+          message_id: row.message_id,
+          conversation_id: row.conversation_id,
+          source_kind: row.source_kind ?? 'message',
+          source_text: row.source_text ?? '',
         },
       });
     }
@@ -60,10 +70,20 @@ export class LocalVectorStore implements IVectorStore {
     const json = JSON.stringify(vector);
 
     db.prepare(
-      `INSERT INTO embeddings (id, message_id, model, dimension, vector_json)
-       VALUES (?, ?, 'default', ?, ?)
-       ON CONFLICT(id) DO UPDATE SET vector_json = excluded.vector_json`,
-    ).run(id, metadata.messageId, vector.length, json);
+      `INSERT INTO embeddings (id, message_id, model, dimension, vector_json, source_kind, source_text)
+       VALUES (?, ?, 'default', ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         vector_json = excluded.vector_json,
+         source_kind = excluded.source_kind,
+         source_text = excluded.source_text`,
+    ).run(
+      id,
+      metadata.message_id,
+      vector.length,
+      json,
+      metadata.source_kind,
+      metadata.source_text,
+    );
 
     this.cache.set(id, { id, vector, metadata });
   }
@@ -72,6 +92,10 @@ export class LocalVectorStore implements IVectorStore {
     vector: number[],
     topK: number,
     threshold = 0.0,
+    options?: {
+      source_kinds?: Array<'message' | 'turn'>;
+      conversation_id?: string;
+    },
   ): Promise<Array<{ id: string; score: number; metadata: VectorMeta }>> {
     this.ensureCache();
 
@@ -85,6 +109,19 @@ export class LocalVectorStore implements IVectorStore {
     }> = [];
 
     for (const entry of this.cache.values()) {
+      if (
+        options?.conversation_id &&
+        entry.metadata.conversation_id !== options.conversation_id
+      ) {
+        continue;
+      }
+      if (
+        options?.source_kinds &&
+        options.source_kinds.length > 0 &&
+        !options.source_kinds.includes(entry.metadata.source_kind)
+      ) {
+        continue;
+      }
       const score = cosine(vector, qNorm, entry.vector);
       if (score >= threshold) {
         scored.push({ id: entry.id, score, metadata: entry.metadata });

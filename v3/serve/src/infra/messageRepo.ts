@@ -13,10 +13,10 @@ interface MessageRow {
 
 export class MessageRepo implements IMessageRepo {
   create(
-    conversationId: string,
+    conversation_id: string,
     role: Role,
     content: string,
-    tokenCount?: number,
+    token_count?: number,
     metadata?: Record<string, unknown>,
   ): Message {
     const db = getDatabase();
@@ -27,38 +27,43 @@ export class MessageRepo implements IMessageRepo {
     db.prepare(
       `INSERT INTO messages (id, conversation_id, role, content, created_at, token_count, metadata_json)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, conversationId, role, content, now, tokenCount ?? null, metaJson);
+    ).run(id, conversation_id, role, content, now, token_count ?? null, metaJson);
 
     db.prepare(
       'UPDATE conversations SET updated_at = ? WHERE id = ?',
-    ).run(now, conversationId);
+    ).run(now, conversation_id);
 
     return {
       id,
-      conversationId,
+      conversation_id,
       role,
       content,
-      createdAt: now,
-      tokenCount: tokenCount ?? null,
+      created_at: now,
+      token_count: token_count ?? null,
       metadata: metadata ?? null,
     };
   }
 
-  findByConversation(
-    conversationId: string,
+  find_by_conversation(
+    conversation_id: string,
     limit = 200,
     offset = 0,
+    order: 'asc' | 'desc' = 'asc',
   ): Message[] {
     const db = getDatabase();
+    const orderBy = order === 'desc' ? 'DESC' : 'ASC';
     const rows = db
       .prepare(
-        'SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?',
+        `SELECT * FROM messages
+         WHERE conversation_id = ?
+         ORDER BY created_at ${orderBy}, id ${orderBy}
+         LIMIT ? OFFSET ?`,
       )
-      .all(conversationId, limit, offset) as MessageRow[];
+      .all(conversation_id, limit, offset) as MessageRow[];
     return rows.map(toEntity);
   }
 
-  findById(id: string): Message | null {
+  find_by_id(id: string): Message | null {
     const db = getDatabase();
     const row = db
       .prepare('SELECT * FROM messages WHERE id = ?')
@@ -66,13 +71,13 @@ export class MessageRepo implements IMessageRepo {
     return row ? toEntity(row) : null;
   }
 
-  countByConversation(conversationId: string): number {
+  count_by_conversation(conversation_id: string): number {
     const db = getDatabase();
     const row = db
       .prepare(
         'SELECT COUNT(*) as cnt FROM messages WHERE conversation_id = ?',
       )
-      .get(conversationId) as { cnt: number };
+      .get(conversation_id) as { cnt: number };
     return row.cnt;
   }
 }
@@ -80,11 +85,11 @@ export class MessageRepo implements IMessageRepo {
 function toEntity(row: MessageRow): Message {
   return {
     id: row.id,
-    conversationId: row.conversation_id,
+    conversation_id: row.conversation_id,
     role: row.role as Role,
     content: row.content,
-    createdAt: row.created_at,
-    tokenCount: row.token_count,
+    created_at: row.created_at,
+    token_count: row.token_count,
     metadata: row.metadata_json ? JSON.parse(row.metadata_json) : null,
   };
 }

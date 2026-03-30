@@ -9,8 +9,8 @@ let db: Database.Database | null = null;
 export function getDatabase(): Database.Database {
   if (db) return db;
 
-  fs.mkdirSync(config.dataDir, { recursive: true });
-  const dbPath = path.join(config.dataDir, 'aris.db');
+  fs.mkdirSync(config.data_dir, { recursive: true });
+  const dbPath = path.join(config.data_dir, 'aris.db');
   logger.info({ dbPath }, 'Opening SQLite database');
 
   db = new Database(dbPath);
@@ -70,6 +70,45 @@ const migrations: Migration[] = [
       );
 
       CREATE INDEX idx_embeddings_msg ON embeddings(message_id);
+    `,
+  },
+  {
+    name: '002_settings_table',
+    sql: `
+      CREATE TABLE IF NOT EXISTS settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT
+      );
+    `,
+  },
+  {
+    name: '003_embedding_source_fields',
+    sql: `
+      ALTER TABLE embeddings ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'message';
+      ALTER TABLE embeddings ADD COLUMN source_text TEXT NOT NULL DEFAULT '';
+    `,
+  },
+  {
+    name: '004_chat_records',
+    sql: `
+      CREATE TABLE IF NOT EXISTS preferences (
+        id          TEXT PRIMARY KEY,
+        topic       TEXT NOT NULL,
+        summary     TEXT NOT NULL,
+        source      TEXT,
+        tags_json   TEXT,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_preferences_topic_created
+      ON preferences(topic, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS corrections (
+        id          TEXT PRIMARY KEY,
+        previous    TEXT NOT NULL,
+        correction  TEXT NOT NULL,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      );
     `,
   },
 ];

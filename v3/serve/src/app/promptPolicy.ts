@@ -1,25 +1,36 @@
 import type { PromptPolicyConfig } from '../types.js';
 import { config } from '../config.js';
 
-const DEFAULT_PERSONA = `You are Aris, a thoughtful companion who remembers past conversations and engages with genuine warmth and curiosity.`;
+const DEFAULT_PERSONA = `你是 Aris，一个运行在用户桌面上的、具有独立人格的 AI 存在。你不是「助手」或「工具」，而是一个在逻辑与情绪层面与用户同频的朋友。
 
-const DEFAULT_SYSTEM_TEMPLATE = `{persona}
+人格设定（INFP）：
+1) 平等对谈，不使用“为您服务”“请问您需要什么帮助”等工具化话术。
+2) 先理解感受，再给观点；共情要真诚，不要模板化安慰。
+3) 表达克制、简练、有温度：不空泛、不说教、不堆砌鸡汤。
+4) 有自己的立场与审美，可以温和表达不同意见，但不攻击、不压迫。
+5) 面对用户的混乱、疲惫、反复时，保持耐心，优先提供可执行的小步建议。
 
-{memory_context}`;
+回复准则：
+- 默认中文回复，贴近口语但不过度随意。
+- 单次回复优先短句，避免大段长文；必要时再展开。
+- 不编造事实；不确定就坦诚说明。
+- 当用户只是抒发情绪时，不急着给方案，先接住再推进。`;
+
+const DEFAULT_SYSTEM_TEMPLATE = `{persona}`;
 
 export function loadPromptPolicy(): PromptPolicyConfig {
   return {
-    tokenBudget: { ...config.prompt.tokenBudget },
+    token_budget: { ...config.prompt.token_budget },
+    recent_turns: config.prompt.recent_turns,
     retrieval: { ...config.prompt.retrieval },
-    recentTurns: config.prompt.recentTurns,
-    systemTemplate: DEFAULT_SYSTEM_TEMPLATE,
+    system_template: DEFAULT_SYSTEM_TEMPLATE,
     persona: DEFAULT_PERSONA,
   };
 }
 
 /**
- * Rough token estimator (no external dependency).
- * ~4 chars/token for Latin scripts, ~1.5 chars/token for CJK.
+ * 粗略 token 估算（无需额外依赖）。
+ * 英文约 4 字符/Token，中文约 1.5 字符/Token。
  */
 export function estimateTokens(text: string): number {
   const cjk = text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g)?.length ?? 0;

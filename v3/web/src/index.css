@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #fdfdfb;
+  --color-ink: #1a1a1a;
+  --color-brush: #333333;
+  --color-mist: #f5f5f5;
+  --color-border-ink: #e0e0e0;
+}
+
+@layer base {
+  body {
+    @apply bg-paper text-ink antialiased;
+    font-family: "Inter", "Noto Sans SC", sans-serif;
+  }
+}
+
+.ink-shadow {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+}
+
+.ink-border {
+  border: 1px solid var(--color-border-ink);
+}
+
+/* Scrollbar styling for ink theme */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d1d1d1;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #b1b1b1;
+}

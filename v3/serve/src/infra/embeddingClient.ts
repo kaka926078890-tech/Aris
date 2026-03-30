@@ -8,9 +8,10 @@ export class OpenAIEmbeddingClient implements IEmbeddingClient {
   private client: OpenAI;
 
   constructor() {
+    const base = config.embedding.base_url.replace(/\/+$/, '');
     this.client = new OpenAI({
-      apiKey: config.embedding.apiKey,
-      baseURL: config.embedding.baseUrl,
+      apiKey: config.embedding.api_key || 'ollama',
+      baseURL: base.endsWith('/v1') ? base : `${base}/v1`,
     });
   }
 
@@ -27,7 +28,6 @@ export class OpenAIEmbeddingClient implements IEmbeddingClient {
       const res = await this.client.embeddings.create({
         model: config.embedding.model,
         input: texts,
-        dimensions: config.embedding.dimension,
       });
 
       const vectors = res.data

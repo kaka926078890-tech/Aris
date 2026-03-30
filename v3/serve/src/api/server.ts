@@ -18,9 +18,35 @@ export async function createServer(deps: ServerDeps) {
 
   await app.register(cors, { origin: true });
 
+  app.addHook('onRequest', async (request) => {
+    logger.info(
+      {
+        method: request.method,
+        url: request.url,
+        params: sanitizePayload(request.params),
+        query: sanitizePayload(request.query),
+        body: sanitizePayload(request.body),
+      },
+      'HTTP request',
+    );
+  });
+
+  app.addHook('onSend', async (request, reply, payload) => {
+    logger.info(
+      {
+        method: request.method,
+        url: request.url,
+        status_code: reply.statusCode,
+        response_body: sanitizePayload(parsePayload(payload)),
+      },
+      'HTTP response',
+    );
+    return payload;
+  });
+
   app.setErrorHandler((error: Error, _request, reply) => {
     if (error instanceof AppError) {
-      logger.warn({ code: error.code, message: error.message }, 'App error');
+      logger.warn({ code: error.code, message: error.message }, '应用错误');
       return reply.status(error.statusCode).send({
         error: error.code,
         message: error.message,
@@ -36,10 +62,10 @@ export async function createServer(deps: ServerDeps) {
       });
     }
 
-    logger.error({ err: error }, 'Unhandled error');
+    logger.error({ err: error }, '未处理异常');
     return reply.status(500).send({
       error: 'INTERNAL_ERROR',
-      message: 'An unexpected error occurred',
+      message: '服务内部错误',
     });
   });
 
@@ -49,4 +75,28 @@ export async function createServer(deps: ServerDeps) {
   registerConversationRoutes(app, deps.conversationRepo, deps.messageRepo);
 
   return app;
+}
+
+function parsePayload(payload: unknown): unknown {
+  if (typeof payload !== 'string') return payload;
+  try {
+    return JSON.parse(payload);
+  } catch {
+    return payload;
+  }
+}
+
+function sanitizePayload(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return value.length > 1200 ? `${value.slice(0, 1200)}...` : value;
+  }
+  if (Array.isArray(value)) return value.map((v) => sanitizePayload(v));
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = sanitizePayload(v);
+    }
+    return out;
+  }
+  return value;
 }
