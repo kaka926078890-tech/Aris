@@ -10,6 +10,73 @@ export function registerChatRoutes(
     Body: {
       conversation_id?: string;
       message: string;
+      model?: string;
+      include_trace?: boolean;
+    };
+  }>(
+    '/chat/stream',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['message'],
+          properties: {
+            conversation_id: { type: 'string' },
+            message: { type: 'string', minLength: 1 },
+            model: { type: 'string' },
+            include_trace: { type: 'boolean', default: false },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      reply.raw.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
+      reply.raw.setHeader('Connection', 'keep-alive');
+      reply.raw.setHeader('X-Accel-Buffering', 'no');
+
+      const send = (event: string, data: unknown) => {
+        reply.raw.write(`event: ${event}\n`);
+        reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+      };
+
+      logger.info(
+        {
+          endpoint: '/chat/stream',
+          request_body: sanitizePayload(request.body),
+        },
+        'API request',
+      );
+
+      await chatService.chat_stream(request.body, {
+        on_open: (payload) => send('open', payload),
+        on_tool_trace: (payload) => send('tool_trace', payload),
+        on_delta: (payload) => send('delta', payload),
+        on_final: (payload) => {
+          send('final', sanitizePayload(payload));
+          reply.raw.end();
+          logger.info(
+            {
+              endpoint: '/chat/stream',
+              response_body: sanitizePayload(payload),
+            },
+            'API response',
+          );
+        },
+        on_error: (payload) => {
+          send('error', payload);
+          reply.raw.end();
+        },
+      });
+
+      return reply;
+    },
+  );
+
+  app.post<{
+    Body: {
+      conversation_id?: string;
+      message: string;
     };
   }>(
     '/chat/preview',

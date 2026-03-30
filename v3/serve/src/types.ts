@@ -137,6 +137,28 @@ export interface ILLMClient {
       };
     }>;
   }>;
+
+  chat_stream?(
+    messages: PromptMessage[],
+    model?: string,
+    tools?: Array<{
+      type: 'function';
+      function: {
+        name: string;
+        description: string;
+        parameters: Record<string, unknown>;
+      };
+    }>,
+  ): AsyncGenerator<{
+    delta: string;
+    tool_calls: Array<{
+      index?: number;
+      id: string;
+      type: 'function';
+      function: { name: string; arguments: string };
+    }>;
+    model: string;
+  }>;
 }
 
 export interface IEmbeddingClient {

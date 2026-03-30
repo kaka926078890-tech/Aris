@@ -1,4 +1,11 @@
-import type { IEmbeddingClient, IRecordRepo, IVectorStore } from '../types.js';
+import type {
+  IConversationRepo,
+  IEmbeddingClient,
+  IMessageRepo,
+  IRecordRepo,
+  IVectorStore,
+} from '../types.js';
+import { TimelineRepo } from '../infra/timelineRepo.js';
 
 type ToolDef = {
   type: 'function';
@@ -14,6 +21,9 @@ export class ChatTools {
     private recordRepo: IRecordRepo,
     private embeddingClient: IEmbeddingClient,
     private vectorStore: IVectorStore,
+    private conversationRepo: IConversationRepo,
+    private messageRepo: IMessageRepo,
+    private timelineRepo: TimelineRepo,
   ) {}
 
   getDefinitions(): ToolDef[] {
@@ -95,6 +105,35 @@ export class ChatTools {
           parameters: { type: 'object', properties: {} },
         },
       },
+      {
+        type: 'function',
+        function: {
+          name: 'get_timeline',
+          description:
+            '获取可验证的时间线证据（按时间排序），用于回忆/复盘/总结/判断先后顺序。返回的 evidence 仅来自数据库事件与消息，不会编造。',
+          parameters: {
+            type: 'object',
+            properties: {
+              conversation_id: {
+                type: 'string',
+                description:
+                  '可选：指定会话 id；不传则默认当前会话（current conversation）',
+              },
+              limit: {
+                type: 'number',
+                default: 30,
+                description: '返回条数，建议 10-80',
+              },
+              include_global_records: {
+                type: 'boolean',
+                default: true,
+                description:
+                  '是否附带全局记录类事件（identity/preference/correction）作为背景（不参与会话顺序）',
+              },
+            },
+          },
+        },
+      },
     ];
   }
 
@@ -114,6 +153,7 @@ export class ChatTools {
         iso: now.toISOString(),
       };
     }
+    if (name === 'get_timeline') return this.runGetTimeline(args);
     return { ok: false, error: `Unknown tool: ${name}` };
   }
 
@@ -195,6 +235,65 @@ export class ChatTools {
       ok: true,
       memories: picked,
       text: picked.map((x) => x.text).filter(Boolean).join('\n---\n'),
+    };
+  }
+
+  private runGetTimeline(args: Record<string, unknown>) {
+    const requested = String(args.conversation_id ?? '').trim();
+    const conversation_id =
+      requested || this.conversationRepo.get_current_id() || '';
+    if (!conversation_id) {
+      return { ok: true, conversation_id: null, evidence: [] };
+    }
+    const limit = Math.max(1, Math.min(200, Number(args.limit ?? 30)));
+    const include_global = args.include_global_records !== false;
+
+    // 1) 会话内的可验证证据：events（优先） + fallback messages（兼容旧数据）
+    const events = this.timelineRepo.list_recent(conversation_id, limit);
+    const evidence =
+      events.length > 0
+        ? events
+            .slice()
+            .reverse()
+            .map((e) => ({
+              t: e.created_at,
+              type: e.event_type,
+              role: e.role,
+              content: e.content,
+              message_id: e.message_id,
+            }))
+        : this.messageRepo
+            .find_by_conversation(conversation_id, limit, 0, 'asc')
+            .map((m) => ({
+              t: m.created_at,
+              type: 'chat_message',
+              role: m.role,
+              content: m.content,
+              message_id: m.id,
+            }));
+
+    // 2) 全局记录类证据（不参与会话顺序，只做背景）
+    const global_records = include_global
+      ? this.timelineRepo
+          .list_recent(null, 50)
+          .slice()
+          .reverse()
+          .map((e) => ({
+            t: e.created_at,
+            type: e.event_type,
+            role: e.role,
+            content: e.content,
+            message_id: e.message_id,
+          }))
+      : [];
+
+    return {
+      ok: true,
+      conversation_id,
+      evidence,
+      global_records,
+      note:
+        'evidence 仅是可验证证据；当你要复盘/总结/判断先后顺序时，应只基于 evidence 叙述，超出部分必须标注“不在证据中”。',
     };
   }
 }

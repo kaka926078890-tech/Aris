@@ -1,5 +1,6 @@
 import { getDatabase } from './database.js';
 import type { IRecordRepo } from '../types.js';
+import { TimelineRepo } from './timelineRepo.js';
 
 interface PreferenceRow {
   id: string;
@@ -18,6 +19,8 @@ interface CorrectionRow {
 }
 
 export class RecordRepo implements IRecordRepo {
+  private timelineRepo = new TimelineRepo();
+
   get_identity(): { name: string; notes: string } | null {
     const db = getDatabase();
     const row = db
@@ -44,6 +47,15 @@ export class RecordRepo implements IRecordRepo {
     const db = getDatabase();
     db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
       .run('identity_json', JSON.stringify(next));
+
+    this.timelineRepo.add({
+      id: crypto.randomUUID(),
+      conversation_id: null,
+      event_type: 'record_identity',
+      role: null,
+      message_id: null,
+      content: `identity: name=${next.name || '未知'}; notes=${next.notes || '无'}`,
+    });
   }
 
   add_preference(payload: {
@@ -65,6 +77,15 @@ export class RecordRepo implements IRecordRepo {
       payload.tags?.length ? JSON.stringify(payload.tags) : null,
       new Date().toISOString(),
     );
+
+    this.timelineRepo.add({
+      id: crypto.randomUUID(),
+      conversation_id: null,
+      event_type: 'record_preference',
+      role: null,
+      message_id: null,
+      content: `preference: ${payload.topic} -> ${payload.summary}`,
+    });
     return id;
   }
 
@@ -115,6 +136,15 @@ export class RecordRepo implements IRecordRepo {
       payload.correction,
       new Date().toISOString(),
     );
+
+    this.timelineRepo.add({
+      id: crypto.randomUUID(),
+      conversation_id: null,
+      event_type: 'record_correction',
+      role: null,
+      message_id: null,
+      content: `correction: ${payload.previous} -> ${payload.correction}`,
+    });
     return id;
   }
 

@@ -122,4 +122,106 @@ export class OpenAILLMClient implements ILLMClient {
       });
     }
   }
+
+  /**
+   * Stream chat completion deltas (OpenAI-compatible SSE under the hood).
+   * Only streams model output; callers decide how to persist / handle tools.
+   */
+  async *chat_stream(
+    messages: PromptMessage[],
+    model?: string,
+    tools?: Array<{
+      type: 'function';
+      function: {
+        name: string;
+        description: string;
+        parameters: Record<string, unknown>;
+      };
+    }>,
+  ): AsyncGenerator<{
+    delta: string;
+    tool_calls: Array<{
+      id: string;
+      type: 'function';
+      function: { name: string; arguments: string };
+    }>;
+    model: string;
+  }> {
+    const effectiveModel = model || config.llm.default_model;
+    try {
+      const apiMessages = messages.map((m) => {
+        if (m.role === 'tool') {
+          return {
+            role: 'tool' as const,
+            content: m.content,
+            tool_call_id: m.tool_call_id || '',
+          };
+        }
+        if (m.role === 'assistant') {
+          return {
+            role: 'assistant' as const,
+            content: m.content,
+            tool_calls: m.tool_calls,
+          };
+        }
+        if (m.role === 'system') {
+          return {
+            role: 'system' as const,
+            content: m.content,
+          };
+        }
+        return {
+          role: 'user' as const,
+          content: m.content,
+        };
+      });
+
+      const stream = await this.client.chat.completions.create({
+        model: effectiveModel,
+        messages: apiMessages,
+        tools,
+        stream: true,
+      });
+
+      for await (const chunk of stream as AsyncIterable<{
+        model?: string;
+        choices: Array<{
+          delta?: {
+            content?: string | null;
+            tool_calls?: Array<{
+              index?: number;
+              id?: string;
+              type?: 'function';
+              function?: { name?: string; arguments?: string };
+            }>;
+          };
+        }>;
+      }>) {
+        const d = chunk.choices?.[0]?.delta;
+        const delta = (d?.content ?? '') as string;
+        // In streaming mode, tool_calls.function.arguments can arrive in multiple chunks.
+        // Some chunks may only carry arguments without repeating the function name.
+        const tool_calls =
+          (d?.tool_calls ?? [])
+            .filter((tc) => tc?.type === 'function' && (tc.id || tc.function?.name || tc.function?.arguments))
+            .map((tc) => ({
+              index: typeof tc.index === 'number' ? tc.index : undefined,
+              id: tc.id || '',
+              type: 'function' as const,
+              function: {
+                name: tc.function?.name || '',
+                arguments: tc.function?.arguments || '',
+              },
+            })) ?? [];
+        if (!delta && tool_calls.length === 0) continue;
+        yield { delta, tool_calls, model: chunk.model || effectiveModel };
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ err, model: effectiveModel }, 'LLM stream call failed');
+      throw new LLMError(`LLM stream call failed: ${msg}`, {
+        model: effectiveModel,
+      });
+    }
+  }
 }

@@ -111,6 +111,28 @@ const migrations: Migration[] = [
       );
     `,
   },
+  {
+    name: '005_events_timeline',
+    sql: `
+      CREATE TABLE IF NOT EXISTS events (
+        id              TEXT PRIMARY KEY,
+        conversation_id TEXT,
+        event_type      TEXT NOT NULL,
+        role            TEXT,
+        message_id      TEXT,
+        content         TEXT NOT NULL,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_events_conv_created
+      ON events(conversation_id, created_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_events_type_created
+      ON events(event_type, created_at DESC);
+    `,
+  },
 ];
 
 function runMigrations(db: Database.Database): void {

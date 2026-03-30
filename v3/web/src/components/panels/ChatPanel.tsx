@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
 import { Send, Terminal, Wrench } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "@/src/lib/utils";
@@ -101,7 +103,7 @@ export default function ChatPanel({
       if (conversationId) body.conversation_id = conversationId;
       console.log("[aris_web][chat_request]", body);
 
-      const response = await fetch(`${api_base_url}/chat`, {
+      const response = await fetch(`${api_base_url}/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -112,25 +114,100 @@ export default function ChatPanel({
         throw new Error(`HTTP ${response.status}: ${txt}`);
       }
 
-      const data = (await response.json()) as ChatApiResponse;
-      console.log("[aris_web][chat_response]", data);
-      if (data.conversation_id !== conversationId) {
-        await onConversationChange(data.conversation_id);
-      }
-
-      const aiMsgId = data.message.id;
+      const aiTempId = `stream-${Date.now()}`;
       const aiMsg: Message = {
-        id: data.message.id,
+        id: aiTempId,
         role: "assistant",
         content: "",
-        tool_trace: data.tool_trace,
-        timestamp: new Date(data.message.created_at).toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       };
       setMessages((prev) => [...prev, aiMsg]);
-      await streamAssistantContent(aiMsgId, data.message.content, setMessages);
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("response body is not readable");
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+      let currentConversationId = conversationId;
+
+      const applyDelta = (delta: string) => {
+        if (!delta) return;
+        setMessages((prev) =>
+          prev.map((m) => (m.id === aiTempId ? { ...m, content: m.content + delta } : m)),
+        );
+      };
+
+      const applyToolTrace = (tool_trace: ToolTraceRound[]) => {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === aiTempId ? { ...m, tool_trace } : m)),
+        );
+      };
+
+      const replaceWithFinal = (data: ChatApiResponse) => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === aiTempId
+              ? {
+                  id: data.message.id,
+                  role: "assistant",
+                  content: data.message.content,
+                  tool_trace: data.tool_trace,
+                  timestamp: new Date(data.message.created_at).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  }),
+                }
+              : m,
+          ),
+        );
+      };
+
+      const parseEventBlock = (block: string) => {
+        const lines = block.split("\n").filter(Boolean);
+        let event = "message";
+        let dataLine = "";
+        for (const line of lines) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          if (line.startsWith("data:")) dataLine += line.slice(5).trim();
+        }
+        if (!dataLine) return;
+        const payload = JSON.parse(dataLine) as any;
+        if (event === "open") {
+          currentConversationId = payload.conversation_id || currentConversationId;
+          if (currentConversationId && currentConversationId !== conversationId) {
+            void onConversationChange(currentConversationId);
+          }
+          return;
+        }
+        if (event === "delta") {
+          applyDelta(payload.delta || "");
+          return;
+        }
+        if (event === "tool_trace") {
+          applyToolTrace(payload.tool_trace || []);
+          return;
+        }
+        if (event === "final") {
+          const finalData = payload as ChatApiResponse;
+          console.log("[aris_web][chat_stream_final]", finalData);
+          replaceWithFinal(finalData);
+          return;
+        }
+        if (event === "error") {
+          throw new Error(payload.error || "stream error");
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buffer.indexOf("\n\n")) !== -1) {
+          const chunk = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          parseEventBlock(chunk);
+        }
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[aris_web][chat_error]", err);
@@ -208,10 +285,14 @@ export default function ChatPanel({
                 )}
               >
                 <div className={cn(
-                  "prose prose-sm max-w-none text-ink selection:bg-ink/10",
-                  msg.role === "assistant" ? "text-[16px] leading-[1.65] font-medium" : "text-[15px]"
+                  "chat-markdown max-w-none text-ink selection:bg-ink/10",
+                  msg.role === "assistant"
+                    ? "chat-markdown-assistant text-[16px] leading-[1.65] font-medium"
+                    : "chat-markdown-user text-[15px] leading-[1.6]"
                 )}>
-                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                    {msg.content}
+                  </ReactMarkdown>
                 </div>
               </div>
 
@@ -315,23 +396,4 @@ function hasRealToolUsage(trace: ToolTraceRound[] | undefined): boolean {
   return trace.some((round) => round.used_tools && round.tool_calls.length > 0);
 }
 
-async function streamAssistantContent(
-  messageId: string,
-  fullText: string,
-  setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
-): Promise<void> {
-  for (let i = 1; i <= fullText.length; i++) {
-    const next = fullText.slice(0, i);
-    setMessages((prev) =>
-      prev.map((msg) =>
-        msg.id === messageId
-          ? {
-              ...msg,
-              content: next,
-            }
-          : msg,
-      ),
-    );
-    await new Promise((resolve) => setTimeout(resolve, 12));
-  }
-}
+// legacy typing simulation removed (real SSE streaming is used now)

@@ -15,6 +15,7 @@ import type {
 import { PromptBuilder } from './promptBuilder.js';
 import { loadPromptPolicy } from './promptPolicy.js';
 import { ChatTools } from './chatTools.js';
+import { TimelineRepo } from '../infra/timelineRepo.js';
 import { NotFoundError } from '../errors.js';
 import { logger } from '../logger.js';
 
@@ -54,7 +55,14 @@ export class ChatService {
   ) {
     this.policy = loadPromptPolicy();
     this.promptBuilder = new PromptBuilder();
-    this.chatTools = new ChatTools(recordRepo, embeddingClient, vectorStore);
+    this.chatTools = new ChatTools(
+      recordRepo,
+      embeddingClient,
+      vectorStore,
+      conversationRepo,
+      messageRepo,
+      new TimelineRepo(),
+    );
   }
 
   async preview(req: ChatPreviewRequest): Promise<ChatPreviewResponse> {
@@ -204,6 +212,191 @@ export class ChatService {
       tool_trace: llmRes.tool_trace,
       trace: req.include_trace ? promptPackage : undefined,
     };
+  }
+
+  /**
+   * Server-sent-events streaming chat.
+   * Sends tool rounds (if any) as discrete events and streams final assistant text as deltas.
+   *
+   * Important: if tools are invoked, we do NOT stream the "assistant thinking" text before tools;
+   * we only stream the final assistant answer in the last round (no tool calls).
+   */
+  async chat_stream(
+    req: ChatRequest,
+    hooks: {
+      on_open: (payload: { conversation_id: string }) => void;
+      on_tool_trace: (payload: { tool_trace: ToolTraceRound[] }) => void;
+      on_delta: (payload: { delta: string }) => void;
+      on_final: (payload: ChatResponse) => void;
+      on_error: (payload: { error: string }) => void;
+    },
+  ): Promise<void> {
+    // 1) resolve/create conversation
+    let conversation = this.resolveConversation(req.conversation_id);
+    if (!conversation) conversation = this.conversationRepo.create();
+    this.conversationRepo.set_current_id(conversation.id);
+    hooks.on_open({ conversation_id: conversation.id });
+
+    // 2) persist user message
+    const userMsg = this.messageRepo.create(conversation.id, 'user', req.message);
+
+    // 3) build prompt
+    const recentMessages = this.messageRepo.find_by_conversation(
+      conversation.id,
+      this.policy.recent_turns * 2,
+    );
+    const history = recentMessages.filter((m) => m.id !== userMsg.id);
+    const retrieval = await this.retrieveRelevantMemories(req.message, conversation.id);
+    const recordContext = this.buildRecordContextLines();
+    const promptPackage = this.promptBuilder.build(this.policy, history, req.message, {
+      record_lines: recordContext,
+      retrieval_lines: retrieval.lines,
+    });
+
+    // 4) run with tools; stream final answer deltas if supported
+    const tools = this.chatTools.getDefinitions();
+    const messages = [...promptPackage.messages];
+    const toolPolicyMessage = this.buildToolPolicyMessage();
+    const firstNonSystemIdx = messages.findIndex((m) => m.role !== 'system');
+    if (firstNonSystemIdx === -1) messages.push({ role: 'system', content: toolPolicyMessage });
+    else messages.splice(firstNonSystemIdx, 0, { role: 'system', content: toolPolicyMessage });
+
+    let finalContent = '';
+    let modelName = req.model || 'unknown';
+    let completionTokens = 0;
+    const toolTrace: ToolTraceRound[] = [];
+
+    try {
+      for (let round = 0; round < 3; round++) {
+        // Root-cause fix:
+        // - Tool-call streaming is not reliable for deepseek+SDK (arguments can be missing).
+        // - Therefore: always run a NON-stream round first to obtain complete tool_calls (with arguments).
+        // - Only when the model returns NO tool_calls, we optionally stream the final answer text.
+        const res = await this.llmClient.chat(messages, req.model, tools);
+        modelName = res.model;
+        completionTokens += res.completion_tokens;
+
+        if (res.tool_calls.length > 0) {
+          messages.push({
+            role: 'assistant',
+            content: res.content || '',
+            tool_calls: res.tool_calls,
+          });
+          const roundTrace: ToolTraceRound = {
+            round,
+            used_tools: true,
+            assistant_content: res.content || '',
+            tool_calls: [],
+          };
+          for (const call of res.tool_calls) {
+            const args = safeJsonParse(call.function.arguments);
+            const result = await this.chatTools.run(call.function.name, args);
+            roundTrace.tool_calls.push({
+              tool_name: call.function.name,
+              tool_args: args,
+              tool_result: result,
+            });
+            messages.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              content: JSON.stringify(result),
+            });
+          }
+          toolTrace.push(roundTrace);
+          hooks.on_tool_trace({ tool_trace: [...toolTrace] });
+          continue;
+        }
+
+        // No tool calls: stream final answer if supported (tools omitted to prevent tool_calls in stream).
+        if (typeof this.llmClient.chat_stream === 'function') {
+          let streamedText = '';
+          for await (const chunk of this.llmClient.chat_stream(messages, req.model)) {
+            modelName = chunk.model || modelName;
+            if (chunk.delta) {
+              streamedText += chunk.delta;
+              hooks.on_delta({ delta: chunk.delta });
+            }
+          }
+          toolTrace.push({
+            round,
+            used_tools: false,
+            assistant_content: streamedText,
+            tool_calls: [],
+          });
+          finalContent = streamedText;
+          break;
+        }
+
+        toolTrace.push({
+          round,
+          used_tools: false,
+          assistant_content: res.content || '',
+          tool_calls: [],
+        });
+        finalContent = res.content;
+        break;
+      }
+
+      const assistantMsg = this.messageRepo.create(
+        conversation.id,
+        'assistant',
+        finalContent,
+        completionTokens,
+        { tool_trace: toolTrace },
+      );
+
+      if (this.messageRepo.count_by_conversation(conversation.id) <= 2) {
+        this.conversationRepo.update_title(conversation.id, req.message.slice(0, 100));
+      }
+
+      // embedding persistence (same as non-stream path)
+      try {
+        const { vectors } = await this.embeddingClient.embed([
+          userMsg.content,
+          assistantMsg.content,
+          this.buildTurnText(userMsg.content, assistantMsg.content),
+        ]);
+        if (vectors[0]) {
+          await this.vectorStore.upsert(userMsg.id, vectors[0], {
+            message_id: userMsg.id,
+            conversation_id: conversation.id,
+            source_kind: 'message',
+            source_text: userMsg.content,
+          });
+        }
+        if (vectors[1]) {
+          await this.vectorStore.upsert(assistantMsg.id, vectors[1], {
+            message_id: assistantMsg.id,
+            conversation_id: conversation.id,
+            source_kind: 'message',
+            source_text: assistantMsg.content,
+          });
+        }
+        if (vectors[2]) {
+          const turnText = this.buildTurnText(userMsg.content, assistantMsg.content);
+          await this.vectorStore.upsert(`turn:${assistantMsg.id}`, vectors[2], {
+            message_id: assistantMsg.id,
+            conversation_id: conversation.id,
+            source_kind: 'turn',
+            source_text: turnText,
+          });
+        }
+      } catch (err) {
+        logger.warn({ err }, '向量化失败，不影响主对话');
+      }
+
+      const result: ChatResponse = {
+        conversation_id: conversation.id,
+        message: assistantMsg,
+        model: modelName,
+        tool_trace: toolTrace,
+        trace: req.include_trace ? promptPackage : undefined,
+      };
+      hooks.on_final(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      hooks.on_error({ error: msg });
+    }
   }
 
   private buildTurnText(userText: string, assistantText: string): string {
@@ -542,6 +735,7 @@ export class ChatService {
       '4) 需要核对历史信息时优先调用 get_record 或 search_memories。',
       '5) 调工具后再继续回答用户；不要只口头说“记住了”却不调用工具。',
       '6) 若涉及“现在/今天/早晚/饭点/节律”等时间语境，先调用 get_current_time 再回答。',
+      '7) 当你要“回忆/总结/复盘对话”或需要判断“先后顺序/时间线”时，先调用 get_timeline 获取证据，再基于 evidence 叙述；证据之外必须明确标注“不在证据中/不确定”。',
     ].join('\n');
   }
 

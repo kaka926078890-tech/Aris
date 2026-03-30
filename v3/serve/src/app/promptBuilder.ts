@@ -62,6 +62,7 @@ export class PromptBuilder {
       }
     }
 
+    const history_time_hints: string[] = [];
     for (let i = recent_messages.length - 1; i >= 0; i--) {
       const msg = recent_messages[i];
       const distanceFromLatest = recent_messages.length - 1 - i;
@@ -76,13 +77,27 @@ export class PromptBuilder {
       const isOldHistory = distanceFromLatest >= strongHistoryWindow;
       const normalized = msg.content.replace(/\s+/g, ' ').trim();
       const clipped = normalized.length > 120 ? `${normalized.slice(0, 120)}...` : normalized;
-      const content = isOldHistory
-        ? `[较早历史 ${historyLocal}] ${clipped}`
-        : `[历史时间 ${historyLocal}] ${normalized}`;
+      const content = isOldHistory ? clipped : normalized;
       const t = estimateTokens(content);
       if (memory_tokens + t > memory_budget) break;
       memory_messages.unshift({ role: msg.role, content });
       memory_tokens += t;
+      const roleLabel = msg.role === 'user' ? '用户' : 'Aris';
+      history_time_hints.unshift(
+        `${roleLabel} @ ${historyLocal}${isOldHistory ? '（较早）' : ''}`,
+      );
+    }
+
+    if (history_time_hints.length > 0) {
+      const hintBlock = [
+        '最近历史时间锚点（仅用于语境判断，不要在回复中原样输出这些标签）：',
+        ...history_time_hints.map((item, idx) => `${idx + 1}. ${item}`),
+      ].join('\n');
+      const t = estimateTokens(hintBlock);
+      if (memory_tokens + t <= memory_budget) {
+        memory_messages.unshift({ role: 'system', content: hintBlock });
+        memory_tokens += t;
+      }
     }
 
     const user_tokens = estimateTokens(user_input);

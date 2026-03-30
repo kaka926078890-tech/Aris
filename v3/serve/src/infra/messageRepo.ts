@@ -1,5 +1,6 @@
 import { getDatabase } from './database.js';
 import type { Message, Role, IMessageRepo } from '../types.js';
+import { TimelineRepo } from './timelineRepo.js';
 
 interface MessageRow {
   id: string;
@@ -12,6 +13,8 @@ interface MessageRow {
 }
 
 export class MessageRepo implements IMessageRepo {
+  private timelineRepo = new TimelineRepo();
+
   create(
     conversation_id: string,
     role: Role,
@@ -28,6 +31,17 @@ export class MessageRepo implements IMessageRepo {
       `INSERT INTO messages (id, conversation_id, role, content, created_at, token_count, metadata_json)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, conversation_id, role, content, now, token_count ?? null, metaJson);
+
+    // 事件化时间线：对每条聊天消息写入 event（用于可验证的回忆/复盘）
+    this.timelineRepo.add({
+      id: `evt:${id}`,
+      conversation_id,
+      event_type: 'chat_message',
+      role,
+      message_id: id,
+      content,
+      created_at: now,
+    });
 
     db.prepare(
       'UPDATE conversations SET updated_at = ? WHERE id = ?',
