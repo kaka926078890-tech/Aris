@@ -15,6 +15,7 @@ interface EmbeddingRow {
   conversation_id: string;
   source_kind: 'message' | 'turn';
   source_text: string;
+  source_created_at: string;
 }
 
 /**
@@ -37,7 +38,8 @@ export class LocalVectorStore implements IVectorStore {
           e.message_id,
           m.conversation_id,
           e.source_kind,
-          e.source_text
+          e.source_text,
+          m.created_at AS source_created_at
          FROM embeddings e
          JOIN messages m ON m.id = e.message_id`,
       )
@@ -52,6 +54,7 @@ export class LocalVectorStore implements IVectorStore {
           conversation_id: row.conversation_id,
           source_kind: row.source_kind ?? 'message',
           source_text: row.source_text ?? '',
+          source_created_at: row.source_created_at,
         },
       });
     }

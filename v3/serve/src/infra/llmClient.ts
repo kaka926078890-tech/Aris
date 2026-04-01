@@ -3,6 +3,26 @@ import type { ILLMClient, PromptMessage } from '../types.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { LLMError } from '../errors.js';
+import { estimateTokens } from '../app/promptPolicy.js';
+import { logLlmUsage } from './usageLog.js';
+
+function summarizePromptPayload(messages: PromptMessage[]) {
+  const role_counts: Record<string, number> = {};
+  let content_chars = 0;
+  let est_tokens = 0;
+  for (const m of messages) {
+    role_counts[m.role] = (role_counts[m.role] || 0) + 1;
+    const c = typeof m.content === 'string' ? m.content : '';
+    content_chars += c.length;
+    est_tokens += estimateTokens(c);
+  }
+  return {
+    message_count: messages.length,
+    role_counts,
+    content_chars_total: content_chars,
+    estimated_input_tokens: est_tokens,
+  };
+}
 
 export class OpenAILLMClient implements ILLMClient {
   private client: OpenAI;
@@ -58,20 +78,33 @@ export class OpenAILLMClient implements ILLMClient {
           content: m.content,
         };
       });
-      logger.info(
-        {
-          model: effectiveModel,
-          tools: (tools ?? []).map((t) => t.function.name),
-          messages: apiMessages.map((m) => ({
-            ...m,
-            content:
-              typeof m.content === 'string' && m.content.length > 1200
-                ? `${m.content.slice(0, 1200)}...`
-                : m.content,
-          })),
-        },
-        'LLM request payload',
-      );
+      const payloadSummary = summarizePromptPayload(messages);
+      if (config.log.debug_llm_request_body) {
+        logger.info(
+          {
+            model: effectiveModel,
+            tools: (tools ?? []).map((t) => t.function.name),
+            ...payloadSummary,
+            messages: apiMessages.map((m) => ({
+              ...m,
+              content:
+                typeof m.content === 'string' && m.content.length > 1200
+                  ? `${m.content.slice(0, 1200)}...`
+                  : m.content,
+            })),
+          },
+          'LLM request payload（完整，调试用）',
+        );
+      } else {
+        logger.debug(
+          {
+            model: effectiveModel,
+            tools: (tools ?? []).map((t) => t.function.name),
+            ...payloadSummary,
+          },
+          'LLM request（摘要）',
+        );
+      }
       const res = await this.client.chat.completions.create({
         model: effectiveModel,
         messages: apiMessages,
@@ -94,18 +127,14 @@ export class OpenAILLMClient implements ILLMClient {
         }));
       const elapsed = Date.now() - start;
 
-      logger.info(
-        {
-          model: effectiveModel,
-          prompt_tokens: res.usage?.prompt_tokens,
-          completion_tokens: res.usage?.completion_tokens,
-          elapsed,
-          response_content:
-            content.length > 1200 ? `${content.slice(0, 1200)}...` : content,
-          response_tool_calls: toolCalls,
-        },
-        '大模型响应完成',
-      );
+      if (res.usage && typeof res.usage === 'object') {
+        logLlmUsage(
+          logger,
+          'chat',
+          res.usage as unknown as Record<string, unknown>,
+          { elapsed_ms: elapsed },
+        );
+      }
 
       return {
         content,
@@ -146,8 +175,10 @@ export class OpenAILLMClient implements ILLMClient {
       function: { name: string; arguments: string };
     }>;
     model: string;
+    usage?: Record<string, unknown> | null;
   }> {
     const effectiveModel = model || config.llm.default_model;
+    const streamStartedAt = Date.now();
     try {
       const apiMessages = messages.map((m) => {
         if (m.role === 'tool') {
@@ -176,15 +207,49 @@ export class OpenAILLMClient implements ILLMClient {
         };
       });
 
-      const stream = await this.client.chat.completions.create({
+      if (config.log.debug_llm_request_body) {
+        logger.info(
+          {
+            model: effectiveModel,
+            tools: (tools ?? []).map((t) => t.function.name),
+            ...summarizePromptPayload(messages),
+            messages: apiMessages.map((m) => ({
+              ...m,
+              content:
+                typeof m.content === 'string' && m.content.length > 1200
+                  ? `${m.content.slice(0, 1200)}...`
+                  : m.content,
+            })),
+          },
+          'LLM stream request（完整，调试用）',
+        );
+      } else {
+        logger.debug(
+          {
+            model: effectiveModel,
+            tools: (tools ?? []).map((t) => t.function.name),
+            ...summarizePromptPayload(messages),
+          },
+          'LLM stream request（摘要）',
+        );
+      }
+
+      const streamParams: Parameters<
+        typeof this.client.chat.completions.create
+      >[0] = {
         model: effectiveModel,
         messages: apiMessages,
         tools,
         stream: true,
-      });
+      };
+      if (config.llm.stream_include_usage) {
+        streamParams.stream_options = { include_usage: true };
+      }
+      const stream = await this.client.chat.completions.create(streamParams);
 
       for await (const chunk of stream as AsyncIterable<{
         model?: string;
+        usage?: Record<string, unknown> | null;
         choices: Array<{
           delta?: {
             content?: string | null;
@@ -197,6 +262,14 @@ export class OpenAILLMClient implements ILLMClient {
           };
         }>;
       }>) {
+        if (chunk.usage && typeof chunk.usage === 'object') {
+          logLlmUsage(
+            logger,
+            'chat_stream',
+            chunk.usage as unknown as Record<string, unknown>,
+            { elapsed_ms: Date.now() - streamStartedAt },
+          );
+        }
         const d = chunk.choices?.[0]?.delta;
         const delta = (d?.content ?? '') as string;
         // In streaming mode, tool_calls.function.arguments can arrive in multiple chunks.
@@ -213,8 +286,17 @@ export class OpenAILLMClient implements ILLMClient {
                 arguments: tc.function?.arguments || '',
               },
             })) ?? [];
-        if (!delta && tool_calls.length === 0) continue;
-        yield { delta, tool_calls, model: chunk.model || effectiveModel };
+        const usage =
+          chunk.usage && typeof chunk.usage === 'object'
+            ? (chunk.usage as unknown as Record<string, unknown>)
+            : undefined;
+        if (!delta && tool_calls.length === 0 && !usage) continue;
+        yield {
+          delta,
+          tool_calls,
+          model: chunk.model || effectiveModel,
+          usage: usage ?? null,
+        };
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

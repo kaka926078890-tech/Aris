@@ -4,9 +4,29 @@ import type {
   IMessageRepo,
   IRecordRepo,
   IVectorStore,
+  PreferenceMemoryKind,
 } from '../types.js';
 import { TimelineRepo } from '../infra/timelineRepo.js';
+import type { ConversationContextRepo } from '../infra/conversationContextRepo.js';
 import { config } from '../config.js';
+
+const PREFERENCE_KINDS: PreferenceMemoryKind[] = [
+  'preference',
+  'interaction_feedback',
+  'project_context',
+  'reference_pointer',
+];
+
+function scoreWithTimeDecay(
+  score: number,
+  createdAt: string | undefined,
+  lambdaPerDay: number,
+): number {
+  if (!lambdaPerDay || lambdaPerDay <= 0 || !createdAt) return score;
+  const days = (Date.now() - new Date(createdAt).getTime()) / 86_400_000;
+  if (days <= 0) return score;
+  return score * Math.exp(-days * lambdaPerDay);
+}
 
 type ToolDef = {
   type: 'function';
@@ -25,6 +45,7 @@ export class ChatTools {
     private conversationRepo: IConversationRepo,
     private messageRepo: IMessageRepo,
     private timelineRepo: TimelineRepo,
+    private conversationContextRepo: ConversationContextRepo,
   ) {}
 
   getDefinitions(): ToolDef[] {
@@ -34,18 +55,24 @@ export class ChatTools {
         function: {
           name: 'record',
           description:
-            '写入聊天相关记录。type=identity 用于记录用户名字/身份备注；type=preference 用于记录稳定喜好；type=correction 用于记录用户纠错。只有在用户明确表达时才写入，不要臆造。',
+            '写入记录。勿存整段聊天流水或临时进度（临时进度用 session_context）。仅用户明确表达时写入，禁止臆造。禁止编造 URL。',
           parameters: {
             type: 'object',
             properties: {
               type: {
                 type: 'string',
-                enum: ['identity', 'preference', 'correction'],
+                enum: [
+                  'identity',
+                  'preference',
+                  'correction',
+                  'session_context',
+                  'ignore_topics',
+                ],
               },
               payload: {
                 type: 'object',
                 description:
-                  'identity: {name?, notes?}; preference: {topic, summary, source?, tags?}; correction: {previous, correction}',
+                  'identity:{name?,notes?}; preference:{topic,summary,source?,tags?,memory_kind?,description?,why_context?,how_to_apply?,expires_at?} memory_kind 可选: preference|interaction_feedback|project_context|reference_pointer；project_context 建议 expires_at(ISO)；correction:{previous,correction,why_context?}; session_context:{note} 仅本会话备忘；ignore_topics:{topics:string[]}',
               },
             },
             required: ['type', 'payload'],
@@ -63,12 +90,12 @@ export class ChatTools {
             properties: {
               type: {
                 type: 'string',
-                enum: ['identity', 'preferences', 'corrections'],
+                enum: ['identity', 'preferences', 'corrections', 'ignored_topics'],
               },
               options: {
                 type: 'object',
                 description:
-                  'preferences 支持 {topic?, limit?}；corrections 支持 {limit?}；identity 无需 options',
+                  'preferences:{topic?,limit?,memory_kinds?} memory_kinds 为字符串数组时可筛选种类；corrections:{limit?}；identity 无需 options',
               },
             },
             required: ['type'],
@@ -183,8 +210,12 @@ export class ChatTools {
     return defs;
   }
 
-  async run(name: string, args: Record<string, unknown>) {
-    if (name === 'record') return this.runRecord(args);
+  async run(
+    name: string,
+    args: Record<string, unknown>,
+    ctx?: { conversation_id: string | null },
+  ) {
+    if (name === 'record') return this.runRecord(args, ctx);
     if (name === 'get_record') return this.runGetRecord(args);
     if (name === 'search_memories') return this.runSearchMemories(args);
     if (name === 'get_current_time') {
@@ -205,7 +236,18 @@ export class ChatTools {
     return { ok: false, error: `Unknown tool: ${name}` };
   }
 
-  private runRecord(args: Record<string, unknown>) {
+  private parsePreferenceKind(raw: unknown): PreferenceMemoryKind {
+    const k = String(raw ?? 'preference').toLowerCase();
+    if (PREFERENCE_KINDS.includes(k as PreferenceMemoryKind)) {
+      return k as PreferenceMemoryKind;
+    }
+    return 'preference';
+  }
+
+  private runRecord(
+    args: Record<string, unknown>,
+    ctx?: { conversation_id: string | null },
+  ) {
     const type = String(args.type ?? '').toLowerCase();
     const payload = (args.payload ?? {}) as Record<string, unknown>;
     if (type === 'identity') {
@@ -215,12 +257,32 @@ export class ChatTools {
       });
       return { ok: true, message: 'identity 已记录' };
     }
+    if (type === 'session_context') {
+      const note = String(payload.note ?? '').trim();
+      if (!note) return { ok: false, error: 'session_context 需要 payload.note' };
+      const cid = ctx?.conversation_id?.trim();
+      if (!cid) {
+        return { ok: false, error: 'session_context 需要当前会话（conversation_id）' };
+      }
+      this.conversationContextRepo.upsertSessionNote(cid, note);
+      return { ok: true, message: '本会话备忘已更新' };
+    }
+    if (type === 'ignore_topics') {
+      const topicsRaw = payload.topics;
+      if (!Array.isArray(topicsRaw)) {
+        return { ok: false, error: 'ignore_topics 需要 payload.topics: string[]' };
+      }
+      const next = topicsRaw.map((x) => String(x)).map((s) => s.trim()).filter(Boolean);
+      this.recordRepo.set_ignored_topics(next);
+      return { ok: true, message: '已更新忽略主题列表', topics: next };
+    }
     if (type === 'preference') {
       const topic = String(payload.topic ?? '').trim();
       const summary = String(payload.summary ?? '').trim();
       if (!topic || !summary) {
         return { ok: false, error: 'preference 需要 topic 与 summary' };
       }
+      const memory_kind = this.parsePreferenceKind(payload.memory_kind);
       const id = this.recordRepo.add_preference({
         topic,
         summary,
@@ -228,8 +290,13 @@ export class ChatTools {
         tags: Array.isArray(payload.tags)
           ? payload.tags.map((x) => String(x)).filter(Boolean)
           : undefined,
+        memory_kind,
+        description: payload.description ? String(payload.description) : undefined,
+        why_context: payload.why_context ? String(payload.why_context) : undefined,
+        how_to_apply: payload.how_to_apply ? String(payload.how_to_apply) : undefined,
+        expires_at: payload.expires_at ? String(payload.expires_at) : undefined,
       });
-      return { ok: true, id, message: 'preference 已记录' };
+      return { ok: true, id, message: 'preference 已记录', memory_kind };
     }
     if (type === 'correction') {
       const previous = String(payload.previous ?? '').trim();
@@ -237,7 +304,11 @@ export class ChatTools {
       if (!previous || !correction) {
         return { ok: false, error: 'correction 需要 previous 与 correction' };
       }
-      const id = this.recordRepo.add_correction({ previous, correction });
+      const id = this.recordRepo.add_correction({
+        previous,
+        correction,
+        why_context: payload.why_context ? String(payload.why_context) : undefined,
+      });
       return { ok: true, id, message: 'correction 已记录' };
     }
     return { ok: false, error: `不支持的 record type: ${type}` };
@@ -249,11 +320,21 @@ export class ChatTools {
     if (type === 'identity') {
       return { ok: true, identity: this.recordRepo.get_identity() };
     }
+    if (type === 'ignored_topics') {
+      return { ok: true, ignored_topics: this.recordRepo.get_ignored_topics() };
+    }
     if (type === 'preferences') {
-      const list = this.recordRepo.list_preferences(
-        options.topic ? String(options.topic) : undefined,
-        options.limit ? Number(options.limit) : 20,
-      );
+      const limit = options.limit ? Number(options.limit) : 20;
+      const kindsRaw = options.memory_kinds;
+      const list = Array.isArray(kindsRaw)
+        ? this.recordRepo.list_preferences_by_memory_kinds(
+            kindsRaw.map((x) => String(x)),
+            limit,
+          )
+        : this.recordRepo.list_preferences(
+            options.topic ? String(options.topic) : undefined,
+            limit,
+          );
       return { ok: true, preferences: list };
     }
     if (type === 'corrections') {
@@ -273,8 +354,16 @@ export class ChatTools {
     const qv = vectors[0];
     if (!qv) return { ok: true, memories: [], text: '（无可用向量）' };
     const rows = await this.vectorStore.query(qv, limit * 3, 0.45);
-    const picked = rows.slice(0, limit).map((r) => ({
+    const lambda = config.prompt.retrieval.time_decay_per_day;
+    const ranked = rows
+      .map((r) => ({
+        r,
+        adj: scoreWithTimeDecay(r.score, r.metadata.source_created_at, lambda),
+      }))
+      .sort((a, b) => b.adj - a.adj);
+    const picked = ranked.slice(0, limit).map(({ r, adj }) => ({
       score: r.score,
+      adjusted_score: Number(adj.toFixed(6)),
       kind: r.metadata.source_kind,
       conversation_id: r.metadata.conversation_id,
       text: r.metadata.source_text,

@@ -19,7 +19,7 @@ export async function createServer(deps: ServerDeps) {
   await app.register(cors, { origin: true });
 
   app.addHook('onRequest', async (request) => {
-    logger.info(
+    logger.debug(
       {
         method: request.method,
         url: request.url,
@@ -32,7 +32,7 @@ export async function createServer(deps: ServerDeps) {
   });
 
   app.addHook('onSend', async (request, reply, payload) => {
-    logger.info(
+    logger.debug(
       {
         method: request.method,
         url: request.url,

@@ -32,6 +32,8 @@ export const config = {
     base_url: env('DEEPSEEK_API_URL', 'https://api.deepseek.com'),
     default_model: env('LLM_DEFAULT_MODEL', 'deepseek-chat'),
     timeout: envInt('LLM_TIMEOUT_MS', 60_000),
+    /** 流式结束时请求 usage（OpenAI 兼容）；若对端报错可设 false） */
+    stream_include_usage: envBool('ARIS_LLM_STREAM_INCLUDE_USAGE', true),
   },
 
   embedding: {
@@ -67,12 +69,24 @@ export const config = {
         'PROMPT_RETRIEVAL_EXCLUDE_CURRENT_CONVERSATION',
         true,
       ),
+      /** 按消息距今天数衰减检索分：final = score * exp(-days * λ)；0 表示关闭 */
+      time_decay_per_day: envFloat('PROMPT_RETRIEVAL_TIME_DECAY_PER_DAY', 0),
+    },
+    /** OpenClaw 式：transcript 全量落库，进窗时 compaction + 尾部原文 + 元数据裁剪 */
+    compaction: {
+      enabled: envBool('PROMPT_COMPACTION_ENABLED', true),
+      /** 0 表示使用 PROMPT_RECENT_TURNS*2 条消息作为尾部保留 */
+      tail_messages: envInt('PROMPT_COMPACTION_TAIL_MESSAGES', 0),
+      token_trigger_ratio: envFloat('PROMPT_COMPACTION_TOKEN_TRIGGER_RATIO', 0.85),
+      prune_metadata_keep_last: envInt('PROMPT_COMPACTION_PRUNE_METADATA_KEEP_LAST', 8),
     },
   },
 
   log: {
     level: env('LOG_LEVEL', 'info'),
     pretty: envBool('LOG_PRETTY', true),
+    /** true 时在终端打印完整 messages 内容（调试）；默认仅摘要条数与字符量 */
+    debug_llm_request_body: envBool('ARIS_DEBUG_LLM_REQUEST_BODY', false),
   },
 } as const;
 

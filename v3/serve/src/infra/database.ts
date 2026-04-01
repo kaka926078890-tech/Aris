@@ -133,6 +133,70 @@ const migrations: Migration[] = [
       ON events(event_type, created_at DESC);
     `,
   },
+  {
+    name: '006_conversation_compaction',
+    sql: `
+      CREATE TABLE IF NOT EXISTS conversation_compaction (
+        conversation_id       TEXT PRIMARY KEY,
+        summary_text          TEXT NOT NULL,
+        first_kept_message_id TEXT NOT NULL,
+        updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+        FOREIGN KEY (first_kept_message_id) REFERENCES messages(id)
+      );
+    `,
+  },
+  {
+    name: '007_memory_kinds_session_context',
+    sql: `
+      ALTER TABLE preferences ADD COLUMN memory_kind TEXT NOT NULL DEFAULT 'preference';
+      ALTER TABLE preferences ADD COLUMN description TEXT NOT NULL DEFAULT '';
+      ALTER TABLE preferences ADD COLUMN why_context TEXT;
+      ALTER TABLE preferences ADD COLUMN how_to_apply TEXT;
+      ALTER TABLE preferences ADD COLUMN updated_at TEXT;
+      ALTER TABLE preferences ADD COLUMN expires_at TEXT;
+      ALTER TABLE preferences ADD COLUMN superseded_by_id TEXT;
+
+      UPDATE preferences SET description = topic
+        WHERE description IS NULL OR trim(description) = '';
+      UPDATE preferences SET updated_at = created_at
+        WHERE updated_at IS NULL;
+
+      ALTER TABLE corrections ADD COLUMN why_context TEXT;
+
+      CREATE TABLE IF NOT EXISTS conversation_context (
+        conversation_id TEXT PRIMARY KEY,
+        session_note    TEXT NOT NULL DEFAULT '',
+        intent_json     TEXT,
+        updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_preferences_kind_updated
+      ON preferences (memory_kind, updated_at DESC);
+    `,
+  },
+  {
+    name: '008_tool_summaries_and_ignored_topics',
+    sql: `
+      CREATE TABLE IF NOT EXISTS tool_summaries (
+        id              TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        message_id      TEXT,
+        round           INTEGER,
+        tool_name       TEXT NOT NULL,
+        summary_text    TEXT NOT NULL,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_tool_summaries_conv_created
+      ON tool_summaries (conversation_id, created_at DESC);
+
+      INSERT OR IGNORE INTO settings (key, value) VALUES ('user_ignored_topics_json', '[]');
+    `,
+  },
 ];
 
 function runMigrations(db: Database.Database): void {

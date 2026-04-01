@@ -12,6 +12,7 @@ export function registerChatRoutes(
       message: string;
       model?: string;
       include_trace?: boolean;
+      reply_to_message_id?: string;
     };
   }>(
     '/chat/stream',
@@ -25,6 +26,7 @@ export function registerChatRoutes(
             message: { type: 'string', minLength: 1 },
             model: { type: 'string' },
             include_trace: { type: 'boolean', default: false },
+            reply_to_message_id: { type: 'string' },
           },
         },
       },
@@ -40,11 +42,8 @@ export function registerChatRoutes(
         reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
       };
 
-      logger.info(
-        {
-          endpoint: '/chat/stream',
-          request_body: sanitizePayload(request.body),
-        },
+      logger.debug(
+        { endpoint: '/chat/stream', request_body: sanitizePayload(request.body) },
         'API request',
       );
 
@@ -55,11 +54,8 @@ export function registerChatRoutes(
         on_final: (payload) => {
           send('final', sanitizePayload(payload));
           reply.raw.end();
-          logger.info(
-            {
-              endpoint: '/chat/stream',
-              response_body: sanitizePayload(payload),
-            },
+          logger.debug(
+            { endpoint: '/chat/stream', response_body: sanitizePayload(payload) },
             'API response',
           );
         },
@@ -77,6 +73,7 @@ export function registerChatRoutes(
     Body: {
       conversation_id?: string;
       message: string;
+      reply_to_message_id?: string;
     };
   }>(
     '/chat/preview',
@@ -88,25 +85,30 @@ export function registerChatRoutes(
           properties: {
             conversation_id: { type: 'string' },
             message: { type: 'string' },
+            reply_to_message_id: { type: 'string' },
           },
         },
       },
     },
     async (request) => {
-      logger.info(
-        {
-          endpoint: '/chat/preview',
-          request_body: sanitizePayload(request.body),
-        },
+      const t0 = Date.now();
+      logger.debug(
+        { endpoint: '/chat/preview', request_body: sanitizePayload(request.body) },
         'API request',
       );
       const result = await chatService.preview(request.body);
+      logger.debug(
+        { endpoint: '/chat/preview', response_body: sanitizePayload(result) },
+        'API response',
+      );
       logger.info(
         {
-          endpoint: '/chat/preview',
-          response_body: sanitizePayload(result),
+          path: '/chat/preview',
+          ms: Date.now() - t0,
+          conversation_id: result.conversation_id,
+          trace_messages: result.trace?.messages?.length,
         },
-        'API response',
+        '请求完成',
       );
       return result;
     },
@@ -118,6 +120,7 @@ export function registerChatRoutes(
       message: string;
       model?: string;
       include_trace?: boolean;
+      reply_to_message_id?: string;
     };
   }>(
     '/chat',
@@ -131,24 +134,19 @@ export function registerChatRoutes(
             message: { type: 'string', minLength: 1 },
             model: { type: 'string' },
             include_trace: { type: 'boolean', default: false },
+            reply_to_message_id: { type: 'string' },
           },
         },
       },
     },
     async (request) => {
-      logger.info(
-        {
-          endpoint: '/chat',
-          request_body: sanitizePayload(request.body),
-        },
+      logger.debug(
+        { endpoint: '/chat', request_body: sanitizePayload(request.body) },
         'API request',
       );
       const result = await chatService.chat(request.body);
-      logger.info(
-        {
-          endpoint: '/chat',
-          response_body: sanitizePayload(result),
-        },
+      logger.debug(
+        { endpoint: '/chat', response_body: sanitizePayload(result) },
         'API response',
       );
       return result;

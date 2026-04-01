@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { Send, Terminal, Wrench } from "lucide-react";
+import { ChevronDown, ChevronUp, Send, Terminal, Wrench } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "@/src/lib/utils";
 import { ChatApiResponse, ConversationMessage, Message, ToolTraceRound } from "@/src/types";
@@ -24,8 +24,22 @@ export default function ChatPanel({
   const [isTyping, setIsTyping] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error_msg, set_error_msg] = useState("");
+  const [toolPanelOpenByMsgId, setToolPanelOpenByMsgId] = useState<Record<string, boolean>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // default: collapse tool panel when tools exist
+    setToolPanelOpenByMsgId((prev) => {
+      const next = { ...prev };
+      for (const m of messages) {
+        if (m.role !== "assistant") continue;
+        if (!hasRealToolUsage(m.tool_trace)) continue;
+        if (next[m.id] === undefined) next[m.id] = false;
+      }
+      return next;
+    });
+  }, [messages]);
 
   useEffect(() => {
     const loadConversationMessages = async () => {
@@ -256,24 +270,54 @@ export default function ChatPanel({
             >
               {msg.role === "assistant" && hasRealToolUsage(msg.tool_trace) && (
                 <div className="mb-2 w-full max-w-[90%] border border-border-ink/30 rounded-xl p-3 bg-mist/40">
-                  <div className="text-xs text-ink/60 flex items-center gap-2 mb-2">
-                    <Wrench size={12} />
-                    工具调用流水线（{msg.tool_trace?.filter((r) => r.used_tools).length || 0} 轮）
-                  </div>
-                  <div className="space-y-2">
-                    {msg.tool_trace?.filter((round) => round.used_tools).map((round) => (
-                      <div key={`${msg.id}-round-${round.round}`} className="text-[11px] font-mono text-ink/60 bg-paper/70 p-2 rounded-lg">
-                        <div>round={round.round} used_tools={String(round.used_tools)}</div>
-                        {round.tool_calls.map((call, idx) => (
-                          <div key={`${msg.id}-${round.round}-${idx}`} className="mt-1">
-                            <div>tool={call.tool_name}</div>
-                            <div>args={JSON.stringify(call.tool_args)}</div>
-                            <div>result={JSON.stringify(call.tool_result)}</div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setToolPanelOpenByMsgId((prev) => ({
+                        ...prev,
+                        [msg.id]: !(prev[msg.id] ?? false),
+                      }))
+                    }
+                    className="w-full flex items-center justify-between text-xs text-ink/60 gap-2"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Wrench size={12} />
+                      工具调用流水线（{msg.tool_trace?.filter((r) => r.used_tools).length || 0} 轮）
+                    </span>
+                    <span className="flex items-center gap-1 text-ink/40">
+                      {toolPanelOpenByMsgId[msg.id] ? (
+                        <>
+                          收起 <ChevronUp size={14} />
+                        </>
+                      ) : (
+                        <>
+                          展开 <ChevronDown size={14} />
+                        </>
+                      )}
+                    </span>
+                  </button>
+
+                  {toolPanelOpenByMsgId[msg.id] && (
+                    <div className="mt-2 space-y-2">
+                      {msg.tool_trace
+                        ?.filter((round) => round.used_tools)
+                        .map((round) => (
+                          <div
+                            key={`${msg.id}-round-${round.round}`}
+                            className="text-[11px] font-mono text-ink/60 bg-paper/70 p-2 rounded-lg"
+                          >
+                            <div>round={round.round} used_tools={String(round.used_tools)}</div>
+                            {round.tool_calls.map((call, idx) => (
+                              <div key={`${msg.id}-${round.round}-${idx}`} className="mt-1">
+                                <div>tool={call.tool_name}</div>
+                                <div>args={JSON.stringify(call.tool_args)}</div>
+                                <div>result={JSON.stringify(call.tool_result)}</div>
+                              </div>
+                            ))}
                           </div>
                         ))}
-                      </div>
-                    ))}
-                  </div>
+                    </div>
+                  )}
                 </div>
               )}
               <div 

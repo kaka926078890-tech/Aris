@@ -64,6 +64,15 @@ export interface PromptPolicyConfig {
     top_k_message: number;
     score_threshold: number;
     exclude_current_conversation: boolean;
+    /** 每天衰减系数 λ，0 关闭 */
+    time_decay_per_day: number;
+  };
+  compaction: {
+    enabled: boolean;
+    /** 尾部保留条数（user+assistant 消息条数，非轮次）；0 表示用 recent_turns*2 */
+    tail_messages: number;
+    token_trigger_ratio: number;
+    prune_metadata_keep_last: number;
   };
   system_template: string;
   persona: string;
@@ -76,6 +85,8 @@ export interface ChatRequest {
   message: string;
   model?: string;
   include_trace?: boolean;
+  /** 结构化指代：回复所针对的上一条消息 id（通常为 assistant） */
+  reply_to_message_id?: string;
 }
 
 export interface ChatResponse {
@@ -89,6 +100,7 @@ export interface ChatResponse {
 export interface ChatPreviewRequest {
   conversation_id?: string;
   message: string;
+  reply_to_message_id?: string;
 }
 
 export interface ChatPreviewResponse {
@@ -158,6 +170,8 @@ export interface ILLMClient {
       function: { name: string; arguments: string };
     }>;
     model: string;
+    /** 流式最后一包可能带整次请求的 usage（需请求含 stream_options.include_usage） */
+    usage?: Record<string, unknown> | null;
   }>;
 }
 
@@ -176,6 +190,8 @@ export interface VectorMeta {
   conversation_id: string;
   source_kind: 'message' | 'turn';
   source_text: string;
+  /** 对应 message 的 created_at（ISO），用于检索时间衰减 */
+  source_created_at?: string;
 }
 
 export interface IVectorStore {
@@ -203,29 +219,61 @@ export interface IConversationRepo {
   delete_all(): void;
 }
 
+/** preferences.memory_kind，与 record 工具 payload.memory_kind 对齐 */
+export type PreferenceMemoryKind =
+  | 'preference'
+  | 'interaction_feedback'
+  | 'project_context'
+  | 'reference_pointer';
+
+export interface PreferenceEntry {
+  id: string;
+  topic: string;
+  summary: string;
+  source: string | null;
+  tags: string[];
+  created_at: string;
+  memory_kind: PreferenceMemoryKind;
+  description: string;
+  why_context: string | null;
+  how_to_apply: string | null;
+  updated_at: string | null;
+  expires_at: string | null;
+}
+
 export interface IRecordRepo {
-  get_identity(): { name: string; notes: string } | null;
+  get_identity(): { name: string; notes: string; updated_at?: string } | null;
   set_identity(payload: { name?: string; notes?: string }): void;
+  get_ignored_topics(): string[];
+  set_ignored_topics(topics: string[]): void;
   add_preference(payload: {
     topic: string;
     summary: string;
     source?: string;
     tags?: string[];
+    memory_kind?: PreferenceMemoryKind;
+    description?: string;
+    why_context?: string;
+    how_to_apply?: string;
+    expires_at?: string | null;
   }): string;
-  list_preferences(topic?: string, limit?: number): Array<{
-    id: string;
-    topic: string;
-    summary: string;
-    source: string | null;
-    tags: string[];
-    created_at: string;
-  }>;
-  add_correction(payload: { previous: string; correction: string }): string;
+  /** 全量或按 topic 列（get_record）；不过滤 inject 策略 */
+  list_preferences(topic?: string, limit?: number): PreferenceEntry[];
+  /** 按 memory_kind 过滤（get_record 可选） */
+  list_preferences_by_memory_kinds(kinds: string[], limit: number): PreferenceEntry[];
+  /** 仅注入进窗：preference + 未过期 project_context */
+  list_preferences_for_prompt(limit: number): PreferenceEntry[];
+  add_correction(payload: {
+    previous: string;
+    correction: string;
+    why_context?: string;
+  }): string;
   list_corrections(limit?: number): Array<{
     id: string;
     previous: string;
     correction: string;
     created_at: string;
+    why_context: string | null;
   }>;
 }
 
