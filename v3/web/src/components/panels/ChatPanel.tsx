@@ -304,14 +304,24 @@ export default function ChatPanel({
                         .map((round) => (
                           <div
                             key={`${msg.id}-round-${round.round}`}
-                            className="text-[11px] font-mono text-ink/60 bg-paper/70 p-2 rounded-lg"
+                            className="text-[11px] font-mono text-ink/60 bg-paper/70 p-2 rounded-lg max-w-full overflow-x-auto overflow-y-auto max-h-[500px]"
                           >
                             <div>round={round.round} used_tools={String(round.used_tools)}</div>
                             {round.tool_calls.map((call, idx) => (
                               <div key={`${msg.id}-${round.round}-${idx}`} className="mt-1">
                                 <div>tool={call.tool_name}</div>
-                                <div>args={JSON.stringify(call.tool_args)}</div>
-                                <div>result={JSON.stringify(call.tool_result)}</div>
+                                <div className="mt-0.5">
+                                  args=
+                                  <pre className="whitespace-pre-wrap break-all overflow-x-auto max-w-full">
+                                    {safeJsonStringify(call.tool_args)}
+                                  </pre>
+                                </div>
+                                <div className="mt-0.5">
+                                  result=
+                                  <pre className="whitespace-pre-wrap break-all overflow-x-auto max-w-full">
+                                    {safeJsonStringify(call.tool_result)}
+                                  </pre>
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -438,6 +448,14 @@ function parseToolTraceFromMeta(meta: Record<string, unknown> | null): ToolTrace
 function hasRealToolUsage(trace: ToolTraceRound[] | undefined): boolean {
   if (!trace || trace.length === 0) return false;
   return trace.some((round) => round.used_tools && round.tool_calls.length > 0);
+}
+
+function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 // legacy typing simulation removed (real SSE streaming is used now)

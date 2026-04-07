@@ -84,9 +84,9 @@ npm run dev
 - `get_current_time`
   - 返回当前时间
 - `web_search`
-  - 查询最新公开网页信息（标题/链接/摘要）
+  - 最终方案：多源检索编排（tavily/searx/duckduckgo）→ 去重重排 → 抓取 topN 正文补全证据 → 返回 citation/url
 - `web_fetch`
-  - 抓取指定 URL 正文（用于核对细节）
+  - 抓取指定 URL 正文（带注入清洗、域名策略、超时与截断控制）
 
 ### 历史接口补充
 
@@ -118,6 +118,7 @@ src/
     promptBuilder.ts
     chatService.ts
     chatTools.ts
+    webResearch.ts
   infra/
     database.ts
     conversationRepo.ts
@@ -147,8 +148,17 @@ src/
 - `ARIS_V2_DATA_DIR`
 - `ARIS_WEB_TOOLS_ENABLED`（是否启用联网工具）
 - `ARIS_WEB_SEARCH_API_URL`（搜索 API 地址）
-- `ARIS_WEB_SEARCH_API_KEY`（搜索 API 密钥）
+- `ARIS_WEB_SEARCH_API_KEY`（可选；配置后优先走 Tavily）
+- `ARIS_WEB_SEARCH_PROVIDER_ORDER`（多源顺序：tavily,searx,duckduckgo）
+- `ARIS_WEB_SEARX_ENDPOINTS`（可选，自建/公共 SearxNG）
+- `ARIS_WEB_DUCKDUCKGO_HTML_ENDPOINT`（无 key 兜底来源）
+- `ARIS_WEB_SEARCH_LANGUAGE`
 - `ARIS_WEB_SEARCH_MAX_RESULTS`
+- `ARIS_WEB_SEARCH_QUERY_VARIANTS`（query 扩展变体数）
+- `ARIS_WEB_SEARCH_FETCH_TOP_N`（检索后抓取正文条数）
+- `ARIS_WEB_TRUSTED_DOMAINS`（可信域名加权）
+- `ARIS_WEB_BLOCKED_DOMAINS`（域名黑名单）
+- `ARIS_WEB_ENABLE_INJECTION_GUARD`（网页注入清洗）
 - `ARIS_WEB_FETCH_TIMEOUT_MS`
 - `ARIS_WEB_FETCH_MAX_CHARS`
 - `PROMPT_RECENT_TURNS`

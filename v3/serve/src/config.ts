@@ -21,6 +21,14 @@ function envFloat(key: string, fallback: number): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
+function envCsv(key: string, fallback: string[]): string[] {
+  const v = process.env[key];
+  if (!v) return fallback;
+  return v
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
 
 export const config = {
   port: envInt('PORT', 7899),
@@ -47,7 +55,28 @@ export const config = {
     enabled: envBool('ARIS_WEB_TOOLS_ENABLED', true),
     search_api_url: env('ARIS_WEB_SEARCH_API_URL', 'https://api.tavily.com/search'),
     search_api_key: env('ARIS_WEB_SEARCH_API_KEY', ''),
+    provider_order: envCsv('ARIS_WEB_SEARCH_PROVIDER_ORDER', [
+      'tavily',
+      'searx',
+      'duckduckgo',
+    ]),
+    searx_endpoints: envCsv('ARIS_WEB_SEARX_ENDPOINTS', []),
+    duckduckgo_html_endpoint: env(
+      'ARIS_WEB_DUCKDUCKGO_HTML_ENDPOINT',
+      'https://duckduckgo.com/html',
+    ),
+    search_language: env('ARIS_WEB_SEARCH_LANGUAGE', 'zh-CN'),
     search_max_results: envInt('ARIS_WEB_SEARCH_MAX_RESULTS', 5),
+    query_variants: envInt('ARIS_WEB_SEARCH_QUERY_VARIANTS', 3),
+    fetch_top_n: envInt('ARIS_WEB_SEARCH_FETCH_TOP_N', 3),
+    trusted_domains: envCsv('ARIS_WEB_TRUSTED_DOMAINS', [
+      'gov.cn',
+      'edu.cn',
+      'wikipedia.org',
+      'github.com',
+    ]),
+    blocked_domains: envCsv('ARIS_WEB_BLOCKED_DOMAINS', []),
+    enable_injection_guard: envBool('ARIS_WEB_ENABLE_INJECTION_GUARD', true),
     fetch_timeout_ms: envInt('ARIS_WEB_FETCH_TIMEOUT_MS', 12_000),
     fetch_max_chars: envInt('ARIS_WEB_FETCH_MAX_CHARS', 12_000),
   },

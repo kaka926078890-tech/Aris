@@ -21,6 +21,7 @@ This follows the same practical pattern seen in Claude Code public examples:
 2. **Deterministic tool gating before generation**
    - Time context -> force `get_current_time`.
    - Recall/review/timeline intent -> force `get_timeline`.
+   - Latest/news/external-fact intent -> force `web_search`.
    - Facts are prefetched and injected as runtime facts.
 
 3. **Post-generation safety/quality gate**
@@ -52,6 +53,7 @@ This is the same control shape you asked for: not "write more prompt", but "eval
 - Timeline/order claims must be evidence-based only.
 - Do not output synthetic history-time tags (for example `[历史时间 ...]`).
 - Time phrases must match actual local time context (avoid daytime `晚安`).
+- External/latest fact questions must run `web_search` first and cite returned source URLs.
 
 ## Rules derived from existing correction data
 

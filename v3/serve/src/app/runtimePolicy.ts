@@ -1,5 +1,5 @@
 export interface RuntimePolicyToolRequirement {
-  name: 'get_current_time' | 'get_timeline';
+  name: 'get_current_time' | 'get_timeline' | 'web_search';
   args: Record<string, unknown>;
   reason: string;
 }
@@ -15,7 +15,7 @@ type ConsequenceType = 'require_tool' | 'inject_rule' | 'set_flag';
 type RuntimeConsequence =
   | {
       type: 'require_tool';
-      name: 'get_current_time' | 'get_timeline';
+      name: 'get_current_time' | 'get_timeline' | 'web_search';
       args: Record<string, unknown>;
       reason: string;
     }
@@ -63,6 +63,9 @@ const TIME_CONTEXT_RE =
 
 const TIMELINE_CONTEXT_RE =
   /(回忆|复盘|总结|先后|时间线|当时|之前|后来|发生了什么|记得.*吗|我说过|你说过|证据|原话)/i;
+
+const WEB_CONTEXT_RE =
+  /(最新|最近|新闻|官网|公告|发布|查一下|搜一下|网络上|实时|今天发生|外部信息)/i;
 
 const BASE_RULES: RuntimeRule[] = [
   {
@@ -120,6 +123,24 @@ const BASE_RULES: RuntimeRule[] = [
       },
     ],
   },
+  {
+    id: 'ctx.web_require_tool',
+    forbid: '涉及最新外部信息时禁止纯记忆回答',
+    reason: '外部事实会过时，必须先检索再答。',
+    test: (userText) => WEB_CONTEXT_RE.test(userText),
+    consequences: [
+      {
+        type: 'require_tool',
+        name: 'web_search',
+        args: {},
+        reason: '检测到外部信息语境，先执行 web_search 获取最新公开来源。',
+      },
+      {
+        type: 'inject_rule',
+        text: '涉及外部事实时，优先引用 web_search 返回的 citation/url，再给结论。',
+      },
+    ],
+  },
 ];
 
 const FINAL_RULE_BASE = '优先给出可验证事实，再给情绪化表述。';
@@ -146,7 +167,11 @@ export function executeRuntimePolicy(
     matches.push({ id: rule.id, forbid: rule.forbid, reason: rule.reason });
     for (const c of rule.consequences) {
       if (c.type === 'require_tool') {
-        required_tools.push({ name: c.name, args: c.args, reason: c.reason });
+        const args =
+          c.name === 'web_search' && !String((c.args as Record<string, unknown>)?.query ?? '').trim()
+            ? { ...c.args, query: userText, max_results: 5 }
+            : c.args;
+        required_tools.push({ name: c.name, args, reason: c.reason });
         consequence_hits.push({
           rule_id: rule.id,
           type: c.type,

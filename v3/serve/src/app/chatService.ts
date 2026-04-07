@@ -1353,6 +1353,14 @@ function summarizeToolResult(toolName: string, result: Record<string, unknown>):
     const n = Array.isArray(result.evidence) ? result.evidence.length : 0;
     return `时间线证据 ${n} 条`;
   }
+  if (toolName === 'web_search') {
+    const n = Array.isArray(result.results) ? result.results.length : 0;
+    return `网络检索结果 ${n} 条`;
+  }
+  if (toolName === 'web_fetch') {
+    const chars = typeof result.content === 'string' ? result.content.length : 0;
+    return `网页抓取正文 ${chars} 字`;
+  }
   return '工具已执行';
 }
 
@@ -1389,6 +1397,10 @@ function summarizeRuntimePrefetchFact(
     const evidence = Array.isArray(result.evidence) ? result.evidence.length : 0;
     const global = Array.isArray(result.global_records) ? result.global_records.length : 0;
     return `[get_timeline] evidence=${evidence}, global_records=${global}`;
+  }
+  if (toolName === 'web_search') {
+    const n = Array.isArray(result.results) ? result.results.length : 0;
+    return `[web_search] results=${n}`;
   }
   return `[${toolName}] 已执行`;
 }
