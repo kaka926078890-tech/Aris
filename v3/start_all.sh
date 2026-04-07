@@ -46,8 +46,8 @@ start_serve() {
   local dir="$ROOT_DIR/serve"
   install_if_needed "$dir"
 
-  if is_listening 3000; then
-    echo "[v3] serve already running on 3000"
+  if is_listening 7899; then
+    echo "[v3] serve already running on 7899"
     return
   fi
 
@@ -64,8 +64,8 @@ start_web() {
     cp "$dir/.env.example" "$dir/.env"
   fi
 
-  if is_listening 5173; then
-    echo "[v3] web already running on 5173"
+  if is_listening 7898; then
+    echo "[v3] web already running on 7898"
     return
   fi
 
@@ -80,6 +80,6 @@ start_web
 
 echo
 echo "[v3] done"
-echo "  serve: http://127.0.0.1:3000"
-echo "  web:   http://127.0.0.1:5173"
+echo "  serve: http://127.0.0.1:7899"
+echo "  web:   http://127.0.0.1:7898"
 echo "  logs:  $LOG_DIR"

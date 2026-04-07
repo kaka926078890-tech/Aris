@@ -8,10 +8,10 @@
    - `npm install`
 2. 配置接口地址
    - 复制 `.env.example` 为 `.env`
-   - 默认：`VITE_API_BASE_URL=http://127.0.0.1:3000`
+   - 默认：`VITE_API_BASE_URL=http://127.0.0.1:7899`
 3. 启动
    - `npm run dev`
-   - 访问 [http://127.0.0.1:5173](http://127.0.0.1:5173)
+   - 访问 [http://127.0.0.1:7898](http://127.0.0.1:7898)
 
 ## 一键启动（推荐）
 

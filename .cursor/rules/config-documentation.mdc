@@ -1,6 +1,5 @@
 ---
-description: 新增可配置项时须在 README 或配置文档中补充说明
-globs:
+description: 
 alwaysApply: true
 ---
 
