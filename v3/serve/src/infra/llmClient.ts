@@ -85,13 +85,7 @@ export class OpenAILLMClient implements ILLMClient {
             model: effectiveModel,
             tools: (tools ?? []).map((t) => t.function.name),
             ...payloadSummary,
-            messages: apiMessages.map((m) => ({
-              ...m,
-              content:
-                typeof m.content === 'string' && m.content.length > 1200
-                  ? `${m.content.slice(0, 1200)}...`
-                  : m.content,
-            })),
+            messages: apiMessages,
           },
           'LLM request payload（完整，调试用）',
         );
@@ -213,13 +207,7 @@ export class OpenAILLMClient implements ILLMClient {
             model: effectiveModel,
             tools: (tools ?? []).map((t) => t.function.name),
             ...summarizePromptPayload(messages),
-            messages: apiMessages.map((m) => ({
-              ...m,
-              content:
-                typeof m.content === 'string' && m.content.length > 1200
-                  ? `${m.content.slice(0, 1200)}...`
-                  : m.content,
-            })),
+            messages: apiMessages,
           },
           'LLM stream request（完整，调试用）',
         );

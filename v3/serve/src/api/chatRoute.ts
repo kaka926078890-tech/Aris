@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { ChatService } from '../app/chatService.js';
 import { logger } from '../logger.js';
+import { config } from '../config.js';
 
 export function registerChatRoutes(
   app: FastifyInstance,
@@ -52,7 +53,9 @@ export function registerChatRoutes(
         on_tool_trace: (payload) => send('tool_trace', payload),
         on_delta: (payload) => send('delta', payload),
         on_final: (payload) => {
-          send('final', sanitizePayload(payload));
+          // Do not truncate SSE final payload sent to frontend.
+          // sanitizePayload is only for logging to avoid oversized logs.
+          send('final', payload);
           reply.raw.end();
           logger.debug(
             { endpoint: '/chat/stream', response_body: sanitizePayload(payload) },
@@ -156,6 +159,7 @@ export function registerChatRoutes(
 
 function sanitizePayload(value: unknown): unknown {
   if (typeof value === 'string') {
+    if (config.log.debug_llm_request_body) return value;
     return value.length > 800 ? `${value.slice(0, 800)}...` : value;
   }
   if (Array.isArray(value)) return value.map((v) => sanitizePayload(v));

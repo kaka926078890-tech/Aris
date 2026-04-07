@@ -60,14 +60,18 @@ export default function HistoryPanel({
       setLoadingMessages(true);
       try {
         const response = await fetch(
-          `${api_base_url}/conversations/${activeConversationId}/messages?limit=200`,
+          `${api_base_url}/conversations/${activeConversationId}/messages?limit=10&newest_first=true`,
         );
         if (!response.ok) {
           const txt = await response.text();
           throw new Error(`HTTP ${response.status}: ${txt}`);
         }
         const data = (await response.json()) as ConversationMessage[];
-        setMessages(data);
+        setMessages(
+          data
+            .filter((msg) => msg.role === "user" || msg.role === "assistant")
+            .reverse(),
+        );
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         set_error_msg(msg);

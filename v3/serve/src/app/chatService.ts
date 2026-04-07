@@ -11,6 +11,7 @@ import type {
   ChatPreviewResponse,
   Message,
   PromptPolicyConfig,
+  ToolTraceCall,
   ToolTraceRound,
 } from '../types.js';
 import { PromptBuilder } from './promptBuilder.js';
@@ -23,6 +24,13 @@ import { ToolSummaryRepo } from '../infra/toolSummaryRepo.js';
 import { NotFoundError } from '../errors.js';
 import { logger } from '../logger.js';
 import { buildToolPolicyMessage } from './toolPolicy.js';
+import { sanitizeAssistantOutput } from './outputSanitizer.js';
+import {
+  applyRuntimeConsequences,
+  buildRuntimePolicyMessage,
+  executeRuntimePolicy,
+  type RuntimePolicyExecution,
+} from './runtimePolicy.js';
 
 interface RetrievalHitDebug {
   scope: 'current' | 'cross';
@@ -94,6 +102,7 @@ export class ChatService {
       ? this.assembleHistoryForPrompt(conversationId, null)
       : { history: [] as Message[], compaction_summary: null as string | null };
     const userText = this.buildUserTextWithReply(req);
+    const runtimePolicy = this.resolveRuntimePolicy(userText);
     const retrieval = await this.retrieveRelevantMemories(
       userText,
       conversationId ?? '',
@@ -119,6 +128,7 @@ export class ChatService {
         retrieval_lines: retrieval.lines,
         session_note: sessionNote,
         tool_summaries: toolSummaries,
+        runtime_rules: runtimePolicy.injected_rules,
       },
     );
 
@@ -148,6 +158,13 @@ export class ChatService {
       userMsg.id,
     );
     const userText = this.buildUserTextWithReply(req);
+    const runtimePolicy = this.resolveRuntimePolicy(userText);
+    const runtimePrefetch = await this.runRuntimePolicyPrefetch(
+      runtimePolicy,
+      conversation.id,
+      userMsg.id,
+      -1,
+    );
     const retrieval = await this.retrieveRelevantMemories(
       userText,
       conversation.id,
@@ -169,6 +186,8 @@ export class ChatService {
         retrieval_lines: retrieval.lines,
         session_note: sessionNote,
         tool_summaries: toolSummaries,
+        runtime_rules: runtimePolicy.injected_rules,
+        runtime_facts: runtimePrefetch.facts,
       },
     );
 
@@ -188,6 +207,9 @@ export class ChatService {
         prompt_chars_max: promptChars.length ? Math.max(...promptChars) : 0,
         retrieval: retrieval.debug,
         record_context_lines: recordContext.length,
+        runtime_policy_matched: runtimePolicy.stats.rules_hit,
+        runtime_policy_consequence_hits: runtimePolicy.stats.consequence_applied_count,
+        runtime_prefetch_tools: runtimePrefetch.calls.map((c) => c.tool_name),
       },
       '提示词已组装',
     );
@@ -197,7 +219,12 @@ export class ChatService {
       promptPackage.messages,
       req.model,
       conversation.id,
+      runtimePolicy,
+      runtimePrefetch.calls,
     );
+    const sanitized = sanitizeAssistantOutput(llmRes.content || '');
+    const consequenceRes = applyRuntimeConsequences(sanitized, runtimePolicy);
+    llmRes.content = consequenceRes.text;
 
     // 5) 保存助手回复
     const assistantMsg = this.messageRepo.create(
@@ -205,7 +232,14 @@ export class ChatService {
       'assistant',
       llmRes.content,
       llmRes.completion_tokens,
-      { tool_trace: llmRes.tool_trace },
+      {
+        tool_trace: llmRes.tool_trace,
+        runtime_policy: {
+          matched_rules: runtimePolicy.stats.rules_hit,
+          consequence_hits: runtimePolicy.stats.consequence_hits,
+          post_applied: consequenceRes.applied,
+        },
+      },
     );
 
     // 6) 首轮自动设置标题
@@ -262,6 +296,10 @@ export class ChatService {
         completion_tokens: llmRes.completion_tokens,
         tool_rounds: llmRes.tool_trace.length,
         tools_used: llmRes.tool_trace.some((r) => r.used_tools),
+        runtime_policy_matched: runtimePolicy.stats.rules_hit,
+        runtime_policy_consequence_hits: runtimePolicy.stats.consequence_applied_count,
+        runtime_policy_post_applied: consequenceRes.applied,
+        runtime_prefetch_tools: runtimePrefetch.calls.map((c) => c.tool_name),
         assistant_chars: assistantMsg.content.length,
       },
       'chat 完成',
@@ -310,6 +348,13 @@ export class ChatService {
       userMsg.id,
     );
     const userText = this.buildUserTextWithReply(req);
+    const runtimePolicy = this.resolveRuntimePolicy(userText);
+    const runtimePrefetch = await this.runRuntimePolicyPrefetch(
+      runtimePolicy,
+      conversation.id,
+      userMsg.id,
+      -1,
+    );
     const retrieval = await this.retrieveRelevantMemories(userText, conversation.id);
     const recordContext = this.buildRecordContextLines();
     const sessionNote = this.contextRepo.getSessionNote(conversation.id);
@@ -324,44 +369,111 @@ export class ChatService {
       retrieval_lines: retrieval.lines,
       session_note: sessionNote,
       tool_summaries: toolSummaries,
+      runtime_rules: runtimePolicy.injected_rules,
+      runtime_facts: runtimePrefetch.facts,
     });
 
     // 4) run with tools; stream final answer deltas if supported
     const tools = this.chatTools.getDefinitions();
     const messages = [...promptPackage.messages];
     const toolPolicyMessage = buildToolPolicyMessage();
+    const runtimePolicyMessage = buildRuntimePolicyMessage(runtimePolicy);
     const firstNonSystemIdx = messages.findIndex((m) => m.role !== 'system');
-    if (firstNonSystemIdx === -1) messages.push({ role: 'system', content: toolPolicyMessage });
-    else messages.splice(firstNonSystemIdx, 0, { role: 'system', content: toolPolicyMessage });
+    if (firstNonSystemIdx === -1) {
+      messages.push({ role: 'system', content: toolPolicyMessage });
+      messages.push({ role: 'system', content: runtimePolicyMessage });
+    } else {
+      messages.splice(firstNonSystemIdx, 0, { role: 'system', content: toolPolicyMessage });
+      messages.splice(firstNonSystemIdx + 1, 0, {
+        role: 'system',
+        content: runtimePolicyMessage,
+      });
+    }
 
     let finalContent = '';
     let modelName = req.model || 'unknown';
     let completionTokens = 0;
     const toolTrace: ToolTraceRound[] = [];
+    if (runtimePrefetch.calls.length > 0) {
+      toolTrace.push({
+        round: -1,
+        used_tools: true,
+        assistant_content: '[runtime_policy_prefetch]',
+        tool_calls: runtimePrefetch.calls,
+      });
+      hooks.on_tool_trace({ tool_trace: [...toolTrace] });
+    }
 
     try {
-      for (let round = 0; round < 3; round++) {
-        // Root-cause fix:
-        // - Tool-call streaming is not reliable for deepseek+SDK (arguments can be missing).
-        // - Therefore: always run a NON-stream round first to obtain complete tool_calls (with arguments).
-        // - Only when the model returns NO tool_calls, we optionally stream the final answer text.
-        const res = await this.llmClient.chat(messages, req.model, tools);
-        modelName = res.model;
-        completionTokens += res.completion_tokens;
+      // Prefer single-call streaming path.
+      // If stream emits tool calls, fall back to non-stream tool rounds.
+      let initialToolCalls: Array<{
+        id: string;
+        type: 'function';
+        function: { name: string; arguments: string };
+      }> = [];
+      let initialAssistantText = '';
+      if (typeof this.llmClient.chat_stream === 'function') {
+        const streamToolCalls = new Map<
+          number,
+          { id: string; type: 'function'; function: { name: string; arguments: string } }
+        >();
+        let sawToolCallsInStream = false;
 
-        if (res.tool_calls.length > 0) {
+        for await (const chunk of this.llmClient.chat_stream(messages, req.model, tools)) {
+          modelName = chunk.model || modelName;
+          if (chunk.usage) {
+            const ct = Number(chunk.usage.completion_tokens);
+            if (!Number.isNaN(ct) && ct >= 0) completionTokens += ct;
+          }
+          if (chunk.tool_calls?.length) {
+            sawToolCallsInStream = true;
+            mergeStreamToolCalls(streamToolCalls, chunk.tool_calls as Array<Record<string, unknown>>);
+          }
+          if (chunk.delta) {
+            initialAssistantText += chunk.delta;
+            // Only stream to client when we are still on "no-tools" path.
+            if (!sawToolCallsInStream) {
+              hooks.on_delta({ delta: chunk.delta });
+            }
+          }
+        }
+
+        if (!sawToolCallsInStream) {
+          toolTrace.push({
+            round: 0,
+            used_tools: false,
+            assistant_content: sanitizeAssistantOutput(initialAssistantText),
+            tool_calls: [],
+          });
+          finalContent = sanitizeAssistantOutput(initialAssistantText);
+        } else {
+          initialToolCalls = [...streamToolCalls.entries()]
+            .sort((a, b) => a[0] - b[0])
+            .map(([, call]) => call)
+            .filter((call) => call.function.name);
+        }
+      }
+
+      // Stream path produced no-tool final answer in one request.
+      if (finalContent) {
+        // nothing else to do
+      } else {
+        // Fallback: tool rounds via non-stream chat.
+        let round = 0;
+        if (initialToolCalls.length > 0) {
           messages.push({
             role: 'assistant',
-            content: res.content || '',
-            tool_calls: res.tool_calls,
+            content: initialAssistantText || '',
+            tool_calls: initialToolCalls,
           });
           const roundTrace: ToolTraceRound = {
             round,
             used_tools: true,
-            assistant_content: res.content || '',
+            assistant_content: sanitizeAssistantOutput(initialAssistantText || ''),
             tool_calls: [],
           };
-          for (const call of res.tool_calls) {
+          for (const call of initialToolCalls) {
             const args = safeJsonParse(call.function.arguments);
             const result = await this.chatTools.run(call.function.name, args, {
               conversation_id: conversation.id,
@@ -386,49 +498,84 @@ export class ChatService {
           }
           toolTrace.push(roundTrace);
           hooks.on_tool_trace({ tool_trace: [...toolTrace] });
-          continue;
+          round = 1;
         }
 
-        // No tool calls: stream final answer if supported (tools omitted to prevent tool_calls in stream).
-        if (typeof this.llmClient.chat_stream === 'function') {
-          let streamedText = '';
-          for await (const chunk of this.llmClient.chat_stream(messages, req.model)) {
-            modelName = chunk.model || modelName;
-            if (chunk.usage) {
-              const ct = Number(chunk.usage.completion_tokens);
-              if (!Number.isNaN(ct) && ct >= 0) completionTokens += ct;
+        for (; round < 3; round++) {
+          const res = await this.llmClient.chat(messages, req.model, tools);
+          modelName = res.model;
+          completionTokens += res.completion_tokens;
+
+          if (res.tool_calls.length > 0) {
+            messages.push({
+              role: 'assistant',
+              content: res.content || '',
+              tool_calls: res.tool_calls,
+            });
+            const roundTrace: ToolTraceRound = {
+              round,
+              used_tools: true,
+              assistant_content: sanitizeAssistantOutput(res.content || ''),
+              tool_calls: [],
+            };
+            for (const call of res.tool_calls) {
+              const args = safeJsonParse(call.function.arguments);
+              const result = await this.chatTools.run(call.function.name, args, {
+                conversation_id: conversation.id,
+              });
+              this.persistToolSummary(
+                conversation.id,
+                userMsg.id,
+                round,
+                call.function.name,
+                result,
+              );
+              roundTrace.tool_calls.push({
+                tool_name: call.function.name,
+                tool_args: args,
+                tool_result: result,
+              });
+              messages.push({
+                role: 'tool',
+                tool_call_id: call.id,
+                content: JSON.stringify(result),
+              });
             }
-            if (chunk.delta) {
-              streamedText += chunk.delta;
-              hooks.on_delta({ delta: chunk.delta });
-            }
+            toolTrace.push(roundTrace);
+            hooks.on_tool_trace({ tool_trace: [...toolTrace] });
+            continue;
           }
+
           toolTrace.push({
             round,
             used_tools: false,
-            assistant_content: streamedText,
+            assistant_content: sanitizeAssistantOutput(res.content || ''),
             tool_calls: [],
           });
-          finalContent = streamedText;
+          finalContent = sanitizeAssistantOutput(res.content || '');
           break;
         }
-
-        toolTrace.push({
-          round,
-          used_tools: false,
-          assistant_content: res.content || '',
-          tool_calls: [],
-        });
-        finalContent = res.content;
-        break;
       }
+
+      const consequenceRes = applyRuntimeConsequences(
+        sanitizeAssistantOutput(finalContent || ''),
+        runtimePolicy,
+      );
+      finalContent = consequenceRes.text;
 
       const assistantMsg = this.messageRepo.create(
         conversation.id,
         'assistant',
         finalContent,
         completionTokens,
-        { tool_trace: toolTrace },
+        {
+          tool_trace: toolTrace,
+          runtime_policy: {
+            matched_rules: runtimePolicy.stats.rules_hit,
+            consequence_hits: runtimePolicy.stats.consequence_hits,
+            post_applied: consequenceRes.applied,
+          },
+        },
       );
 
       if (this.messageRepo.count_by_conversation(conversation.id) <= 2) {
@@ -488,6 +635,10 @@ export class ChatService {
           completion_tokens: completionTokens,
           tool_rounds: toolTrace.length,
           tools_used: toolTrace.some((r) => r.used_tools),
+          runtime_policy_matched: runtimePolicy.stats.rules_hit,
+          runtime_policy_consequence_hits: runtimePolicy.stats.consequence_applied_count,
+          runtime_policy_post_applied: consequenceRes.applied,
+          runtime_prefetch_tools: runtimePrefetch.calls.map((c) => c.tool_name),
           assistant_chars: assistantMsg.content.length,
         },
         'chat_stream 完成',
@@ -905,6 +1056,8 @@ export class ChatService {
     }>,
     model?: string,
     conversationId?: string | null,
+    runtimePolicy?: RuntimePolicyExecution,
+    runtimePrefetchCalls: ToolTraceCall[] = [],
   ): Promise<{
     content: string;
     model: string;
@@ -914,19 +1067,55 @@ export class ChatService {
     const tools = this.chatTools.getDefinitions();
     const messages = [...baseMessages];
     const toolPolicyMessage = buildToolPolicyMessage();
+    const runtimePolicyMessage = buildRuntimePolicyMessage(
+      runtimePolicy ?? {
+        required_tools: [],
+        injected_rules: [],
+        flags: {
+          block_unverified_system_blame: false,
+          disallow_history_time_tag: false,
+          enforce_complete_tail: false,
+        },
+        matches: [],
+        stats: {
+          rules_hit: [],
+          consequence_hits: [],
+          rules_total: 0,
+          rules_hit_count: 0,
+          consequence_applied_count: 0,
+        },
+      },
+    );
     const firstNonSystemIdx = messages.findIndex((m) => m.role !== 'system');
     if (firstNonSystemIdx === -1) {
       messages.push({ role: 'system', content: toolPolicyMessage });
+      if (runtimePolicyMessage.trim()) {
+        messages.push({ role: 'system', content: runtimePolicyMessage });
+      }
     } else {
       messages.splice(firstNonSystemIdx, 0, {
         role: 'system',
         content: toolPolicyMessage,
       });
+      if (runtimePolicyMessage.trim()) {
+        messages.splice(firstNonSystemIdx + 1, 0, {
+          role: 'system',
+          content: runtimePolicyMessage,
+        });
+      }
     }
     let finalContent = '';
     let modelName = model || 'unknown';
     let completionTokens = 0;
     const toolTrace: ToolTraceRound[] = [];
+    if (runtimePrefetchCalls.length > 0) {
+      toolTrace.push({
+        round: -1,
+        used_tools: true,
+        assistant_content: '[runtime_policy_prefetch]',
+        tool_calls: runtimePrefetchCalls,
+      });
+    }
 
     for (let round = 0; round < 3; round++) {
       logger.debug(
@@ -945,7 +1134,7 @@ export class ChatService {
         toolTrace.push({
           round,
           used_tools: false,
-          assistant_content: res.content || '',
+          assistant_content: sanitizeAssistantOutput(res.content || ''),
           tool_calls: [],
         });
         logger.debug(
@@ -959,7 +1148,7 @@ export class ChatService {
           },
           '工具轮次结束（无工具调用）',
         );
-        finalContent = res.content;
+        finalContent = sanitizeAssistantOutput(res.content || '');
         break;
       }
       logger.debug(
@@ -979,7 +1168,7 @@ export class ChatService {
       const roundTrace: ToolTraceRound = {
         round,
         used_tools: true,
-        assistant_content: res.content || '',
+        assistant_content: sanitizeAssistantOutput(res.content || ''),
         tool_calls: [],
       };
 
@@ -1076,6 +1265,48 @@ export class ChatService {
     return lines;
   }
 
+  private resolveRuntimePolicy(userText: string): RuntimePolicyExecution {
+    const recentCorrections = this.recordRepo.list_corrections(50);
+    return executeRuntimePolicy(
+      userText,
+      recentCorrections.map((c) => ({
+        previous: c.previous,
+        correction: c.correction,
+        why_context: c.why_context,
+      })),
+    );
+  }
+
+  private async runRuntimePolicyPrefetch(
+    decision: RuntimePolicyExecution,
+    conversation_id: string,
+    message_id: string | null,
+    round: number,
+  ): Promise<{ facts: string[]; calls: ToolTraceCall[] }> {
+    const facts: string[] = [];
+    const calls: ToolTraceCall[] = [];
+    for (const req of decision.required_tools) {
+      const result = await this.chatTools.run(req.name, req.args, {
+        conversation_id,
+      });
+      this.persistToolSummary(
+        conversation_id,
+        message_id,
+        round,
+        req.name,
+        result,
+      );
+      calls.push({
+        tool_name: req.name,
+        tool_args: req.args,
+        tool_result: result,
+      });
+      const fact = summarizeRuntimePrefetchFact(req.name, result);
+      if (fact) facts.push(fact);
+    }
+    return { facts, calls };
+  }
+
   private persistToolSummary(
     conversation_id: string,
     message_id: string | null,
@@ -1139,5 +1370,53 @@ function safeJsonParse(raw: string): Record<string, unknown> {
     return JSON.parse(raw || '{}') as Record<string, unknown>;
   } catch {
     return {};
+  }
+}
+
+function summarizeRuntimePrefetchFact(
+  toolName: string,
+  result: Record<string, unknown>,
+): string {
+  if (result.ok === false) {
+    const err = typeof result.error === 'string' ? result.error : 'tool error';
+    return `[${toolName}] 失败：${err}`;
+  }
+  if (toolName === 'get_current_time') {
+    const dt = typeof result.datetime === 'string' ? result.datetime : '';
+    return dt ? `[get_current_time] 当前时间：${dt}` : '[get_current_time] 已获取当前时间';
+  }
+  if (toolName === 'get_timeline') {
+    const evidence = Array.isArray(result.evidence) ? result.evidence.length : 0;
+    const global = Array.isArray(result.global_records) ? result.global_records.length : 0;
+    return `[get_timeline] evidence=${evidence}, global_records=${global}`;
+  }
+  return `[${toolName}] 已执行`;
+}
+
+function mergeStreamToolCalls(
+  state: Map<
+    number,
+    { id: string; type: 'function'; function: { name: string; arguments: string } }
+  >,
+  chunks: Array<Record<string, unknown>>,
+): void {
+  for (let i = 0; i < chunks.length; i++) {
+    const call = chunks[i] as Record<string, unknown>;
+    const idx =
+      typeof call.index === 'number' ? (call.index as number) : i;
+    const existing = state.get(idx) ?? {
+      id: '',
+      type: 'function' as const,
+      function: { name: '', arguments: '' },
+    };
+    const incomingId = typeof call.id === 'string' ? call.id : '';
+    if (incomingId) existing.id = incomingId;
+    const fn = (call.function as Record<string, unknown> | undefined) ?? {};
+    const incomingName = typeof fn.name === 'string' ? fn.name : '';
+    if (incomingName) existing.function.name = incomingName;
+    const incomingArgs = typeof fn.arguments === 'string' ? fn.arguments : '';
+    if (incomingArgs) existing.function.arguments += incomingArgs;
+    if (!existing.id) existing.id = crypto.randomUUID();
+    state.set(idx, existing);
   }
 }

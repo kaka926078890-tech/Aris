@@ -15,6 +15,10 @@ interface PromptMemoryContext {
   session_note?: string | null;
   /** 工具执行摘要（落库后可回注入，避免 tool_trace 被裁剪后丢事实） */
   tool_summaries?: string[];
+  /** 运行时策略：短规则（硬约束） */
+  runtime_rules?: string[];
+  /** 运行时策略：代码预取到的事实 */
+  runtime_facts?: string[];
 }
 
 /** 运行时注入协议：避免模型把注入块与用户本轮输入错误绑定 */
@@ -119,6 +123,34 @@ export class PromptBuilder {
         ...tool_summaries.map((item, idx) => `${idx + 1}. ${item}`),
       ].join('\n');
       const block = wrapInject('tool_summaries', inner);
+      const t = estimateTokens(block);
+      if (memory_tokens + t <= memory_budget) {
+        memory_messages.push({ role: 'system', content: block });
+        memory_tokens += t;
+      }
+    }
+
+    const runtime_facts = context.runtime_facts ?? [];
+    if (runtime_facts.length > 0) {
+      const inner = [
+        '以下为代码侧策略预取到的事实（优先级高于猜测）：',
+        ...runtime_facts.map((item, idx) => `${idx + 1}. ${item}`),
+      ].join('\n');
+      const block = wrapInject('runtime_facts', inner);
+      const t = estimateTokens(block);
+      if (memory_tokens + t <= memory_budget) {
+        memory_messages.push({ role: 'system', content: block });
+        memory_tokens += t;
+      }
+    }
+
+    const runtime_rules = context.runtime_rules ?? [];
+    if (runtime_rules.length > 0) {
+      const inner = [
+        '以下为本轮运行时强约束（必须遵守，优先级高于一般风格偏好）：',
+        ...runtime_rules.map((item, idx) => `${idx + 1}. ${item}`),
+      ].join('\n');
+      const block = wrapInject('runtime_rules', inner);
       const t = estimateTokens(block);
       if (memory_tokens + t <= memory_budget) {
         memory_messages.push({ role: 'system', content: block });
