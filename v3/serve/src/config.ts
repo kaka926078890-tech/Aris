@@ -23,7 +23,7 @@ function envFloat(key: string, fallback: number): number {
 }
 
 export const config = {
-  port: envInt('PORT', 3000),
+  port: envInt('PORT', 7899),
   host: env('HOST', '0.0.0.0'),
   data_dir: env('ARIS_V2_DATA_DIR', env('ARIS_DATA_DIR', path.join(process.cwd(), 'data'))),
 
@@ -39,6 +39,15 @@ export const config = {
     base_url: env('OLLAMA_HOST', 'http://127.0.0.1:11434'),
     model: env('ARIS_EMBED_MODEL', 'nomic-embed-text'),
     dimension: envInt('EMBEDDING_DIMENSION', 768),
+  },
+
+  web: {
+    enabled: envBool('ARIS_WEB_TOOLS_ENABLED', true),
+    search_api_url: env('ARIS_WEB_SEARCH_API_URL', 'https://api.tavily.com/search'),
+    search_api_key: env('ARIS_WEB_SEARCH_API_KEY', ''),
+    search_max_results: envInt('ARIS_WEB_SEARCH_MAX_RESULTS', 5),
+    fetch_timeout_ms: envInt('ARIS_WEB_FETCH_TIMEOUT_MS', 12_000),
+    fetch_max_chars: envInt('ARIS_WEB_FETCH_MAX_CHARS', 12_000),
   },
 
   prompt: {

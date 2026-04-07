@@ -69,6 +69,10 @@ npm run dev
   - 语义检索历史记忆（跨会话）
 - `get_current_time`
   - 返回当前时间
+- `web_search`
+  - 查询最新公开网页信息（标题/链接/摘要）
+- `web_fetch`
+  - 抓取指定 URL 正文（用于核对细节）
 
 ### 历史接口补充
 
@@ -125,6 +129,12 @@ src/
 - `OLLAMA_HOST`
 - `ARIS_EMBED_MODEL`
 - `ARIS_V2_DATA_DIR`
+- `ARIS_WEB_TOOLS_ENABLED`（是否启用联网工具）
+- `ARIS_WEB_SEARCH_API_URL`（搜索 API 地址）
+- `ARIS_WEB_SEARCH_API_KEY`（搜索 API 密钥）
+- `ARIS_WEB_SEARCH_MAX_RESULTS`
+- `ARIS_WEB_FETCH_TIMEOUT_MS`
+- `ARIS_WEB_FETCH_MAX_CHARS`
 - `PROMPT_RECENT_TURNS`
 - `PROMPT_RETRIEVAL_ENABLED`
 - `PROMPT_RETRIEVAL_TOP_K_TURN`
