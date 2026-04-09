@@ -68,7 +68,7 @@ npm run dev
 
 ### 聊天工具层（对齐 v2 最小聊天能力）
 
-`/chat` 已接入 function tools（自动工具调用，最多 3 轮）：
+`/chat` 已接入 function tools（自动工具调用；轮次上限见环境变量 **`ARIS_MAX_TOOL_ROUNDS`**，默认 **20**；用尽仍无正文时会补一轮不传 tools 的总结，失败则返回明确降级文案）：
 
 - `record`
   - `identity`：写用户信息（name/notes）

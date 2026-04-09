@@ -119,6 +119,8 @@ export interface ToolTraceRound {
   used_tools: boolean;
   assistant_content: string;
   tool_calls: ToolTraceCall[];
+  /** 工具轮用尽或尚无正文时补发的「禁工具」总结轮 */
+  forced_text_only?: boolean;
 }
 
 // ── 适配器接口（基础设施边界） ──

@@ -15,15 +15,13 @@ interface PromptMemoryContext {
   session_note?: string | null;
   /** 工具执行摘要（落库后可回注入，避免 tool_trace 被裁剪后丢事实） */
   tool_summaries?: string[];
-  /** 运行时策略：短规则（硬约束） */
-  runtime_rules?: string[];
   /** 运行时策略：代码预取到的事实 */
   runtime_facts?: string[];
 }
 
 /** 运行时注入协议：避免模型把注入块与用户本轮输入错误绑定 */
 const ENGINE_PREAMBLE = [
-  '【引擎说明】除你的人格设定与上一条「当前本地时间」外，下文若出现多段说明性文字，均为服务端运行时注入，用于补全上下文。',
+  '【引擎说明】除你的人格设定外，下文中的「当前本地时间」块与其它带注释边界的说明性文字，均为服务端运行时注入，用于补全上下文。',
   '这些内容与用户本轮输入不一定一一对应；请优先以用户当前自然语言为准。',
   '若注入中的事实与用户刚说的内容矛盾，以当前话为准，并可通过工具更新或废弃过时记录。',
 ].join('\n');
@@ -47,11 +45,18 @@ export class PromptBuilder {
       hour: '2-digit',
       minute: '2-digit',
     });
-    const system_content =
+    /** 首条 system 仅含人格 + 引擎说明，便于 LLM 服务端对前缀做 prompt cache（时间等易变块后置）。 */
+    const stable_system_content =
       policy.system_template.replace('{persona}', policy.persona).trim() +
-      `\n\n${ENGINE_PREAMBLE}\n\n当前本地时间（用于语境判断）：${nowLocal}`;
+      `\n\n${ENGINE_PREAMBLE}`;
 
-    const system_tokens = estimateTokens(system_content);
+    const current_time_block = wrapInject(
+      'current_time',
+      `当前本地时间（用于语境判断）：${nowLocal}`,
+    );
+
+    const system_tokens =
+      estimateTokens(stable_system_content) + estimateTokens(current_time_block);
 
     const memory_budget = policy.token_budget.memory;
     const memory_messages: PromptMessage[] = [];
@@ -144,20 +149,6 @@ export class PromptBuilder {
       }
     }
 
-    const runtime_rules = context.runtime_rules ?? [];
-    if (runtime_rules.length > 0) {
-      const inner = [
-        '以下为本轮运行时强约束（必须遵守，优先级高于一般风格偏好）：',
-        ...runtime_rules.map((item, idx) => `${idx + 1}. ${item}`),
-      ].join('\n');
-      const block = wrapInject('runtime_rules', inner);
-      const t = estimateTokens(block);
-      if (memory_tokens + t <= memory_budget) {
-        memory_messages.push({ role: 'system', content: block });
-        memory_tokens += t;
-      }
-    }
-
     const history_time_hints: string[] = [];
     for (let i = recent_messages.length - 1; i >= 0; i--) {
       const msg = recent_messages[i];
@@ -200,8 +191,9 @@ export class PromptBuilder {
     const user_tokens = estimateTokens(user_input);
 
     const messages: PromptMessage[] = [
-      { role: 'system', content: system_content },
+      { role: 'system', content: stable_system_content },
       ...memory_messages,
+      { role: 'system', content: current_time_block },
       { role: 'user', content: user_input },
     ];
 
@@ -215,4 +207,36 @@ export class PromptBuilder {
       },
     };
   }
+}
+
+/**
+ * 在固定位置插入工具策略与运行时策略，利于 LLM 服务端 prefix 缓存：
+ * 稳定人格+引擎说明 → 稳定工具说明 → … 动态记忆/历史 … → 当前时间 → 运行时强约束 → user
+ */
+export function mergeToolAndRuntimePolicyIntoMessages(
+  messages: PromptMessage[],
+  toolPolicyMessage: string,
+  runtimePolicyMessage: string,
+): PromptMessage[] {
+  const out = [...messages];
+  const run = runtimePolicyMessage.trim();
+  if (out.length === 0) {
+    const base: PromptMessage[] = [{ role: 'system', content: toolPolicyMessage }];
+    if (run) base.push({ role: 'system', content: run });
+    return base;
+  }
+  if (out[0]?.role !== 'system') {
+    out.unshift({ role: 'system', content: toolPolicyMessage });
+  } else {
+    out.splice(1, 0, { role: 'system', content: toolPolicyMessage });
+  }
+  if (run) {
+    const last = out.length - 1;
+    if (last >= 0 && out[last]?.role === 'user') {
+      out.splice(last, 0, { role: 'system', content: run });
+    } else {
+      out.push({ role: 'system', content: run });
+    }
+  }
+  return out;
 }

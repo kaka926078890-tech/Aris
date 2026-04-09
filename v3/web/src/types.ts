@@ -44,6 +44,7 @@ export interface ToolTraceRound {
     tool_args: Record<string, unknown>;
     tool_result: Record<string, unknown>;
   }>;
+  forced_text_only?: boolean;
 }
 
 export interface PromptMessage {

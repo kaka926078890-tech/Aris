@@ -167,10 +167,14 @@ export function executeRuntimePolicy(
     matches.push({ id: rule.id, forbid: rule.forbid, reason: rule.reason });
     for (const c of rule.consequences) {
       if (c.type === 'require_tool') {
-        const args =
-          c.name === 'web_search' && !String((c.args as Record<string, unknown>)?.query ?? '').trim()
-            ? { ...c.args, query: userText, max_results: 5 }
-            : c.args;
+        // web_search 的 query 仅应由模型在工具调用中填写；无 query 时不做代码侧预取，避免空跑或代填。
+        if (
+          c.name === 'web_search' &&
+          !String((c.args as Record<string, unknown>)?.query ?? '').trim()
+        ) {
+          continue;
+        }
+        const args = c.args;
         required_tools.push({ name: c.name, args, reason: c.reason });
         consequence_hits.push({
           rule_id: rule.id,

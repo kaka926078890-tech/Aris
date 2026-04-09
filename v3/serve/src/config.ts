@@ -10,6 +10,13 @@ function envInt(key: string, fallback: number): number {
   const v = process.env[key];
   return v ? parseInt(v, 10) : fallback;
 }
+function envIntClamped(key: string, fallback: number, min: number, max: number): number {
+  const v = process.env[key];
+  if (!v) return fallback;
+  const n = parseInt(v, 10);
+  if (Number.isNaN(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
 function envBool(key: string, fallback: boolean): boolean {
   const v = process.env[key];
   if (!v) return fallback;
@@ -42,6 +49,11 @@ export const config = {
     timeout: envInt('LLM_TIMEOUT_MS', 60_000),
     /** 流式结束时请求 usage（OpenAI 兼容）；若对端报错可设 false） */
     stream_include_usage: envBool('ARIS_LLM_STREAM_INCLUDE_USAGE', true),
+    /**
+     * 主对话每轮用户消息内，带 tools 的 chat 最多迭代次数（与 v2 ARIS_MAX_TOOL_ROUNDS 对齐）。
+     * 用尽后若仍无正文，会再请求一轮不传 tools 的总结回复（仍失败则降级文案）。
+     */
+    max_tool_rounds: envIntClamped('ARIS_MAX_TOOL_ROUNDS', 20, 1, 500),
   },
 
   embedding: {

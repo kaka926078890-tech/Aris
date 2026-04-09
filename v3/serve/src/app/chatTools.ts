@@ -173,11 +173,15 @@ export class ChatTools {
           function: {
             name: 'web_search',
             description:
-              '搜索最新公开网页信息，返回标题、URL、摘要。适用于“最新动态/新闻/官网说明”等需要外部信息的问题。',
+              '搜索公开网页，返回标题、URL、摘要。适用于需要核对外部事实、新闻或文档时。检索词由你在调用时写入参数 `query`，服务端不会替你生成。',
             parameters: {
               type: 'object',
               properties: {
-                query: { type: 'string', description: '搜索关键词或问题' },
+                query: {
+                  type: 'string',
+                  description:
+                    '检索用语：请根据当前对话在讨论什么、需要核实什么，自行归纳成适合搜索引擎的简短表达式（关键词或极短问句均可）。',
+                },
                 max_results: {
                   type: 'number',
                   default: 5,
@@ -234,7 +238,7 @@ export class ChatTools {
       };
     }
     if (name === 'get_timeline') return this.runGetTimeline(args);
-    if (name === 'web_search') return this.runWebSearch(args, ctx);
+    if (name === 'web_search') return this.runWebSearch(args);
     if (name === 'web_fetch') return this.runWebFetch(args);
     return { ok: false, error: `Unknown tool: ${name}` };
   }
@@ -437,17 +441,13 @@ export class ChatTools {
     };
   }
 
-  private async runWebSearch(
-    args: Record<string, unknown>,
-    ctx?: { conversation_id: string | null },
-  ) {
-    const explicit = String(args.query ?? '').trim();
-    const query = explicit || this.buildSearchQueryFallback(ctx?.conversation_id ?? null);
+  private async runWebSearch(args: Record<string, unknown>) {
+    const query = String(args.query ?? '').trim();
     if (!query) {
       return {
         ok: false,
         error: 'query 不能为空',
-        hint: '请在 web_search 里传 query，或先给出你要检索的主题。',
+        hint: '请在参数 query 中传入你根据当前对话主题与待核实问题自行归纳的检索用语；服务端不会代为填写。',
       };
     }
     return this.webResearchEngine.search(query, args.max_results);
@@ -456,23 +456,4 @@ export class ChatTools {
   private async runWebFetch(args: Record<string, unknown>) {
     return this.webResearchEngine.fetch(args.url, args.max_chars);
   }
-
-  private buildSearchQueryFallback(conversationId: string | null): string {
-    if (!conversationId) return '';
-    const rows = this.messageRepo.find_by_conversation(conversationId, 20, 0, 'desc');
-    const user = rows.find((m) => m.role === 'user' && m.content.trim());
-    if (!user) return '';
-    return extractSearchIntentText(user.content);
-  }
-}
-
-function extractSearchIntentText(input: string): string {
-  const text = String(input || '').replace(/\s+/g, ' ').trim();
-  if (!text) return '';
-  const lines = text
-    .split('\n')
-    .map((x) => x.trim())
-    .filter(Boolean);
-  const tail = lines.length ? lines[lines.length - 1] : text;
-  return tail.slice(0, 180);
 }
