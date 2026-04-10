@@ -58,7 +58,7 @@ export class ChatTools {
         function: {
           name: 'record',
           description:
-            '写入记录。勿存整段聊天流水或临时进度（临时进度用 session_context）。仅用户明确表达时写入，禁止臆造。禁止编造 URL。',
+            '写入长期/会话相关记录（只增改通过本工具支持的字段，**无删除类操作**）。不能删除已存在的 preference 条目或已向量化记忆；用户要「忘掉/别提某主题」用 type=ignore_topics；要覆盖旧说法用 type=correction。仅当本工具返回 ok:true 时，才能在回复中陈述等价于「已写入/已更新」的事实；禁止口头宣称已删除记录或已清库。勿存整段聊天流水或临时进度（临时进度用 session_context）。仅用户明确表达时写入，禁止臆造。禁止编造 URL。',
           parameters: {
             type: 'object',
             properties: {
@@ -110,7 +110,7 @@ export class ChatTools {
         function: {
           name: 'search_memories',
           description:
-            '按语义检索历史记忆（跨会话），返回相关对话片段/消息。适用于“我之前说过什么”“以前提到过XX吗”这类问题。',
+            '按语义检索历史记忆（跨会话），**只读**；返回相关对话片段/消息，**不能删除或修改**任何已存储内容。适用于“我之前说过什么”“以前提到过XX吗”这类问题。',
           parameters: {
             type: 'object',
             properties: {

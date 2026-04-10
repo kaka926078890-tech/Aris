@@ -70,7 +70,10 @@ npm run dev
 
 `/chat` 已接入 function tools（自动工具调用；轮次上限见环境变量 **`ARIS_MAX_TOOL_ROUNDS`**，默认 **20**；用尽仍无正文时会补一轮不传 tools 的总结，失败则返回明确降级文案）：
 
+- **工具参数**：模型侧策略要求每次调用**仅使用**各工具 schema 已声明的字段（含 `record.payload` 内合法键），禁止私自增加未声明参数；细则见 `toolPolicy.ts` 与 [`prompt-memory-tool-final-spec.md` §8](../docs/prompt-memory-tool-final-spec.md)。
+
 - `record`
+  - **诚实表述 / 能力边界**：工具层**无**按条删除偏好、向量或消息；模型侧策略要求不得在未见到写工具 `ok: true` 时宣称「已删除/已清库」。替代：`ignore_topics`（别再提某主题）、`correction`（否定旧说法）。已向量化落库的内容无法通过聊天工具物理抹除。
   - `identity`：写用户信息（name/notes）
   - `preference`：写长期条目（topic/summary；可选 `memory_kind`：`preference` | `interaction_feedback` | `project_context` | `reference_pointer`，及 `description` / `why_context` / `how_to_apply` / `expires_at`）
   - `correction`：写纠错（previous/correction，可选 `why_context`）
@@ -80,7 +83,7 @@ npm run dev
   - `identity` / `preferences`（可选 `options.memory_kinds` 数组按种类筛）/ `corrections`
   - `ignored_topics`：读取当前忽略主题列表
 - `search_memories`
-  - 语义检索历史记忆（跨会话）
+  - 语义检索历史记忆（跨会话），**只读**，不可删改存储
 - `get_current_time`
   - 返回当前时间
 - `web_search`
